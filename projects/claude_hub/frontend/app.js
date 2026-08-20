@@ -3349,7 +3349,7 @@ function closeTrace() {
 // ── 会话统计详情（右键 → 统计详情）：对任意会话做「时间花在哪」的细分分析 ──
 // 数据源 GET /api/session/trace-stats（后端 TraceStore 已算好 phases/activeMs/rounds）。
 // 与 trOverlay 不同：这里按传入的 sessionId 取数，不依赖当前打开的会话。
-const Stats = { sid: '', title: '', charts: [] };
+const Stats = { sid: '', title: '', charts: [], data: null, withIdle: localStorage.getItem('statsWithIdle') === '1' };
 // 阶段元数据：key 对应后端 TracePhaseBreakdown 字段，label 走 i18n，color 固定配色
 const STAT_PHASES = [
   { key: 'ttft', tk: 'phTtft', color: '#f59e0b' },
@@ -3376,6 +3376,7 @@ function closeSessionStats() {
   _disposeStatsCharts();
   $('statsOverlay').hidden = true;
   Stats.sid = '';
+  Stats.data = null;
 }
 
 function _disposeStatsCharts() {
@@ -3398,6 +3399,7 @@ async function loadSessionStats() {
 
 function renderSessionStats(s) {
   _disposeStatsCharts();
+  Stats.data = s;
   const body = $('statsBody');
   if (!s || !s.events) {
     body.innerHTML = '<div class="tr-empty">' + T('statsEmpty') + '</div>';
@@ -3421,24 +3423,28 @@ function renderSessionStats(s) {
        ${cost}
      </div>`;
 
-  // 阶段细分只看「AI 实际工作时间」如何分配（排除 idle——用户空闲已在汇总条单列）。
-  // 占比按 activeMs 归一，各段之和≈100%。
+  // 阶段细分：默认只看「AI 实际工作时间」如何分配（排除 idle，否则一次过夜的空闲
+  // 会把所有工作阶段压成看不见的细线）；勾上「含空闲」则把 idle 也画进来，
+  // 占比分母同步从 activeMs 换成 spanMs，两种模式下各段之和都≈100%。
+  const withIdle = Stats.withIdle;
+  const base = withIdle ? s.spanMs : s.activeMs;
   const rows = STAT_PHASES
-    .filter((p) => p.key !== 'idle')
+    .filter((p) => withIdle || p.key !== 'idle')
     .map((p) => ({ p, ms: s.phases[p.key] || 0 }))
     .filter((r) => r.ms > 0)
     .sort((a, b) => b.ms - a.ms);
   const legend = rows
     .map((r) => {
-      const pct = s.activeMs ? Math.round((r.ms / s.activeMs) * 100) : 0;
+      const pct = base ? Math.round((r.ms / base) * 100) : 0;
       return `<div class="st-leg-i"><i style="background:${r.p.color}"></i>` +
         `<span class="st-leg-n">${T(r.p.tk)}</span>` +
         `<b>${fmtMs(r.ms)}</b><span class="st-leg-p">${pct}%</span></div>`;
     })
     .join('');
 
-  // 按任务表（列同样排除 idle：任务内不含用户空闲）
-  const colPhases = STAT_PHASES.filter((p) => p.key !== 'idle');
+  // 按任务表：列跟随同一个开关（任务内的 idle = 该任务执行中超过 2 分钟的长间隙；
+  // 任务之间的空闲落在窗与窗的边界上，不计入任何一个任务，所以各任务 idle 之和会小于总 idle）
+  const colPhases = STAT_PHASES.filter((p) => withIdle || p.key !== 'idle');
   const taskRows = (s.byTask || [])
     .map((t, i) => {
       const cells = colPhases.map((p) => {
@@ -3488,15 +3494,29 @@ function renderSessionStats(s) {
   body.innerHTML =
     summary +
     countsBlock +
-    `<div class="st-h">${T('statsPhaseTitle')}</div>` +
+    `<div class="st-h st-h-row">` +
+      `<span>${T(withIdle ? 'statsPhaseTitleAll' : 'statsPhaseTitle')}</span>` +
+      `<label class="st-tg" title="${T('statsIdleHint')}">` +
+        `<input type="checkbox" id="statsIdleTg"${withIdle ? ' checked' : ''}>${T('statsIdleToggle')}</label>` +
+    `</div>` +
     `<div class="st-chart" id="statsPhaseChart"></div>` +
     `<div class="st-legend">${legend}</div>` +
     taskTable +
     slowBlock +
     `<div class="st-note">${T('statsNote')}</div>`;
 
+  const tg = $('statsIdleTg');
+  if (tg) tg.onchange = () => toggleStatsIdle(tg.checked);
+
   // ECharts 需要容器有尺寸：入文档后再画
   setTimeout(() => _renderPhaseChart(rows), 0);
+}
+
+// 「含空闲」开关：纯展示口径切换，数据已在 Stats.data 里，不重新请求接口
+function toggleStatsIdle(on) {
+  Stats.withIdle = !!on;
+  localStorage.setItem('statsWithIdle', Stats.withIdle ? '1' : '0');
+  if (Stats.data) renderSessionStats(Stats.data);
 }
 
 // 横向条形图：每个阶段一根条（秒）。跟随明暗主题取色。
