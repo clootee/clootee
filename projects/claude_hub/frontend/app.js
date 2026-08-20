@@ -1292,6 +1292,17 @@ function favDirOptions() {
 function pickFavDir(rootId) {
   FavDir.rootId = FavDir.rootId === rootId ? '' : rootId;
   renderSessions();
+  // 切到某个目录时顺手打开该目录下最顶端的会话（取消筛选时不动当前会话）
+  if (FavDir.rootId) selectTopVisibleSession();
+}
+
+// 打开会话列表里第一条（已按当前筛选/排序渲染完毕）。批量模式下不动，避免误勾选。
+function selectTopVisibleSession() {
+  if (State.batchMode) return;
+  const top = $('sessionList').querySelector('.session-item');
+  const sid = top && top.dataset.sid;
+  if (!sid || sid === State.sessionId) return;
+  selectSession(sid);
 }
 
 function clearFavDir() {
