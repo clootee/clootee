@@ -13,7 +13,7 @@ const State = {
   tab: 'active',                          // 会话列表筛选：active / testing / completed / all
   runFilters: new Set(),                  // 运行状态筛选（与 tab 叠加）：可同时含 running / justFinished（并集）；空集=「所有」
   mode: 'classic',                       // 模式切换已下线，固定经典模式
-  favoritesOnly: false,
+  favoritesOnly: sessionStorage.getItem('favoritesOnly') === '1', // 刷新后保持收藏夹视图（与 rootId 同用 sessionStorage）
   favoriteSessions: [],
   favoriteCacheReady: false,
   favoriteRootBindingDraftId: '',
@@ -45,7 +45,7 @@ function applyMode() {
 async function toggleMode() {
   State.mode = isWorkspace() ? 'classic' : 'workspace';
   localStorage.setItem('hubMode', State.mode);
-  State.favoritesOnly = false;
+  setFavoritesOnly(false);
   applyMode();
   // 切换后重新加载会话（数据源不同）：先清空当前选择避免跨模式串台
   State.sessionId = '';
@@ -64,6 +64,13 @@ function setTabRootId(rootId) {
   State.rootId = rootId || '';
   if (State.rootId) sessionStorage.setItem('rootId', State.rootId);
   else sessionStorage.removeItem('rootId');
+}
+
+// 收藏夹视图开关：持久化到 sessionStorage，刷新页面后仍停留在收藏夹
+function setFavoritesOnly(on) {
+  State.favoritesOnly = !!on;
+  if (State.favoritesOnly) sessionStorage.setItem('favoritesOnly', '1');
+  else sessionStorage.removeItem('favoritesOnly');
 }
 
 // 引擎显示名
@@ -480,7 +487,7 @@ function currentRoot() {
 
 // 选中某个根目录（下拉框 change / 引导按钮共用）：同步下拉框、切换 tab 根目录、刷新会话列表
 function applyRootSelection(id) {
-  State.favoritesOnly = false;
+  setFavoritesOnly(false);
   const sel = $('rootSelect');
   if (sel && sel.value !== id) sel.value = id;
   setTabRootId(id);
@@ -1156,6 +1163,8 @@ async function loadFavoriteSessions() {
   const sessions = await api('/api/session/list-favorites');
   State.favoriteSessions = sortSessionsForList([...drafts, ...sessions]);
   State.favoriteCacheReady = true;
+  // 恢复的目录筛选可能已无对应收藏（取消收藏/删目录）→ 自动失效，避免列表看起来空
+  if (FavDir.rootId && !State.favoriteSessions.some((s) => s.rootId === FavDir.rootId)) setFavDir('');
   return State.favoriteSessions;
 }
 
@@ -1236,9 +1245,9 @@ function onAdvToggle() {
 }
 
 async function toggleFavorites() {
-  State.favoritesOnly = !State.favoritesOnly;
+  setFavoritesOnly(!State.favoritesOnly);
   FavDir.open = false;
-  FavDir.rootId = '';
+  setFavDir('');
   if (State.favoritesOnly) {
     State.sessions = await loadFavoriteSessions();
     rebuildRunning();
@@ -1270,7 +1279,14 @@ function refreshNewSessionButton() {
 }
 
 // ── 收藏夹目录筛选（纯前端，不走后端） ──
-const FavDir = { open: false, rootId: '' };
+const FavDir = { open: false, rootId: sessionStorage.getItem('favDirRootId') || '' };
+
+// 目录筛选同样持久化：刷新后仍停在原来那个目录下
+function setFavDir(rootId) {
+  FavDir.rootId = rootId || '';
+  if (FavDir.rootId) sessionStorage.setItem('favDirRootId', FavDir.rootId);
+  else sessionStorage.removeItem('favDirRootId');
+}
 
 function toggleFavDirFilter() {
   FavDir.open = !FavDir.open;
@@ -1290,7 +1306,7 @@ function favDirOptions() {
 }
 
 function pickFavDir(rootId) {
-  FavDir.rootId = FavDir.rootId === rootId ? '' : rootId;
+  setFavDir(FavDir.rootId === rootId ? '' : rootId);
   renderSessions();
   // 切到某个目录时顺手打开该目录下最顶端的会话（取消筛选时不动当前会话）
   if (FavDir.rootId) selectTopVisibleSession();
@@ -1306,7 +1322,7 @@ function selectTopVisibleSession() {
 }
 
 function clearFavDir() {
-  FavDir.rootId = '';
+  setFavDir('');
   renderSessions();
 }
 
