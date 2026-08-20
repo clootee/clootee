@@ -148,8 +148,10 @@ function stashLoginInputs() {
 }
 
 function claudeLoginHtml(a, s) {
-  // 第三方服务商用 API Key 直连，压根不需要 Anthropic 账号——别把人吓一跳
-  if (a.provider && a.provider !== 'official')
+  // 第三方服务商用 API Key 直连，压根不需要 Anthropic 账号——别把人吓一跳。
+  // forceOfficial=调用方（引擎板块的原版服务商）已经确定这里就是原版：
+  // 下拉刚切到原版还没保存时，后端记的仍是第三方，不能因此把登录入口藏掉
+  if (!Health.loginOpts.forceOfficial && a.provider && a.provider !== 'official')
     return `<div class="cl ok"><div class="cl-h"><b>${T('clTitle')}</b>` +
       `<span class="hc-badge ok">${T('clNotNeeded')}</span></div>` +
       `<div class="cl-hint">${T('clThirdParty').replace('{p}', escapeHtml(providerLabel(a.provider)))}</div></div>`;

@@ -5296,9 +5296,10 @@ function applyEnginePaneText() {
   // 「逐个真实验证」只有 claude 有（原版订阅没有模型列表接口，只能挨个试）
   $('mdlClaudeVerifyTitle').textContent = T('engVerifyTitle');
   $('mdlClaudeVerifyDesc').textContent = T('engVerifyDesc');
-  // 「当前登录账号」那行是拼出来的文案，切语言要重画（走缓存，不再拉一次 auth status）
-  const who = providerUi('claude').who;
-  if (who && !who.hidden) renderOfficialWho('claude', false);
+  // 登录卡整块都是拼出来的文案，切语言要重画（走缓存，不再拉一次 auth status）
+  // （Health.loginBox 也可能指向引导页那个框，那时别拿引擎板块的可见性去判断）
+  const login = providerUi('claude').login;
+  if (login && !login.hidden && Health.loginBox === login) paintClaudeLogin();
 }
 // 服务商下拉的选项文字：原版按引擎分两种说法，MiniMax 在 claude 侧带「推荐」后缀
 function providerOptionText(engine, id) {
@@ -5516,9 +5517,9 @@ const TC_PREFS = [
 function fillRuntimePane() {
   $('tcStatus').textContent = '';
   renderToolchain();
-  // 网络体检 + Claude 账号：这两件事决定「能不能用」，排在工具链前面
+  // 网络体检排在工具链前面（决定「能不能连上」）。
+  // Claude 账号登录已移到「AI 引擎」板块的原版服务商下——只有原版才需要登录
   runNetCheck($('hcBox'), {});
-  renderClaudeLogin($('clBox'), {});
 }
 
 async function renderToolchain() {
@@ -5882,38 +5883,20 @@ function providerUi(engine) {
     model: $(`${p}ModelSelect`), modelInput: $(`${p}ModelInput`), modelList: $(`${p}ModelList`),
     modelHint: $(`${p}ModelHint`), modelBox: $(`${p}ModelBox`), status: $(`${p}ProviderStatus`),
     effort: $(`${p}EffortSelect`),
-    // 「当前登录账号」只有 claude 侧有（原版才是订阅登录），codex 侧取到 null
-    who: $(`${p}OfficialWho`),
+    // 「Claude 账号登录」卡片只有 claude 侧有（原版才是订阅登录），codex 侧取到 null
+    login: engine === 'claude' ? $('clBox') : null,
   };
 }
 
-// 选了原版时，在服务商下拉底下显示「现在用的是谁的 Anthropic 账号」。
-// 数据复用 health.js 的 Health.auth（登录卡片已经拉过一次），别各拉一次——
-// 每次拉都要起一个 claude 子进程跑 auth status，重复拉又慢又没必要。
-// force=true 用于「打开板块」这种该看最新值的时机。
-async function renderOfficialWho(engine, force) {
-  const box = providerUi(engine).who;
+// 选了原版时，在服务商下拉底下渲染「Claude 账号登录」整卡（当前账号 + 登录/重登/重新检测）。
+// renderClaudeLogin 自己会拉一次 auth status，所以每次调用拿到的都是最新登录态；
+// 只在「打开板块」和「切到原版」这两个时机调，别到处调——每拉一次都要起一个 claude 子进程。
+function renderClaudeLoginBox(engine) {
+  const box = providerUi(engine).login;
   if (!box) return;
-  if (force || !Health.auth) {
-    box.textContent = T('engWhoChecking');
-    try {
-      Health.auth = await api('/api/claude/auth/status');
-    } catch (e) {
-      box.textContent = T('engWhoFail').replace('{err}', e.message || '');
-      return;
-    }
-  }
-  box.textContent = officialWhoText(Health.auth);
-}
-
-// 把登录态拼成一行人话：已登录给「邮箱 · 组织 · 套餐」，没登录就说清去哪儿登
-function officialWhoText(a) {
-  if (!a || !a.cliFound) return T('engWhoNoCli');
-  if (!a.loggedIn) return T('engWhoNone');
-  const who = [a.email, a.orgName, a.subscriptionType].filter(Boolean).join(' · ');
-  // 老版本 claude 的 auth status 可能只给 loggedIn 不给邮箱 —— 别显示成「当前登录账号：」后面空着
-  if (!who) return T('engWhoUnknown');
-  return T('engWhoLoggedIn').replace('{who}', who);
+  // forceOfficial：用户可能刚把下拉切到原版还没点保存，后端记的仍是第三方，
+  // 不加这个标记登录卡会显示成「不需要登录」，正好把要登录的人挡在门外
+  renderClaudeLogin(box, { forceOfficial: true });
 }
 
 // 思考强度档位的 id 顺序由后端 /api/model/state 下发（避免前端写死一份），
@@ -5961,10 +5944,11 @@ function syncProviderVisibility(engine) {
   u.model.hidden = free;
   u.modelInput.hidden = !free;
   u.modelHint.hidden = !free;
-  // 只有原版才是订阅登录，第三方走 API Key，没有「登录账号」可言
-  if (u.who) {
-    u.who.hidden = provider !== 'official';
-    if (provider === 'official') renderOfficialWho(engine, false);
+  // 只有原版才是订阅登录，第三方走 API Key，没有账号可言 —— 整块登录卡都不出现
+  if (u.login) {
+    u.login.hidden = provider !== 'official';
+    if (provider === 'official') renderClaudeLoginBox(engine);
+    else u.login.innerHTML = '';
   }
 }
 // 用户在下拉里手动切换服务商 → 联动：**彻底隔离**。
@@ -6078,8 +6062,6 @@ async function loadEngineProvider(engine) {
     if (u.effort) u.effort.value = c.effort || '';
     syncProviderVisibility(engine);
     syncModelProviderTag(engine);
-    // 读配置这一刻＝板块刚打开，此时强制重读登录账号：中途在别处换过账号不能还显示旧的
-    if (u.who && u.select.value === 'official') renderOfficialWho(engine, true);
     u.status.className = 'sx-note';
     // 说明的是「已保存」的状态（表单里可能已改成别的服务商但还没点保存），文案要写明白
     u.status.textContent = c.provider === 'official'

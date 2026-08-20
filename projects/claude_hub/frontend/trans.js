@@ -839,22 +839,6 @@ const DICT = {
   engSaveFail: { en: 'Save failed: {err}', zh: '保存失败：{err}' },
   engSavedOfficialClaude: { en: 'Saved: official subscription login flow.', zh: '已保存：原版订阅登录流程。' },
 
-  // 原版服务商下面那行「当前登录账号」（来自 claude auth status）
-  engWhoChecking: { en: 'Reading the signed-in account…', zh: '正在读取当前登录账号…' },
-  engWhoLoggedIn: { en: 'Signed in as {who}', zh: '当前登录账号：{who}' },
-  engWhoUnknown: {
-    en: 'Signed in, but this Claude Code version does not report the account.',
-    zh: '已登录，但当前 Claude Code 版本没有回报账号信息。',
-  },
-  engWhoNone: {
-    en: 'Not signed in — the official provider needs an Anthropic account. Sign in under "Runtime".',
-    zh: '尚未登录 —— 原版要用 Anthropic 账号，到「运行环境」板块登录后才能发消息。',
-  },
-  engWhoNoCli: {
-    en: 'Claude Code is not installed yet, so there is no account to read. Install it under "Runtime" first.',
-    zh: '还没安装 Claude Code，读不到登录账号。请先到「运行环境」板块安装。',
-  },
-  engWhoFail: { en: 'Could not read the signed-in account: {err}', zh: '读取登录账号失败：{err}' },
   engSavedOfficialCodex: { en: 'Saved: official ChatGPT login flow.', zh: '已保存：原版 ChatGPT 登录流程。' },
   engSavedProvider: { en: 'Saved: {provider}', zh: '已保存：{provider}' },
   engSavedProviderModel: { en: 'Saved: {provider} (model {model})', zh: '已保存：{provider}（模型 {model}）' },

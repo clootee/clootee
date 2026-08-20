@@ -358,9 +358,10 @@
                 <option value="kimicode">Kimi Code（包月订阅）</option>
                 <option value="custom">自定义服务商</option>
               </select>
-              <!-- 原版=用 Anthropic 账号订阅登录，所以必须在这里显示「现在是谁的账号」：
-                   换过账号或一台机器多人用时，不显示就只能去终端敲 claude auth status 才知道 -->
-              <div class="sx-note" id="claudeOfficialWho" hidden></div>
+              <!-- 原版=用 Anthropic 账号订阅登录，所以「当前账号 + 登录/重登」整块只在这里出现：
+                   第三方服务商走 API Key，压根没有账号可言，摆出来只会吓人。
+                   （原先在「运行环境」板块，已迁到这里） -->
+              <div id="clBox" hidden></div>
               <div id="claudeProviderCfg" hidden>
                 <div id="claudeCustomCfg" hidden>
                   <label class="sx-lbl" id="claudeBaseUrlLbl">Anthropic 兼容 Base URL</label>
@@ -549,8 +550,6 @@
           </div>
           <!-- 网络体检：有没有外网、能不能连上 Claude；连不上时当场给出路 -->
           <div id="hcBox"></div>
-          <!-- Claude 账号：没登录时发消息不会有任何回应，必须能一眼看到并当场登录 -->
-          <div id="clBox"></div>
           <!-- 一键模式：完全自包含 vs 本机优先 -->
           <div class="tc-preset">
             <div class="tc-preset-t"><b>依赖来源（一键设置）</b><span id="tcPresetNow"></span></div>
@@ -899,10 +898,10 @@
   <script src="vendor/cm/mode/sass/sass.min.js"></script>
   <script src="vendor/cm/mode/dart/dart.min.js"></script>
   <script src="vendor/cm/mode/swift/swift.min.js"></script>
-  <script src="trans.js?v=20260818a"></script>
+  <script src="trans.js?v=20260820a"></script>
   <script src="workspace.js?v=20260801i"></script>
   <script src="rootwizard.js?v=20260804a"></script>
-  <script src="health.js?v=20260818a"></script>
+  <script src="health.js?v=20260820a"></script>
   <script src="onboard.js?v=20260817f"></script>
   <script src="galaxy.js?v=20260801p"></script>
   <script src="cyber.js?v=20260801z1"></script>
@@ -915,6 +914,6 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="app.js?v=20260819c"></script>
+  <script src="app.js?v=20260820a"></script>
 </body>
 </html>
