@@ -1,0 +1,107 @@
+# ─────────────────────────────────────────────────────────────
+# Dependencies / build output
+# ─────────────────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+
+# ─────────────────────────────────────────────────────────────
+# Runtime data（含真实会话内容、密钥、每机状态，绝不入库）
+# ─────────────────────────────────────────────────────────────
+data/sessions/
+data/traces/
+data/logs/
+data/roots.json
+data/auth.json
+data/engines.json
+data/codex.json
+data/settings.json
+data/session_meta.json
+data/queue_state.json
+data/*-workdir/
+.runtime-port
+
+# 测试与录制产物
+test-results/
+playwright-report/
+.provider-e2e-temp/
+
+# ─────────────────────────────────────────────────────────────
+# Env / secrets / 私有变体配置
+# ─────────────────────────────────────────────────────────────
+.env
+.env.*
+*.local
+*.local.js
+# Claude Code 个人配置（settings、agents、hooks、worktrees 等，属于本机个人设置）
+.claude/
+*.pem
+*.key
+*.crt
+*.pfx
+.git-credentials
+
+# ─────────────────────────────────────────────────────────────
+# 开发过程文档 / 个人开发约定：只服务于本仓库的开发者，不适合开源
+# （文件仍留在本地磁盘，只是不进 git）
+# 说明：只匹配同名文件本身，backend/src/config/templates/*.CLAUDE.md
+# 这类产品内置模板不受影响。
+# ─────────────────────────────────────────────────────────────
+# 规则：默认忽略所有 .md，只有 README.md / README_zh.md 例外。
+# 例外二：backend/src/config/templates/ 下的 *.CLAUDE.md / *.AGENTS.md 是
+# 产品内置模板，运行期要用（build.js 会复制到 dist），必须入库。
+*.md
+!README.md
+!README_zh.md
+!projects/claude_hub/backend/src/config/templates/*.md
+# 例外三：docs/ 是对外公开的说明文档目录（架构说明等），必须入库。
+!docs/
+!docs/*.md
+
+*.docx
+*.xlsx
+*.pptx
+
+# ─────────────────────────────────────────────────────────────
+# 本机临时产物 / 调试转储 / 运维输出
+# ─────────────────────────────────────────────────────────────
+tmp/
+temp/
+*.log
+*.tmp
+*.bak
+pm2-list.txt
+restart-output.txt
+*-output.txt
+*-debug.json
+nohup.out
+
+# 截图 / 录屏（多为本机界面与个人信息）
+Screenshot*.png
+Screenshot*.jpg
+*.mp4
+
+# ─────────────────────────────────────────────────────────────
+# OS / editor
+# ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+
+# 本机临时素材/试验目录（发票、简历等样例数据，不适合入库）
+/34/
+
+# claude_relay 整个子项目暂不开源，整目录不入 git（文件仍留在本地磁盘）
+projects/claude_relay/
+
+# ─────────────────────────────────────────────────────────────
+# 内置依赖库（out_end 下的便携版 Node / Git / claude / codex）
+# 二进制不入库，保持仓库轻量：node 启动时自动下载，git/引擎在界面里带进度一键安装。
+# 具体规则见 projects/claude_hub/out_end/.gitignore。
+# ─────────────────────────────────────────────────────────────
+# 例外四：assist/ 是对外发布的小助手组件，docs.md 是它的接入文档（产品的一部分，
+# 还要给 AI 读），必须入库。
+!projects/claude_hub/frontend/assist/*.md

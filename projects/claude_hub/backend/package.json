@@ -1,0 +1,29 @@
+{
+  "name": "claude-hub-backend",
+  "version": "1.0.0",
+  "description": "Local Claude multi-session task-queue hub",
+  "main": "src/index.ts",
+  "scripts": {
+    "setup": "node scripts/setup.js --full",
+    "check": "node scripts/setup.js --check",
+    "build": "node scripts/build.js",
+    "rebuild": "node scripts/build.js --force",
+    "typecheck": "tsc --noEmit",
+    "serve": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "passwd": "ts-node src/cli/authctl.ts",
+    "e2e": "cd .. && npx playwright test"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

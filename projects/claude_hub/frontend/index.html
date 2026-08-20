@@ -1,0 +1,920 @@
+﻿<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <!-- 切语言时由 applyText() 用 T('title') / T('tagline') 重写，这里是首屏默认值 -->
+  <title>Clootee — 让 Claude Code / Codex 更易用</title>
+  <link rel="icon" href="favicon.ico?v=20260820c" sizes="any" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20260820c" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
+  <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
+  <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
+  <link rel="stylesheet" href="styles.css?v=20260819c" />
+</head>
+<body class="dark">
+  <!-- 登录遮罩 -->
+  <div class="login-overlay" id="loginOverlay" hidden>
+    <form class="login-card" id="loginForm">
+      <h2 id="loginTitle"></h2>
+      <div class="login-err" id="loginErr"></div>
+      <input type="password" id="loginPwd" autocomplete="current-password" />
+      <button type="submit" class="primary" id="loginBtn"></button>
+    </form>
+  </div>
+
+  <!-- 首次安装：设定访问密码 -->
+  <div class="login-overlay" id="setupOverlay" hidden>
+    <form class="login-card" id="setupForm">
+      <h2 id="setupTitle"></h2>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px" id="setupHint"></div>
+      <div class="login-err" id="setupErr"></div>
+      <input type="password" id="setupPwd" autocomplete="new-password" placeholder="" />
+      <input type="password" id="setupPwd2" autocomplete="new-password" placeholder="" />
+      <button type="submit" class="primary" id="setupBtn"></button>
+    </form>
+  </div>
+
+  <!-- 新手引导：语言/主题 -> 网络体检 -> 选引擎 -> 选服务商 -> 登录 Claude 或填 API Key -->
+  <div class="login-overlay" id="onboardOverlay" hidden>
+    <div class="onboard-card">
+      <div class="ob-steps" id="onboardSteps"></div>
+      <h2 id="onboardTitle"></h2>
+      <div class="ob-sub" id="onboardSub"></div>
+      <div class="ob-body" id="onboardBody"></div>
+      <div class="ob-foot">
+        <button type="button" id="onboardSkip">以后再说</button>
+        <span style="flex:1"></span>
+        <button type="button" id="onboardBack" hidden>上一步</button>
+        <button type="button" class="primary" id="onboardNext">下一步</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 使用指南 -->
+  <div class="login-overlay" id="guideOverlay" hidden>
+    <div class="guide-card">
+      <div class="guide-head">
+        <h2 id="guideTitle"></h2>
+        <button type="button" id="guideClose" class="guide-close">✕</button>
+      </div>
+      <div class="guide-body" id="guideBody"></div>
+      <div class="guide-foot">
+        <button type="button" class="primary" id="guideGotIt"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 会话工具命令结果（/usage /compact …） -->
+  <div class="login-overlay" id="cmdOverlay" hidden>
+    <div class="guide-card cmd-card">
+      <div class="guide-head">
+        <h2 id="cmdTitle"></h2>
+        <button type="button" id="cmdClose" class="guide-close">✕</button>
+      </div>
+      <div class="guide-body">
+        <div class="cmd-desc" id="cmdDesc"></div>
+        <div class="cmd-progress" id="cmdProgress" hidden>
+          <div class="cmd-progress-bar"><span></span></div>
+          <div class="cmd-progress-meta">
+            <span id="cmdProgressLabel"></span>
+            <span id="cmdProgressTime" class="cmd-progress-time"></span>
+          </div>
+        </div>
+        <pre class="cmd-output" id="cmdOutput"></pre>
+      </div>
+      <div class="guide-foot">
+        <button type="button" class="primary" id="cmdGotIt"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 目录选择器 -->
+  <div class="login-overlay" id="pickerOverlay" hidden>
+    <div class="picker-card">
+      <div class="picker-head">
+        <span id="pickerTitle"></span>
+        <button id="pickerClose" style="flex:none;padding:2px 9px"></button>
+      </div>
+      <div class="picker-bar">
+        <button id="pickerHome" style="flex:none"></button>
+        <button id="pickerUp" style="flex:none"></button>
+        <button id="pickerNewDir" style="flex:none"></button>
+        <span class="drives" id="pickerDrives"></span>
+      </div>
+      <div class="picker-bar">
+        <input id="pickerPath" spellcheck="false" />
+        <button id="pickerGo" style="flex:none"></button>
+      </div>
+      <input id="pickerSearch" spellcheck="false" />
+      <div class="picker-list" id="pickerList"></div>
+      <div class="picker-foot">
+        <input id="pickerName" placeholder="" />
+        <button id="pickerSelect" class="primary" style="flex:none"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加工作目录引导：选择已有目录 / 新建项目 -->
+  <div class="login-overlay" id="addRootGuideOverlay" hidden>
+    <div class="picker-card rw-card">
+      <div class="picker-head">
+        <span id="argTitle"></span>
+        <button id="argClose" style="flex:none;padding:2px 9px"></button>
+      </div>
+      <div class="rw-body">
+        <button class="rw-choice" id="argExisting" type="button">
+          <span class="rw-choice-ic">📁</span>
+          <span class="rw-choice-tx"><b id="argExistingT"></b><em id="argExistingD"></em></span>
+        </button>
+        <button class="rw-choice" id="argNew" type="button">
+          <span class="rw-choice-ic">✨</span>
+          <span class="rw-choice-tx"><b id="argNewT"></b><em id="argNewD"></em></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建项目：项目名（英文/数字/下划线）+ 创建到的父目录 -->
+  <div class="login-overlay" id="newProjectOverlay" hidden>
+    <div class="picker-card rw-card">
+      <div class="picker-head">
+        <span id="npTitle"></span>
+        <button id="npClose" style="flex:none;padding:2px 9px"></button>
+      </div>
+      <div class="rw-body">
+        <label class="fld-label" id="npNameLabel"></label>
+        <input id="npName" spellcheck="false" autocomplete="off" />
+        <div class="rw-hint" id="npNameHint"></div>
+        <label class="fld-label" id="npParentLabel" style="margin-top:12px;display:block"></label>
+        <div style="display:flex;gap:8px">
+          <input id="npParent" spellcheck="false" style="flex:1;min-width:0" />
+          <button id="npBrowse" style="flex:none"></button>
+        </div>
+        <div class="rw-preview" id="npPreview"></div>
+        <div class="rw-err" id="npErr" hidden></div>
+      </div>
+      <div class="picker-foot">
+        <span class="spacer"></span>
+        <button id="npCreate" class="primary" style="flex:none"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 选择项目模板：内置（网页工具/网页游戏 2D·3D/Python 工具）+ 自定义（模板集合路径）+ 不选 -->
+  <div class="login-overlay" id="templatePickOverlay" hidden>
+    <div class="picker-card rw-card">
+      <div class="picker-head">
+        <span id="tpTitle"></span>
+        <button id="tpClose" style="flex:none;padding:2px 9px"></button>
+      </div>
+      <div class="rw-body">
+        <div class="rw-hint" id="tpHint"></div>
+        <div class="rw-templates" id="tpList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加/新建目录执行进度（低配机器上创建目录、刷新列表、写模板可能较慢）-->
+  <div class="login-overlay" id="rwProgressOverlay" hidden>
+    <div class="picker-card rw-card" style="width:400px">
+      <div class="rw-body">
+        <div class="rw-prog-title" id="rwpTitle"></div>
+        <div class="rw-prog-track"><div class="rw-prog-bar" id="rwpBar"></div></div>
+        <div class="rw-prog-step" id="rwpStep"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 工作台模式：新建会话前选择工作目录（近期用过 / 手动添加，可创建不存在目录） -->
+  <div class="login-overlay" id="wsDirOverlay" hidden>
+    <div class="picker-card" style="width:560px">
+      <div class="picker-head">
+        <span id="wsDirTitle"></span>
+        <button id="wsDirClose" style="flex:none;padding:2px 9px"></button>
+      </div>
+      <div style="padding:14px 14px 0">
+        <div class="fld-label" id="wsRecentLabel"></div>
+        <div class="ws-recent" id="wsRecentList"></div>
+        <hr style="border:none;border-top:1px solid var(--border,#333);margin:14px 0" />
+        <div class="fld-label" id="wsAddLabel"></div>
+        <div style="display:flex;gap:8px">
+          <input id="wsDirPath" spellcheck="false" style="flex:1;min-width:0" />
+          <button id="wsDirBrowse" style="flex:none"></button>
+        </div>
+        <label class="adv-toggle" style="margin-top:10px">
+          <input type="checkbox" id="wsDirCreate" checked /> <span id="wsDirCreateLabel"></span>
+        </label>
+      </div>
+      <div class="picker-foot">
+        <span class="spacer"></span>
+        <button id="wsDirUse" class="primary" style="flex:none"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 编辑根目录：备注 + 链接 -->
+  <div class="login-overlay" id="rootEditOverlay" hidden>
+    <div class="picker-card" style="width:540px">
+      <div class="picker-head">
+        <span id="rootEditTitle"></span>
+        <button id="rootEditClose" style="flex:none;padding:2px 9px"></button>
+      </div>
+      <div style="padding:14px;overflow-y:auto">
+        <label class="fld-label" id="noteLabel"></label>
+        <textarea id="rootNote" rows="3" style="resize:vertical"></textarea>
+        <div class="fld-row">
+          <span class="fld-label" id="linksLabel"></span>
+          <button id="addLinkBtn" class="sm" style="flex:none"></button>
+        </div>
+        <div id="linksEditor"></div>
+      </div>
+      <div class="picker-foot">
+        <span class="spacer"></span>
+        <button id="rootEditSave" class="primary" style="flex:none"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批量管理根目录：勾选后批量删除 -->
+  <div class="login-overlay" id="rootManageOverlay" hidden>
+    <div class="picker-card" style="width:560px">
+      <div class="picker-head">
+        <span id="rootManageTitle"></span>
+        <button id="rootManageClose" style="flex:none;padding:2px 9px"></button>
+      </div>
+      <div class="rm-toolbar">
+        <label class="batch-all"><input type="checkbox" id="rmAllChk" /> <span id="rmAllLabel"></span></label>
+        <span class="batch-count" id="rmCount"></span>
+      </div>
+      <div class="rm-list" id="rootManageList"></div>
+      <div class="picker-foot">
+        <span class="spacer"></span>
+        <button id="rootManageDelete" class="danger" style="flex:none"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 批量任务录入 -->
+  <div class="login-overlay" id="tasksOverlay" hidden>
+    <div class="picker-card" style="width:600px">
+      <div class="picker-head">
+        <span id="tasksTitle"></span>
+        <button id="tasksClose" style="flex:none;padding:2px 9px"></button>
+      </div>
+      <div style="padding:12px 14px 0">
+        <div id="tasksHint" class="tasks-hint"></div>
+        <textarea id="tasksInput" rows="10" spellcheck="false" style="resize:vertical"></textarea>
+      </div>
+      <div class="picker-foot">
+        <span id="tasksCount" class="tasks-count"></span>
+        <span class="spacer"></span>
+        <button id="tasksSubmit" class="primary" style="flex:none"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 任务管理弹窗（整体展开：批量删除 / 修改 / 复制 / 暂定）-->
+  <div class="login-overlay" id="queueModal" hidden>
+    <div class="picker-card qm-card">
+      <div class="picker-head">
+        <span id="qmTitle"></span>
+        <button id="qmClose" style="flex:none;padding:2px 9px">✕</button>
+      </div>
+      <div class="qm-toolbar">
+        <label class="qm-all"><input type="checkbox" id="qmSelectAll" /><span id="qmAllLabel"></span></label>
+        <span class="spacer"></span>
+        <button id="qmBatchDelete" class="sm danger"></button>
+      </div>
+      <div class="qm-list" id="qmList"></div>
+    </div>
+  </div>
+
+  <!-- 停止二选一：存在后续排队任务时，询问「暂停整个序列」还是「停止当前、开始下一个」 -->
+  <div class="login-overlay" id="stopChoiceOverlay" hidden>
+    <div class="picker-card" style="width:460px">
+      <div class="picker-head">
+        <span id="stopChoiceTitle"></span>
+        <button id="stopChoiceClose" style="flex:none;padding:2px 9px">✕</button>
+      </div>
+      <div style="padding:14px 16px">
+        <div class="stop-choice-desc" id="stopChoiceDesc"></div>
+        <button type="button" class="stop-choice-opt" id="stopChoicePauseBtn">
+          <span class="sco-title" id="stopChoicePauseTitle"></span>
+          <span class="sco-desc" id="stopChoicePauseDesc"></span>
+        </button>
+        <button type="button" class="stop-choice-opt" id="stopChoiceNextBtn">
+          <span class="sco-title" id="stopChoiceNextTitle"></span>
+          <span class="sco-desc" id="stopChoiceNextDesc"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置首页：只放板块导航，具体设置一律「点进去」（见 #settingsPaneOverlay） -->
+  <!-- 独立命名空间 sx-*：不复用任何全局弹窗样式，避免被外部规则撑爆宽度 -->
+  <div class="sx-overlay" id="settingsOverlay" hidden>
+    <div class="sx-card">
+      <div class="sx-head">
+        <span id="settingsTitle"></span>
+        <button class="sx-x" id="settingsClose"></button>
+      </div>
+      <div class="sx-body">
+        <div class="sx-nav" id="settingsNav"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 设置子面板：一次只显示一个板块（pane），头部有「‹ 返回」回到板块列表 -->
+  <div class="sx-overlay sx-overlay-sub" id="settingsPaneOverlay" hidden>
+    <div class="sx-card">
+      <div class="sx-head">
+        <button class="sx-back" id="settingsPaneBack">‹</button>
+        <span id="settingsPaneTitle"></span>
+        <button class="sx-x" id="settingsPaneClose">✕</button>
+      </div>
+      <div class="sx-body">
+
+        <!-- ═══ 板块：AI 引擎 · 服务商 · 模型 ═══ -->
+        <div class="sx-pane" id="pane-engine" hidden>
+          <label class="sx-lbl" id="defaultEngineLabel"></label>
+          <select class="sx-input" id="defaultEngineSelect"></select>
+          <div class="sx-note" id="defaultEngineNote"></div>
+
+          <!-- 每个引擎一个折叠块：折叠时标题行右侧显示「服务商 · 模型」摘要 -->
+          <div class="eng-acc">
+            <button class="eng-acc-head" id="engAccClaudeHead" type="button">
+              <span class="eng-acc-arrow" id="engAccClaudeArrow">▾</span>
+              <span class="eng-acc-title">Claude Code</span>
+              <span class="eng-acc-sum" id="engAccClaudeSum"></span>
+            </button>
+            <div class="eng-acc-body" id="engAccClaudeBody">
+              <label class="sx-lbl" id="claudeProviderLbl">服务商</label>
+              <select class="sx-input" id="claudeProviderSelect">
+                <option value="official">原版（订阅登录，未登录会引导登录）</option>
+                <option value="minimax">MiniMax（推荐，支持图片识别）</option>
+                <option value="xiaomi">小米 MiMo</option>
+                <option value="kimi">Kimi 开放平台（按量计费）</option>
+                <option value="kimicode">Kimi Code（包月订阅）</option>
+                <option value="custom">自定义服务商</option>
+              </select>
+              <!-- 原版=用 Anthropic 账号订阅登录，所以必须在这里显示「现在是谁的账号」：
+                   换过账号或一台机器多人用时，不显示就只能去终端敲 claude auth status 才知道 -->
+              <div class="sx-note" id="claudeOfficialWho" hidden></div>
+              <div id="claudeProviderCfg" hidden>
+                <div id="claudeCustomCfg" hidden>
+                  <label class="sx-lbl" id="claudeBaseUrlLbl">Anthropic 兼容 Base URL</label>
+                  <input class="sx-input" id="claudeBaseUrl" spellcheck="false" placeholder="例如 https://example.com/anthropic" />
+                  <label class="sx-lbl" id="claudeModelsUrlLbl">模型列表 URL（可选）</label>
+                  <input class="sx-input" id="claudeModelsUrl" spellcheck="false" placeholder="默认 Base URL + /models" />
+                </div>
+                <label class="sx-lbl" id="claudeApiKeyLbl">API Key</label>
+                <input class="sx-input" id="claudeApiKey" type="text" placeholder="sk-…（填好后会自动检测并选一个模型）" />
+              </div>
+              <!-- 模型与思考强度：每个服务商各自保存一套（互不干扰）。
+                   原版订阅也可以选模型与强度；换服务商 / 填好 Key 后会自动拉取并选中推荐模型 -->
+              <div id="claudeModelBox">
+                <label class="sx-lbl"><span id="claudeModelLbl">模型</span> <span class="sx-tag" id="mdlClaudeProvider"></span></label>
+                <select class="sx-input" id="claudeModelSelect"></select>
+                <!-- 自定义服务商：模型列表未必拉得到，允许直接手填（候选仍以 datalist 提示） -->
+                <input class="sx-input" id="claudeModelInput" list="claudeModelList" spellcheck="false" hidden />
+                <datalist id="claudeModelList"></datalist>
+                <div class="sx-note" id="claudeModelHint" hidden></div>
+                <label class="sx-lbl" id="claudeEffortLbl">思考强度</label>
+                <select class="sx-input" id="claudeEffortSelect"></select>
+                <div class="sx-note" id="claudeEffortNote">强度越高思考越久、消耗越多；「自动」= 交给引擎决定。</div>
+                <div class="sx-adv">
+                  <button class="sx-adv-head" id="claudeAdvHead" type="button">
+                    <span class="sx-adv-arrow" id="claudeAdvArrow">▸</span><span id="claudeAdvLabel"></span>
+                  </button>
+                  <div class="sx-adv-body" id="claudeAdvBody" hidden>
+                    <div class="sx-row">
+                      <button class="sx-btn" id="claudeModelsBtn">重新拉取模型</button>
+                      <button class="sx-btn" id="mdlClaudeDetectBtn">检测当前模型</button>
+                      <button class="sx-btn" id="mdlClaudeListBtn">检测可用模型</button>
+                    </div>
+                    <label class="sx-chk"><input type="checkbox" id="mdlClaudeVerifyChk" /><span class="sx-chk-txt"><b id="mdlClaudeVerifyTitle">逐个真实验证可用性</b><em id="mdlClaudeVerifyDesc">每个候选发一次极小请求，较慢但更准确</em></span></label>
+                  </div>
+                </div>
+              </div>
+              <div class="sx-note" id="mdlClaudeStatus"></div>
+              <div class="sx-row sx-right">
+                <button class="sx-btn sx-btn-primary" id="claudeSaveBtn">保存 Claude Code 设置</button>
+              </div>
+              <div class="sx-note" id="claudeProviderStatus"></div>
+            </div>
+          </div>
+
+          <div class="eng-acc">
+            <button class="eng-acc-head" id="engAccCodexHead" type="button">
+              <span class="eng-acc-arrow" id="engAccCodexArrow">▸</span>
+              <span class="eng-acc-title">Codex</span>
+              <span class="eng-acc-sum" id="engAccCodexSum"></span>
+            </button>
+            <div class="eng-acc-body" id="engAccCodexBody" hidden>
+              <label class="sx-lbl" id="codexProviderLbl">服务商</label>
+              <select class="sx-input" id="codexProviderSelect">
+                <option value="official">原版 ChatGPT（账号登录）</option>
+                <option value="minimax">MiniMax</option>
+                <option value="xiaomi">小米 MiMo</option>
+                <!-- Codex 不列 Kimi Code：那是给编程 Agent 的包月订阅，OpenAI 兼容端点对客户端有限制，
+                     且 Codex 走的是 config.toml 档位 + 本地代理（见 CodexProfile），与这里的机制不同 -->
+                <option value="kimi">Kimi 开放平台（按量计费）</option>
+                <option value="custom">自定义服务商</option>
+              </select>
+              <div id="codexProviderCfg" hidden>
+                <div id="codexCustomCfg" hidden>
+                  <label class="sx-lbl" id="codexBaseUrlLbl">OpenAI Chat Completions Base URL</label>
+                  <input class="sx-input" id="codexBaseUrl" spellcheck="false" placeholder="例如 https://example.com/v1" />
+                  <label class="sx-lbl" id="codexModelsUrlLbl">模型列表 URL（可选）</label>
+                  <input class="sx-input" id="codexModelsUrl" spellcheck="false" placeholder="默认 Base URL + /models" />
+                </div>
+                <label class="sx-lbl" id="codexApiKeyLbl">API Key</label>
+                <input class="sx-input" id="codexApiKey" type="text" placeholder="sk-…（填好后会自动检测并选一个模型）" />
+              </div>
+              <div id="codexModelBox">
+                <label class="sx-lbl"><span id="codexModelLbl">模型</span> <span class="sx-tag" id="mdlCodexProvider"></span></label>
+                <select class="sx-input" id="codexModelSelect"></select>
+                <input class="sx-input" id="codexModelInput" list="codexModelList" spellcheck="false" hidden />
+                <datalist id="codexModelList"></datalist>
+                <div class="sx-note" id="codexModelHint" hidden></div>
+                <label class="sx-lbl" id="codexEffortLbl">思考强度</label>
+                <select class="sx-input" id="codexEffortSelect"></select>
+                <div class="sx-note" id="codexEffortNote">Codex 只有低/中/高三档，选「极高/最高」会按「高」执行。</div>
+                <div class="sx-adv">
+                  <button class="sx-adv-head" id="codexAdvHead" type="button">
+                    <span class="sx-adv-arrow" id="codexAdvArrow">▸</span><span id="codexAdvLabel"></span>
+                  </button>
+                  <div class="sx-adv-body" id="codexAdvBody" hidden>
+                    <div class="sx-row">
+                      <button class="sx-btn" id="codexModelsBtn">重新拉取模型</button>
+                      <button class="sx-btn" id="mdlCodexDetectBtn">检测当前模型</button>
+                      <button class="sx-btn" id="mdlCodexListBtn">检测可用模型</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="sx-note" id="mdlCodexStatus"></div>
+              <div class="sx-row sx-right">
+                <button class="sx-btn sx-btn-primary" id="codexSaveBtn">保存 Codex 设置</button>
+              </div>
+              <div class="sx-note sx-pre" id="codexProviderStatus"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ═══ 板块：访问与网络 ═══ -->
+        <div class="sx-pane" id="pane-network" hidden>
+          <label class="sx-chk"><input type="checkbox" id="allowLanChk" /><span class="sx-chk-txt"><b>允许局域网访问</b><em>关闭=仅本机 localhost 可访问；更改需重启生效</em></span></label>
+          <!-- 勾选「允许局域网访问」后展开：手机/其他电脑访问教程（同一 WiFi） -->
+          <div class="lan-guide" id="lanGuide" hidden>
+          <div class="lan-guide-warn">⚠️ 开启局域网访问可能带来隐私风险：任何处在同一局域网的用户都可访问本服务，此时唯一的屏障只有访问密码。请谨慎开启，并使用足够强的密码。</div>
+          <div class="lan-guide-title">📱 用手机或其他电脑访问</div>
+          <ol class="lan-guide-steps">
+            <li>确保手机 / 另一台电脑与本机连接<b>同一个 WiFi（或同一局域网）</b>。</li>
+            <li>在那台设备的浏览器里打开下面任意一个地址：</li>
+          </ol>
+          <div class="lan-addr-list" id="lanAddrList"></div>
+          <div class="lan-guide-hintrow">
+            <span class="lan-guide-hint" id="lanGuideHint">首次访问需输入本工作台的访问密码；打开后可像本机一样使用。</span>
+            <a href="#" class="lan-forgot" id="lanForgotLink">忘记密码？</a>
+          </div>
+          <!-- 忘记密码 → 直接重置（无需旧密码；已在设置面板内即视为本机授权） -->
+          <div class="lan-pwreset" id="lanPwReset" hidden>
+            <div class="lan-pwreset-tip">重置访问密码（无需旧密码）：</div>
+            <div class="lan-pwreset-row">
+              <input class="sx-input sx-grow" id="lanPwNew" type="password" placeholder="新密码（至少 4 位）" />
+              <input class="sx-input sx-grow" id="lanPwNew2" type="password" placeholder="再次输入新密码" />
+              <button class="sx-btn sx-btn-auto" id="lanPwResetBtn">重置</button>
+            </div>
+            <div class="sx-note" id="lanPwResetStatus"></div>
+          </div>
+        </div>
+          <!-- 修改访问密码（与局域网访问同属「谁能进来」，归到本板块） -->
+          <div class="sx-sec">修改访问密码</div>
+          <div class="sx-row">
+            <input class="sx-input sx-grow" id="pwOld" type="password" placeholder="当前密码" />
+            <input class="sx-input sx-grow" id="pwNew" type="password" placeholder="新密码" />
+            <button class="sx-btn sx-btn-auto" id="pwChangeBtn">修改</button>
+          </div>
+          <div class="sx-note" id="pwStatus"></div>
+        </div>
+
+        <!-- ═══ 板块：提示词与快捷标签 ═══ -->
+        <div class="sx-pane" id="pane-prompt" hidden>
+          <div class="sx-sec">预设系统提示词</div>
+          <div class="sx-note">填写后，每次发消息前会检查当前项目工作目录的 CLAUDE.md 与 AGENTS.md（大小写均检查），未写过就自动加入（幂等，不重复追加；文件不存在则创建）。留空=关闭。</div>
+          <textarea class="sx-input sx-ta" id="systemPromptInput" rows="6" placeholder="例如：回答一律使用中文；每次改动后必须 git push。"></textarea>
+
+          <div class="sx-sec">快捷按钮</div>
+          <div class="sx-note">
+            在输入框上方显示一排可点的快捷按钮。每个按钮对应一段<b>含义（提示词）</b>：选中后发送时会自动加到正文最前面；含义留空则退化为在正文前加 <code>[按钮文字]</code> 前缀。<br />
+            同一「分组」内的按钮<b>互斥</b>（只能选 1 个，再点一次取消）；不同分组互不影响，可各选一个。想要单个独立按钮时，新建一个只放一个按钮的分组即可。热键 Ctrl+1..9 按按钮整体顺序对应。
+          </div>
+          <div id="quickEditor" class="qedit"></div>
+          <button type="button" id="quickAddGroup" class="qedit-add-group">＋ 添加分组</button>
+        </div>
+
+        <!-- ═══ 板块：上下文自动压缩 ═══ -->
+        <div class="sx-pane" id="pane-context" hidden>
+          <div class="sx-note">
+            对话越长，塞给模型的上下文越多。逼近上限时 Claude Code 会把前面的内容<b>压缩成摘要</b>再继续，这样会话能一直聊下去而不报「上下文超长」。<br />
+            压缩发生时，过程区会出现一行 <code>[上下文自动压缩]</code> 提示。
+          </div>
+          <label class="sx-lbl">压缩窗口</label>
+          <select class="sx-input" id="autoCompactModeSelect">
+            <option value="auto">自动（推荐：跟随模型自身的上下文窗口）</option>
+            <option value="custom">自定义窗口大小</option>
+          </select>
+          <div id="autoCompactCustomBox" hidden>
+            <label class="sx-lbl">窗口大小（tokens，10 万 ~ 100 万）</label>
+            <input class="sx-input" id="autoCompactTokensInput" type="number" min="100000" max="1000000" step="10000" placeholder="例如 200000" />
+            <div class="sx-note">上下文用到这个量级就触发压缩。<b>调小</b>＝压得更早更频繁、每次请求更省；<b>调大</b>＝保留更多原文，但要求模型确实支持这么长的上下文，否则会直接报错。</div>
+          </div>
+          <div class="sx-note" id="autoCompactNote"></div>
+        </div>
+
+        <!-- ═══ 板块：项目模板 ═══ -->
+        <div class="sx-pane" id="pane-template" hidden>
+          <div class="sx-note">填写一个目录（如 <code>D:\templates</code>），其下<b>每个直接子文件夹</b>都会成为一个可选模板。新建或选择工作目录且缺少 CLAUDE.md/AGENTS.md 时，选中某个模板即把该子文件夹内的文件<b>复制覆盖</b>到项目里。留空=不启用自定义模板。</div>
+          <label class="sx-lbl">模板集合路径</label>
+          <input class="sx-input" id="templateCollectionPathInput" spellcheck="false" placeholder="例如 D:\templates" />
+        </div>
+
+        <!-- ═══ 板块：运行环境（node / git / claude / codex：本机 or 内置）═══ -->
+        <div class="sx-pane" id="pane-runtime" hidden>
+          <div class="sx-note">
+            这里管理软件运行所需的四件套。<b>Node / Git 有内置版，随软件自带、不需要安装</b>；本机已装的会被<b>优先使用</b>（默认「自动」）。
+            <b>Claude Code / Codex 不内置</b>，点「安装到本机（全局）」即用 npm 全局安装（自动在官方源与国内镜像里挑更快的那个）。
+          </div>
+          <!-- 网络体检：有没有外网、能不能连上 Claude；连不上时当场给出路 -->
+          <div id="hcBox"></div>
+          <!-- Claude 账号：没登录时发消息不会有任何回应，必须能一眼看到并当场登录 -->
+          <div id="clBox"></div>
+          <!-- 一键模式：完全自包含 vs 本机优先 -->
+          <div class="tc-preset">
+            <div class="tc-preset-t"><b>依赖来源（一键设置）</b><span id="tcPresetNow"></span></div>
+            <div class="sx-row">
+              <button class="sx-btn sx-btn-primary" id="tcAllBundledBtn">全部使用内置</button>
+              <button class="sx-btn" id="tcAutoBtn">自动（本机优先）</button>
+              <button class="sx-btn" id="tcRefreshBtn">重新检测</button>
+            </div>
+            <div class="sx-note">「全部使用内置」= 运行环境（Node、Git）一律用软件自带的那份，完全不理会本机装了什么，换台电脑拷过去表现完全一致。（Claude Code / Codex 走 npm 全局安装，不受此项影响。）</div>
+            <div class="sx-note err" id="tcPresetWarn" hidden></div>
+          </div>
+          <div id="tcList"></div>
+          <div class="sx-note sx-pre" id="tcStatus"></div>
+          <div class="sx-note sx-pre" id="updateStatus" hidden></div>
+        </div>
+
+      </div>
+      <div class="sx-foot">
+        <button class="sx-btn sx-btn-primary" id="settingsPaneSave"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- git push 结果小型弹窗（顶部，全局仅一个，后续执行覆盖） -->
+  <div id="gitPushToast" class="git-push-toast" hidden>
+    <span id="gitPushToastMsg"></span>
+    <button id="gitPushToastClose">✕</button>
+  </div>
+
+  <div class="app">
+    <!-- 移动端抽屉遮罩 -->
+    <div class="scrim" id="scrim"></div>
+
+    <!-- 教程入口菜单（点击 📖 弹出：快速上手指南 / 小白教程） -->
+    <div class="guide-menu" id="guideMenu" hidden>
+      <div class="theme-panel-title" id="guideMenuTitle"></div>
+      <button type="button" class="gm-opt" id="gmQuick">
+        <span class="gm-ic">📖</span>
+        <span class="gm-txt"><span class="gm-t" id="gmQuickT"></span><span class="gm-d" id="gmQuickD"></span></span>
+      </button>
+      <button type="button" class="gm-opt" id="gmLearn">
+        <span class="gm-ic">🎓</span>
+        <span class="gm-txt"><span class="gm-t" id="gmLearnT"></span><span class="gm-d" id="gmLearnD"></span></span>
+      </button>
+    </div>
+
+    <!-- 主题选择面板（点击 🎨 弹出） -->
+    <div class="theme-panel" id="themePanel" hidden>
+      <div class="theme-panel-title" id="themePanelTitle"></div>
+      <div class="theme-grid" id="themeGrid"></div>
+    </div>
+
+    <!-- 侧边栏：根目录 + 会话（移动端为左侧抽屉） -->
+    <aside class="sidebar">
+      <header>
+        <h1 id="appTitle"></h1>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;flex:1;min-width:0">
+          <!-- 版本号：放在齿轮按钮左边，跟随按钮组一起排布 -->
+          <span id="appVersion" class="version-badge">V&nbsp;2.0</span>
+          <button id="settingsBtn" title="settings" style="flex:none;padding:4px 9px">⚙</button>
+          <button id="themeBtn" title="theme" style="flex:none;padding:4px 9px"></button>
+          <button id="langBtn" style="flex:none;padding:4px 10px"></button>
+          <button id="guideBtn" title="guide" style="flex:none;padding:4px 9px">📖</button>
+        </div>
+        <!-- 一句话介绍：整行独占（flex-basis:100%），放在标题与按钮行下方 -->
+        <p class="app-tagline" id="appTagline"></p>
+      </header>
+
+      <div class="section" id="rootSection">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h2 id="rootLabel"></h2>
+          <div style="display:flex;gap:6px">
+            <button id="manageRootsBtn" class="icon-square" title="manage roots">🗂</button>
+            <button id="gitPushBtn" class="icon-square" title="git add . && commit -m 1 && push">⇪</button>
+          </div>
+        </div>
+        <div class="root-row">
+          <select id="rootSelect"></select>
+          <button id="openFolderBtn" class="icon-square" title="open folder" hidden>📂</button>
+          <button id="addRootBtn" class="icon-square" title="add"></button>
+          <button id="removeRootBtn" class="icon-square danger" title="remove"></button>
+        </div>
+        <div id="rootMeta" class="root-meta"></div>
+      </div>
+
+      <div class="section">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="sessions-title-wrap">
+            <button id="favoritesToggleBtn" class="icon-square" title="favorites" style="width:30px;height:30px;font-size:14px">★</button>
+            <h2 id="sessionsLabel" style="margin:0"></h2>
+          </div>
+          <div style="display:flex;gap:6px">
+            <button id="searchToggleBtn" class="icon-square" title="search" style="width:30px;height:30px;font-size:14px">🔍</button>
+            <button id="favDirFilterBtn" class="icon-square" title="filter" style="width:30px;height:30px;font-size:14px" hidden>🗂</button>
+            <button id="batchToggleBtn" class="icon-square" title="batch select" style="width:30px;height:30px;font-size:14px">☑</button>
+            <button id="newSessionBtn" class="primary" style="flex:none;padding:4px 10px"></button>
+          </div>
+        </div>
+        <div class="search-bar" id="searchBar" hidden>
+          <div class="search-input-wrap">
+            <input id="sessionSearch" spellcheck="false" />
+            <button id="sessionSearchClear" class="search-clear" type="button" aria-label="clear search" hidden>x</button>
+          </div>
+          <label class="adv-toggle"><input type="checkbox" id="advSearch" /> <span id="advSearchLabel"></span></label>
+        </div>
+        <div class="fav-dir-filter" id="favDirFilter" hidden></div>
+        <div class="session-tabs" id="sessionTabs">
+          <button class="s-tab active" data-tab="active" id="tabActiveBtn"></button>
+          <button class="s-tab" data-tab="testing" id="tabTestingBtn"></button>
+          <button class="s-tab" data-tab="completed" id="tabCompletedBtn"></button>
+          <button class="s-tab" data-tab="all" id="tabAllBtn"></button>
+        </div>
+        <!-- 运行状态筛选（与上方状态筛选叠加）：所有(默认) 与 执行中/刚执行完 互斥，后两者可同时勾选 -->
+        <div class="session-tabs run-tabs" id="sessionRunTabs">
+          <button class="r-tab active" data-runtab="all" id="runTabAllBtn"></button>
+          <button class="r-tab" data-runtab="running" id="runTabRunningBtn"></button>
+          <button class="r-tab" data-runtab="justFinished" id="runTabJustFinishedBtn"></button>
+        </div>
+      </div>
+      <!-- 批量选择工具条（进入批量模式时显示） -->
+      <div class="batch-bar" id="batchBar" hidden>
+        <label class="batch-all"><input type="checkbox" id="batchAllChk" /> <span id="batchAllLabel"></span></label>
+        <span class="batch-count" id="batchCount"></span>
+        <span class="spacer"></span>
+        <div class="batch-actions">
+          <button id="batchActBtn" class="sm primary"></button>
+          <div class="batch-menu" id="batchMenu" hidden>
+            <button class="batch-mi" id="batchMarkCompleted"></button>
+            <button class="batch-mi" id="batchMarkTesting"></button>
+            <button class="batch-mi" id="batchMarkActive"></button>
+            <button class="batch-mi danger" id="batchDeleteBtn"></button>
+          </div>
+        </div>
+        <button id="batchCancelBtn" class="sm"></button>
+      </div>
+      <div class="session-list" id="sessionList"></div>
+      <div class="session-pager" id="sessionPager" hidden></div>
+    </aside>
+
+    <!-- 会话项右键菜单 / 长按菜单：标记状态（活跃/待测试/已完成，任意互切）/ 置顶 -->
+    <div id="sessionCtxMenu" class="ctx-menu" hidden>
+      <button class="ctx-item ctx-status" data-status="active" id="ctxMarkActive"></button>
+      <button class="ctx-item ctx-status" data-status="testing" id="ctxMarkTesting"></button>
+      <button class="ctx-item ctx-status" data-status="completed" id="ctxMarkCompleted"></button>
+      <div class="ctx-sep"></div>
+      <button id="ctxRenameTitle" class="ctx-item"></button>
+      <button id="ctxToggleFavorite" class="ctx-item"></button>
+      <button id="ctxTogglePinned" class="ctx-item"></button>
+      <div class="ctx-sep"></div>
+      <button id="ctxTraceStats" class="ctx-item"></button>
+    </div>
+
+    <!-- 主区 -->
+    <main class="main">
+      <div class="main-header">
+        <span class="workdir-bar" id="workdirBar" hidden></span>
+        <button id="drawerBtn" class="icon-btn drawer-btn" aria-label="menu">☰</button>
+        <span class="title" id="sessionTitle">—</span>
+        <span class="badge paused" id="pausedBadge" style="display:none"></span>
+        <!-- 引擎：草稿(未开始)可选，开始后锁定为徽章 -->
+        <select id="engineSelect" class="engine-select" style="display:none"></select>
+        <span class="engine-badge" id="engineBadge" style="display:none"></span>
+        <span class="spacer"></span>
+        <button id="aiCollapseBtn" class="icon-btn ai-collapse-btn" aria-label="collapse AI messages"></button>
+        <button id="filesBtn" class="icon-btn files-btn" aria-label="files" title="files">📁</button>
+        <button id="traceBtn" class="icon-btn trace-hdr-btn" aria-label="trace" title="全过程" style="display:none">🕒</button>
+        <button id="procBtn" class="icon-btn proc-btn" aria-label="process">⚙</button>
+        <button id="logoutBtn" style="flex:none;padding:4px 10px;font-size:12px"></button>
+      </div>
+
+      <div class="content">
+        <!-- 消息列（含右下角错误悬浮圆圈；包一层是为了让圆圈相对「会话区」定位而不跟着消息滚动） -->
+        <div class="msg-wrap">
+          <div class="messages" id="messages"></div>
+          <!-- 出错时只在右下角亮一个小圆圈，点开才展开详情，不再整块占用正文 -->
+          <div class="notice-dock" id="noticeDock" hidden>
+            <div class="notice-pop" id="noticePop" hidden></div>
+            <button type="button" class="notice-fab" id="noticeFab" aria-expanded="false">
+              <span class="nf-icon">!</span>
+              <span class="nf-count" id="noticeCount"></span>
+            </button>
+          </div>
+        </div>
+        <section class="process-panel">
+          <header>
+            <span id="processLabel"></span>
+            <span style="display:flex;gap:6px">
+              <button id="clearProcessBtn" style="flex:none;padding:2px 8px;font-size:11px"></button>
+              <button id="closeProcessBtn" class="proc-close" style="flex:none;padding:2px 9px;font-size:13px">✕</button>
+            </span>
+          </header>
+          <div class="process-log" id="processLog"></div>
+        </section>
+      </div>
+
+      <div class="composer" id="composer">
+        <div class="drop-hint" id="dropHint" hidden></div>
+        <div class="queue-bar" id="queueBar">
+          <button id="addTasksBtn" class="sm">＋ <span id="addTasksLabel"></span></button>
+          <button id="queueToggle" class="queue-toggle"></button>
+        </div>
+        <div class="queue" id="queue"></div>
+        <!-- 快捷前缀标签（单选，可重复点击取消，Ctrl+1/2/3 热键，按会话持久化） -->
+        <div class="quick-bar" id="quickBar"></div>
+        <!-- 暂停整条序列时的说明：此处发送=补充任务，越过冻结队列立即执行 -->
+        <div class="pause-hint" id="pauseHint" style="display:none"></div>
+        <div class="composer-input">
+          <div class="slash-menu" id="slashMenu" hidden></div>
+          <textarea id="taskInput" rows="2"></textarea>
+        </div>
+        <div class="controls">
+          <button id="uploadBtn" class="sm" title="">📎</button>
+          <input type="file" id="fileInput" multiple hidden />
+          <button id="shotBtn" class="sm" title="">📷</button>
+          <button id="stopBtn" class="warn sm"></button>
+          <button id="pauseBtn" class="danger sm" style="display:none"></button>
+          <span class="spacer"></span>
+          <!-- 会话工具命令菜单（/usage /compact …），紧贴发送按钮左侧 -->
+          <div class="cmd-wrap">
+            <button id="cmdMenuBtn" class="sm cmd-btn" title="" aria-haspopup="true">/</button>
+            <div class="cmd-menu" id="cmdMenu" hidden></div>
+          </div>
+          <button id="addTaskBtn" class="primary sm"></button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 截屏预览（框选裁剪 → 确定上传） -->
+  <div class="shot-overlay" id="shotOverlay" hidden>
+    <div class="shot-modal">
+      <div class="shot-head" id="shotHead"></div>
+      <div class="shot-tip" id="shotTip"></div>
+      <div class="shot-stage" id="shotStage">
+        <img class="shot-img" id="shotImg" alt="screenshot" draggable="false" />
+        <div class="shot-sel" id="shotSel" hidden></div>
+      </div>
+      <div class="shot-actions">
+        <button class="sm" id="shotCancel"></button>
+        <button class="primary sm" id="shotConfirm"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 文件管理器（右侧抽屉：子目录浏览 / 面包屑 / 编辑 / 搜索 / 重点文件夹） -->
+  <div class="files-overlay" id="filesOverlay" hidden>
+    <div class="files-drawer">
+      <div class="files-head">
+        <span class="files-title" id="filesPanelTitle">📁</span>
+        <span class="spacer"></span>
+        <button class="fm-icon" id="fmSearchBtn" title="search">🔍</button>
+        <button class="fm-icon" id="fmRefreshBtn" title="refresh">⟳</button>
+        <button class="files-x" id="filesClose">✕</button>
+      </div>
+      <div class="fm-search" id="fmSearch" hidden>
+        <div class="search-input-wrap">
+          <input id="fmSearchInput" spellcheck="false" />
+          <button id="fmSearchClear" class="search-clear" type="button" aria-label="clear search" hidden>x</button>
+        </div>
+      </div>
+      <div class="fm-favs" id="fmFavs"></div>
+      <div class="fm-crumbs" id="fmCrumbs"></div>
+      <div class="files-list" id="filesList"></div>
+    </div>
+  </div>
+
+  <!-- 全过程（Trace）：AI 干活的完整时间线 + 耗时统计（看"慢在哪"） -->
+  <div class="tr-overlay" id="trOverlay" hidden>
+    <div class="tr-drawer">
+      <div class="files-head">
+        <span class="files-title">🕒 全过程</span>
+        <button class="fm-icon" id="trRawBtn" title="连元帧一起显示">raw</button>
+        <button class="fm-icon" id="trRefreshBtn" title="refresh">⟳</button>
+        <button class="files-x" id="trClose">✕</button>
+      </div>
+      <div class="tr-stats" id="trStats"></div>
+      <div class="tr-filters" id="trFilters"></div>
+      <div class="tr-list" id="trList"></div>
+    </div>
+  </div>
+
+  <!-- 会话统计详情（右键会话 → 统计详情）：时间花在哪的细分分析 -->
+  <div class="st-overlay" id="statsOverlay" hidden>
+    <div class="st-drawer">
+      <div class="files-head">
+        <span class="files-title" id="statsTitle">📊 统计详情</span>
+        <button class="fm-icon" id="statsRefreshBtn" title="refresh">⟳</button>
+        <button class="files-x" id="statsClose">✕</button>
+      </div>
+      <div class="st-body" id="statsBody"></div>
+    </div>
+  </div>
+
+  <!-- 文本编辑器（覆盖层，移动端友好） -->
+  <div class="ed-overlay" id="edOverlay" hidden>
+    <div class="ed-drawer">
+      <div class="ed-head">
+        <span class="ed-title" id="edTitle"></span>
+        <span class="ed-dirty" id="edDirty" hidden>●</span>
+        <span class="spacer"></span>
+        <button id="edSave" class="primary sm"></button>
+        <button class="ed-x" id="edClose">✕</button>
+      </div>
+      <textarea class="ed-area" id="edArea" spellcheck="false" wrap="off"></textarea>
+      <div class="ed-foot" id="edFoot"></div>
+    </div>
+  </div>
+
+  <!-- 文件预览抽屉（与供应链助手一致：表格/MD/文本/PDF/图片） -->
+  <div class="fp-overlay" id="fpOverlay" hidden>
+    <div class="fp-drawer">
+      <div class="fp-head">
+        <span class="fp-title" id="fpTitle"></span>
+        <a class="fp-dl" id="fpDownload" href="#"></a>
+        <button class="fp-x" id="fpClose">✕</button>
+      </div>
+      <div class="fp-tabs" id="fpTabs" hidden></div>
+      <div class="fp-body" id="fpBody"></div>
+    </div>
+  </div>
+
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/echarts.min.js"></script>
+  <!-- CodeMirror 5：代码编辑/预览语法高亮（本地 vendor，离线可用） -->
+  <script src="vendor/cm/codemirror.min.js"></script>
+  <script src="vendor/cm/addon/edit/matchbrackets.min.js"></script>
+  <script src="vendor/cm/addon/edit/closebrackets.min.js"></script>
+  <script src="vendor/cm/addon/selection/active-line.min.js"></script>
+  <script src="vendor/cm/addon/mode/simple.min.js"></script>
+  <script src="vendor/cm/mode/xml/xml.min.js"></script>
+  <script src="vendor/cm/mode/javascript/javascript.min.js"></script>
+  <script src="vendor/cm/mode/css/css.min.js"></script>
+  <script src="vendor/cm/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="vendor/cm/mode/clike/clike.min.js"></script>
+  <script src="vendor/cm/mode/php/php.min.js"></script>
+  <script src="vendor/cm/mode/python/python.min.js"></script>
+  <script src="vendor/cm/mode/ruby/ruby.min.js"></script>
+  <script src="vendor/cm/mode/go/go.min.js"></script>
+  <script src="vendor/cm/mode/rust/rust.min.js"></script>
+  <script src="vendor/cm/mode/shell/shell.min.js"></script>
+  <script src="vendor/cm/mode/sql/sql.min.js"></script>
+  <script src="vendor/cm/mode/yaml/yaml.min.js"></script>
+  <script src="vendor/cm/mode/markdown/markdown.min.js"></script>
+  <script src="vendor/cm/mode/sass/sass.min.js"></script>
+  <script src="vendor/cm/mode/dart/dart.min.js"></script>
+  <script src="vendor/cm/mode/swift/swift.min.js"></script>
+  <script src="trans.js?v=20260818a"></script>
+  <script src="workspace.js?v=20260801i"></script>
+  <script src="rootwizard.js?v=20260804a"></script>
+  <script src="health.js?v=20260818a"></script>
+  <script src="onboard.js?v=20260817f"></script>
+  <script src="galaxy.js?v=20260801p"></script>
+  <script src="cyber.js?v=20260801z1"></script>
+  <script src="rain.js?v=20260801i"></script>
+  <script src="sea.js?v=20260802c"></script>
+  <script src="aurora.js?v=20260801i"></script>
+  <script src="winter.js?v=20260801x"></script>
+  <script src="ocean.js?v=20260801i"></script>
+  <script src="bamboo.js?v=20260801j"></script>
+  <script src="cat.js?v=20260801q"></script>
+  <script src="rabbit.js?v=20260801z"></script>
+  <script src="mecha.js?v=20260802a"></script>
+  <script src="app.js?v=20260819c"></script>
+</body>
+</html>
