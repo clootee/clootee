@@ -893,7 +893,6 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   line-height: 1.5;
 }
 .fav-dir-filter .fdf-clear:hover { color: var(--red); border-color: var(--red); }
-.fav-dir-filter .fdf-empty { font-size: 11px; color: var(--muted); }
 
 .default-favorite-badge {
   display: inline-flex;

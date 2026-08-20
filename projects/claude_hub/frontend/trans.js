@@ -152,7 +152,6 @@ const DICT = {
   favoriteRootRequired: { en: 'Choose a workspace before starting this favorite session.', zh: '请先选择工作目录，再开始这个收藏会话。' },
   noFavoriteSessions: { en: 'No favorite sessions', zh: '暂无收藏会话' },
   favoriteTag: { en: 'favorite', zh: '收藏' },
-  filterByDir: { en: 'Filter by workspace', zh: '按工作目录筛选' },
   clearFilter: { en: 'Clear filter', zh: '清除筛选' },
   pinLimitReached: { en: 'Pin limit reached (3) — oldest pin will be replaced', zh: '置顶已达上限(3个)，将替换最早的置顶' },
   pinnedTag: { en: 'pinned', zh: '置顶' },

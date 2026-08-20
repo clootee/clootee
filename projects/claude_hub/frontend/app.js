@@ -1246,7 +1246,6 @@ function onAdvToggle() {
 
 async function toggleFavorites() {
   setFavoritesOnly(!State.favoritesOnly);
-  FavDir.open = false;
   setFavDir('');
   if (State.favoritesOnly) {
     State.sessions = await loadFavoriteSessions();
@@ -1279,18 +1278,13 @@ function refreshNewSessionButton() {
 }
 
 // ── 收藏夹目录筛选（纯前端，不走后端） ──
-const FavDir = { open: false, rootId: sessionStorage.getItem('favDirRootId') || '' };
+const FavDir = { rootId: sessionStorage.getItem('favDirRootId') || '' };
 
 // 目录筛选同样持久化：刷新后仍停在原来那个目录下
 function setFavDir(rootId) {
   FavDir.rootId = rootId || '';
   if (FavDir.rootId) sessionStorage.setItem('favDirRootId', FavDir.rootId);
   else sessionStorage.removeItem('favDirRootId');
-}
-
-function toggleFavDirFilter() {
-  FavDir.open = !FavDir.open;
-  renderFavDirFilter();
 }
 
 // 收藏会话涉及的根目录（去重 + 计数），按会话数倒序
@@ -1326,23 +1320,14 @@ function clearFavDir() {
   renderSessions();
 }
 
+// 收藏夹里目录标签行常驻显示（不折叠、无开关）：进来就能看到所有目录
 function renderFavDirFilter() {
-  const btn = $('favDirFilterBtn');
   const box = $('favDirFilter');
-  if (!btn || !box) return;
-  const on = State.favoritesOnly && !isWorkspace();
-  btn.hidden = !on;
-  if (!on) {
-    box.hidden = true;
-    return;
-  }
-  btn.title = T('filterByDir');
-  btn.classList.toggle('active', FavDir.open || !!FavDir.rootId);
-  box.hidden = !FavDir.open;
-  if (!FavDir.open) return;
-  const opts = favDirOptions();
+  if (!box) return;
+  const opts = State.favoritesOnly && !isWorkspace() ? favDirOptions() : [];
+  box.hidden = opts.length === 0; // 不在收藏夹 / 收藏里没有带目录的会话时整行收掉
   if (opts.length === 0) {
-    box.innerHTML = `<span class="fdf-empty">${escapeHtml(T('noFavoriteSessions'))}</span>`;
+    box.innerHTML = '';
     return;
   }
   box.innerHTML = opts
@@ -4842,7 +4827,6 @@ function bind() {
   $('mdlCodexListBtn').addEventListener('click', () => detectAvailableModels('codex'));
   $('pwChangeBtn').addEventListener('click', changePassword);
   $('searchToggleBtn').addEventListener('click', toggleSearch);
-  $('favDirFilterBtn').addEventListener('click', toggleFavDirFilter);
   $('favoritesToggleBtn').addEventListener('click', toggleFavorites);
   $('sessionSearch').addEventListener('input', onSearchInput);
   $('sessionSearchClear').addEventListener('click', clearSessionSearch);
