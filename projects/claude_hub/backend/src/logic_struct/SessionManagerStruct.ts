@@ -95,6 +95,15 @@ export class SessionManagerStruct {
     });
   }
 
+  // 会话在「列表」里对外使用的 id：运行期会话仍以草稿键存放时沿用草稿 id，否则用自然 id。
+  // 必须与 listSessions 的 useLiveId 完全同一口径 —— TaskQueue 广播的 task 事件一律带运行期 id
+  // （首跑起来的会话就是草稿 id），前端按「行 id」记账"执行中"；两边口径不一致时结束事件落在
+  // 另一个 id 上，侧栏的"执行中"就再也清不掉（收藏夹里按自然 id 出行，正是踩了这个坑）。
+  private static _listId(s: Session): string {
+    const live = this._get(s.id) || this._getLiveByNaturalId(s.id);
+    return live && live.id.includes(':draft-') ? live.id : s.id;
+  }
+
   // 会话 meta 的「规范键」：拿到引擎 uuid 后一律用自然 id（`rootId:uuid`），尚是草稿才用草稿 id。
   // 同一个会话在首跑前后有两个可用 id（草稿 id 与自然 id，两者都能 getSession 到），
   // 若标注按调用方传来的 id 直接记账，就会给同一会话写出两条 meta —— 收藏夹遍历 meta 键，
@@ -119,17 +128,20 @@ export class SessionManagerStruct {
       .sort((a, b) => Number(a.includes(':draft-')) - Number(b.includes(':draft-')));
     const out: Session[] = [];
     const seen = new Set<string>();
+    const favAt = new Map<string, number>(); // 行 id → 收藏时间（行 id 可能被改写成草稿 id，不能再按 meta[s.id] 查）
     for (const id of ids) {
       const s = this._getSessionSafe(id); // 会话已删/根目录不可达 → 跳过这条陈旧收藏
       if (!s) continue;
       const key = this._canonicalKey(s);
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push(s);
+      const row = { ...s, id: this._listId(s) };
+      favAt.set(row.id, meta[id]?.favoriteAt || row.updatedAt);
+      out.push(row);
     }
     return out.sort((a, b) => {
       if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-      return (meta[b.id]?.favoriteAt || b.updatedAt) - (meta[a.id]?.favoriteAt || a.updatedAt);
+      return (favAt.get(b.id) || b.updatedAt) - (favAt.get(a.id) || a.updatedAt);
     });
   }
 
