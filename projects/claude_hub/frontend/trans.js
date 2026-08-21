@@ -101,6 +101,8 @@ const DICT = {
   renameSessionPrompt: { en: 'Edit session title. Leave empty to use the automatic title.', zh: '修改会话标题。留空则恢复自动标题。' },
   pinSession: { en: 'Pin', zh: '置顶' },
   unpinSession: { en: 'Unpin', zh: '取消置顶' },
+  // 右键菜单：在服务器本机的文件管理器里打开该会话的工作目录（仅 Windows 本机运行时可见）
+  ctxOpenWorkdir: { en: '📂 Open working folder', zh: '📂 打开工作目录' },
   // ── 会话统计详情（右键 → 统计详情）：时间花在哪 ──
   ctxTraceStats: { en: '📊 Timing stats', zh: '📊 统计详情' },
   statsTitle: { en: 'Timing stats', zh: '统计详情' },

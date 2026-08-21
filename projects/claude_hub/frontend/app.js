@@ -174,6 +174,7 @@ function applyText() {
   $('ctxMarkCompleted').textContent = T('markCompleted');
   $('ctxRenameTitle').textContent = T('renameSession');
   $('ctxTraceStats').textContent = T('ctxTraceStats');
+  $('ctxOpenWorkdir').textContent = T('ctxOpenWorkdir');
   $('ctxToggleFavorite').textContent = T('favoriteSession');
   $('processLabel').textContent = T('process');
   $('clearProcessBtn').textContent = T('clearProcess');
@@ -1552,11 +1553,13 @@ function openSessionCtxMenu(session, x, y) {
   });
   $('ctxToggleFavorite').textContent = session.favorite ? T('unfavoriteSession') : T('favoriteSession');
   $('ctxTogglePinned').textContent = session.pinned ? T('unpinSession') : T('pinSession');
+  // 「打开工作目录」是服务器本机行为：只有本机跑在 Windows 上、且这个会话确实有根目录时才给
+  $('ctxOpenWorkdir').hidden = State.settings.platform !== 'win32' || !session.rootId;
   menu.hidden = false;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const mw = 180;
-  const mh = 240;
+  const mh = 280;
   menu.style.left = Math.min(x, vw - mw - 8) + 'px';
   menu.style.top = Math.min(y, vh - mh - 8) + 'px';
 }
@@ -1601,6 +1604,18 @@ async function ctxSetStatus(status) {
   closeSessionCtxMenu();
   await api('/api/session/status', { id: s.id, status });
   await loadSessions();
+}
+// 在服务器本机的文件管理器中打开该会话的工作目录（Windows 上就是资源管理器）
+async function ctxOpenWorkdir() {
+  if (!ctxSession) return;
+  const rootId = ctxSession.rootId;
+  closeSessionCtxMenu();
+  if (!rootId) return;
+  try {
+    await api('/api/root/open', { rootId });
+  } catch (e) {
+    alert(e.message || 'Open folder failed');
+  }
 }
 function ctxOpenStats() {
   if (!ctxSession) return;
@@ -4851,6 +4866,7 @@ function bind() {
   $('ctxToggleFavorite').addEventListener('click', ctxToggleFavorite);
   $('ctxTogglePinned').addEventListener('click', ctxTogglePinned);
   $('ctxTraceStats').addEventListener('click', ctxOpenStats);
+  $('ctxOpenWorkdir').addEventListener('click', ctxOpenWorkdir);
   $('statsClose').addEventListener('click', closeSessionStats);
   $('statsRefreshBtn').addEventListener('click', loadSessionStats);
   document.addEventListener('click', (e) => {
