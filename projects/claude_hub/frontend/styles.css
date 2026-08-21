@@ -851,6 +851,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  padding-top: 3px; /* 给标签右上角那排小圆点留出溢出空间 */
   margin-bottom: 6px;
 }
 .fav-dir-filter .fdf-tag {
@@ -867,8 +868,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   font-size: 11px;
   line-height: 1.5;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  position: relative; /* 右上角小圆点的定位基准；这里不能 overflow:hidden，否则点被裁掉 */
 }
 .fav-dir-filter .fdf-tag i {
   font-style: normal;
@@ -893,6 +893,25 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   line-height: 1.5;
 }
 .fav-dir-filter .fdf-clear:hover { color: var(--red); border-color: var(--red); }
+/* 目录名过长时省略号（原来靠按钮自身 overflow，现在挪到内层，避免裁掉圆点） */
+.fav-dir-filter .fdf-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* 右上角状态点：执行中=accent 闪烁，刚执行完=蓝色静态；一个会话一个点 */
+.fav-dir-filter .fdf-dots {
+  position: absolute;
+  top: -3px;
+  right: -2px;
+  display: flex;
+  gap: 2px;
+  pointer-events: none;
+}
+.fav-dir-filter .fdf-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--panel); /* 描一圈底色，压在标签边框上也看得清 */
+}
+.fav-dir-filter .fdf-dot.run { background: var(--accent); animation: pulse 1s infinite; }
+.fav-dir-filter .fdf-dot.fin { background: #38bdf8; }
 
 .default-favorite-badge {
   display: inline-flex;

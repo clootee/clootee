@@ -1284,12 +1284,16 @@ function setFavDir(rootId) {
 }
 
 // 收藏会话涉及的根目录（去重 + 计数），按会话数倒序
+// 顺带按目录累计「执行中」「刚执行完」的会话数：标签右上角一个这种会话画一个点
 function favDirOptions() {
   const map = new Map();
   State.sessions.forEach((s) => {
     if (!s.rootId) return;
-    const cur = map.get(s.rootId) || { rootId: s.rootId, name: rootName(s.rootId) || s.rootId, count: 0 };
+    const cur = map.get(s.rootId) || { rootId: s.rootId, name: rootName(s.rootId) || s.rootId, count: 0, running: 0, justFinished: 0 };
     cur.count += 1;
+    // 与会话列表里的标识同口径：执行中优先，停了且用户还没点开看过才算「刚执行完」
+    if (State.running.has(s.id)) cur.running += 1;
+    else if (State.justFinished.has(s.id)) cur.justFinished += 1;
     map.set(s.rootId, cur);
   });
   return [...map.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
@@ -1322,6 +1326,27 @@ function clearFavDir() {
   renderSessions();
 }
 
+const FDF_DOT_MAX = 6; // 单个目录最多画几个点：再多画不下，真实数量在 title 里给
+
+// 目录标签右上角的小圆点：执行中=闪烁，刚执行完=蓝色静态；其余会话不画点
+function favDirDots(o) {
+  const run = Math.min(o.running, FDF_DOT_MAX);
+  const fin = Math.min(o.justFinished, FDF_DOT_MAX);
+  if (!run && !fin) return '';
+  return '<span class="fdf-dots">'
+    + '<span class="fdf-dot run"></span>'.repeat(run)
+    + '<span class="fdf-dot fin"></span>'.repeat(fin)
+    + '</span>';
+}
+
+// 悬浮提示：目录名 + 两类会话的准确条数（点数被 FDF_DOT_MAX 截断时这里仍是真实值）
+function favDirTitle(o) {
+  const parts = [o.name];
+  if (o.running) parts.push(`${T('runningTag')} ${o.running}`);
+  if (o.justFinished) parts.push(`${T('justFinishedTag')} ${o.justFinished}`);
+  return parts.join(' · ');
+}
+
 // 收藏夹里目录标签行常驻显示（不折叠、无开关）：进来就能看到所有目录
 function renderFavDirFilter() {
   const box = $('favDirFilter');
@@ -1333,7 +1358,7 @@ function renderFavDirFilter() {
     return;
   }
   box.innerHTML = opts
-    .map((o) => `<button class="fdf-tag${o.rootId === FavDir.rootId ? ' active' : ''}" data-fdf="${escapeHtml(o.rootId)}" title="${escapeHtml(o.name)}">${escapeHtml(o.name)}<i>${o.count}</i></button>`)
+    .map((o) => `<button class="fdf-tag${o.rootId === FavDir.rootId ? ' active' : ''}" data-fdf="${escapeHtml(o.rootId)}" title="${escapeHtml(favDirTitle(o))}"><span class="fdf-nm">${escapeHtml(o.name)}</span><i>${o.count}</i>${favDirDots(o)}</button>`)
     .join('')
     + (FavDir.rootId ? `<button class="fdf-clear" id="fdfClear" title="${escapeHtml(T('clearFilter'))}">✕</button>` : '');
   box.querySelectorAll('.fdf-tag').forEach((el) => {
