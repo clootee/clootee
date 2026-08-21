@@ -4921,9 +4921,7 @@ function bind() {
   $('qmClose').addEventListener('click', closeQueueModal);
   $('qmSelectAll').addEventListener('change', toggleSelectAll);
   $('qmBatchDelete').addEventListener('click', batchDeleteTasks);
-  $('queueModal').addEventListener('click', (e) => {
-    if (e.target.id === 'queueModal') closeQueueModal();
-  });
+  // 任务弹窗刻意不做「点背景关闭」：里面有勾选/编辑态，误点空白关掉很烦，只允许 ✕ 或 Esc
   $('clearProcessBtn').addEventListener('click', () => ($('processLog').innerHTML = ''));
   // 文件管理器 + 预览抽屉 + 编辑器
   $('filesBtn').addEventListener('click', toggleFilesPanel);
@@ -4954,7 +4952,8 @@ function bind() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!$('shotOverlay').hidden) closeShot();
+    if (!$('queueModal').hidden) closeQueueModal();
+    else if (!$('shotOverlay').hidden) closeShot();
     else if (!$('trOverlay').hidden) closeTrace();
     else if (!$('edOverlay').hidden) closeEditor();
     else if (!$('fpOverlay').hidden) closeFilePreview();
