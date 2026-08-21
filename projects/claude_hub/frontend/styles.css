@@ -1277,13 +1277,20 @@ body.light .session-item .just-finished-tag { background: #ffedd5; color: #c2410
   gap: 12px;
   flex-wrap: wrap;
 }
+.workdir-row { flex: 1 0 100%; min-width: 0; display: flex; }
+/* 工作目录做成一枚有边框的标签：正文色 + panel2 底 + 明显边框，别再糊在标题栏里看不清 */
 .workdir-bar {
-  flex: 1 0 100%;
+  max-width: 100%;
   min-width: 0;
-  color: var(--muted);
+  padding: 2px 9px;
+  border: 1px solid var(--gray);
+  border-radius: 6px;
+  background: var(--panel2);
+  color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
-  line-height: 1.35;
+  font-weight: 500;
+  line-height: 1.6;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1926,7 +1933,7 @@ button.sm { padding: 6px 12px; font-size: 13px; border-radius: 7px; }
 
 /* ── 移动端适配：抽屉式侧栏 + ChatGPT 风格对话 ── */
 @media (max-width: 860px) {
-  .workdir-bar { display: none; }
+  .workdir-row { display: none; }
   .icon-btn { display: inline-flex; align-items: center; }
 
   /* 侧栏变为左侧抽屉，默认滑出屏幕 */

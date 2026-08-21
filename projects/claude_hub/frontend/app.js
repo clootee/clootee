@@ -515,17 +515,12 @@ function guidePickRoot() {
 
 function renderWorkdirBar() {
   const el = $('workdirBar');
+  const row = $('workdirRow');
   if (!el) return;
-  if (State.favoritesOnly) {
-    el.textContent = '';
-    el.title = '';
-    el.hidden = true;
-    return;
-  }
-  const root = currentRoot();
+  const root = State.favoritesOnly ? null : currentRoot();
   el.textContent = root ? root.path : '';
   el.title = root ? root.path : '';
-  el.hidden = !root;
+  if (row) row.hidden = !root; // 整行（含边框）随目录有无一起显隐
 }
 
 // 侧栏渲染根目录的备注与链接（链接 _blank 打开）。编辑入口集成在此处的 ✎
@@ -1299,6 +1294,12 @@ function favDirOptions() {
   return [...map.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
+// 收藏夹里当前筛选中的目录（校验它还活着）：新建会话时直接拿来当工作目录
+function favFilterRootId() {
+  if (!FavDir.rootId) return '';
+  return State.roots.some((r) => r.id === FavDir.rootId) ? FavDir.rootId : '';
+}
+
 function pickFavDir(rootId) {
   setFavDir(FavDir.rootId === rootId ? '' : rootId);
   renderSessions();
@@ -1644,7 +1645,17 @@ async function ctxToggleFavorite() {
 async function newSession() {
   resetSessionSearch(false);
   if (State.favoritesOnly) {
+    // 收藏夹里已按目录筛选 → 新会话直接用该目录，不再让用户重选；没筛选才留空等用户选
+    const favRoot = favFilterRootId();
+    const cur = State.session;
+    // 与主列表同规则：当前就是该目录下一个空的新会话时直接复用，不重复建
+    if (favRoot && cur && cur.rootId === favRoot && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
+      selectSession(cur.id);
+      $('taskInput').focus();
+      return;
+    }
     createFavoriteDraftSession();
+    if (favRoot) await bindFavoriteDraftRoot(favRoot);
     return;
   }
   // 工作台模式：先选择工作目录（近期用过的 / 手动添加，可创建不存在的目录）
@@ -3720,6 +3731,8 @@ async function ensureSession() {
   // 收藏夹视图：创建一个待绑定根目录的草稿会话（后续仍需绑定根目录才能发任务）。
   if (State.favoritesOnly) {
     createFavoriteDraftSession();
+    const favRoot = favFilterRootId();
+    if (favRoot) await bindFavoriteDraftRoot(favRoot); // 目录筛选中 → 直接绑定，省掉「请先选目录」
     return !!State.sessionId;
   }
   // 工作台模式：必须先选工作目录，无法静默创建，走原有目录选择流程。
