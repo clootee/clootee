@@ -5227,6 +5227,7 @@ function paneById(id) {
 }
 
 function openSettings() {
+  closeDrawer(); // 移动端：打开设置前先收起左侧抽屉，避免遮挡
   renderSettingsNav();
   $('settingsOverlay').hidden = false;
 }
