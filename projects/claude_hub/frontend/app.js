@@ -1518,6 +1518,7 @@ function renderSessions() {
       div.addEventListener('click', (e) => {
         if (e.target.dataset.del || e.target.classList.contains('copy-id')) return;
         selectSession(s.id);
+        closeDrawer(); // 移动端：显式点开某条会话（右侧要展示内容）才收抽屉
       });
     }
     const cidBtn = div.querySelector('.copy-id');
@@ -1768,7 +1769,6 @@ async function selectSession(id) {
   renderQuick(); // 快捷前缀按会话持久化，切换会话即刷新选中态
   State.aiExpandedGroups.clear();
   State.noticeOpen = false; // 换会话 → 右下角错误浮层先收起，别把上一个会话的展开态带过来
-  if (id) closeDrawer(); // 移动端：选中会话后收起抽屉
   if (!id) {
     State.session = null;
     $('sessionTitle').textContent = '—';
