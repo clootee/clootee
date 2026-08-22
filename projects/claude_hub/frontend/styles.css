@@ -1994,7 +1994,7 @@ button.sm { padding: 6px 12px; font-size: 13px; border-radius: 7px; }
   .main { width: 100%; height: 100vh; height: 100dvh; }
   .main-header { padding: 10px 12px; flex-wrap: nowrap; gap: 8px; }
   .main-header .title { font-size: 14px; flex: 1 1 0; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .main-header .icon-btn, .main-header #logoutBtn { flex: 0 0 auto; }
+  .main-header .icon-btn { flex: 0 0 auto; }
 
   /* 对话区：消息占满，输入框沉底（类似 ChatGPT） */
   .content { flex-direction: column; min-height: 0; }
@@ -2310,6 +2310,17 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
   color: var(--accent, #6ea8fe); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .sx-navi-arrow { flex: none; font-size: 20px; color: var(--muted, #8b8f96); }
+
+/* 退出登录：放在设置底部，与板块列表用分隔线隔开 */
+.sx-logout-row { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border, #333); }
+.sx-logout-btn {
+  display: block; width: 100%; padding: 11px 13px; text-align: center; cursor: pointer;
+  font-size: 13.5px; font-weight: 600; border-radius: 10px;
+  background: var(--panel2, rgba(255, 255, 255, .03)); color: var(--danger, #e5534b);
+  border: 1px solid var(--border, #333);
+  transition: border-color .15s, background .15s;
+}
+.sx-logout-btn:hover { background: var(--hover, rgba(255, 255, 255, .06)); border-color: var(--danger, #e5534b); }
 
 /* ── 设置子面板：一次只显示一个 pane，头部「‹ 返回」 ── */
 .sx-back {
