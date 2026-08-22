@@ -1684,6 +1684,7 @@ async function ctxToggleFavorite() {
 }
 
 async function newSession() {
+  closeDrawer(); // 移动端：新建会话（右侧要开新对话/弹目录选择）收起抽屉
   resetSessionSearch(false);
   if (State.favoritesOnly) {
     // 收藏夹里已按目录筛选 → 新会话直接用该目录，不再让用户重选；没筛选才留空等用户选
