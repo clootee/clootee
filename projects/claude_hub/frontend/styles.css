@@ -1674,9 +1674,15 @@ body.show-process .process-panel { display: flex; }
 .qm-head .dot { width: 8px; height: 8px; border-radius: 50%; }
 .qm-body { min-width: 0; }
 .qm-text { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-.qm-edit { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; resize: vertical;
-  background: var(--bg); color: var(--text); border: 1px solid var(--accent); border-radius: 8px; padding: 6px 8px; }
-.qm-editbar { display: flex; gap: 6px; margin-top: 6px; }
+.qm-edit { width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; line-height: 1.6; resize: vertical;
+  min-height: 120px;
+  background: var(--bg); color: var(--text); border: 1.5px solid var(--accent); border-radius: 10px; padding: 12px 14px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.08); transition: box-shadow .15s ease, border-color .15s ease; }
+.qm-edit:focus { outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.qm-edit::placeholder { color: var(--muted); }
+.qm-editbar { display: flex; gap: 8px; margin-top: 8px; }
+.qm-editbar .sm { padding: 7px 16px; font-size: 13px; }
 .qm-acts { display: flex; gap: 4px; align-items: center; }
 .qm-act {
   flex: none; width: 28px; height: 28px; border-radius: 7px; border: 1px solid var(--border);
@@ -1690,6 +1696,11 @@ body.show-process .process-panel { display: flex; }
   .qm-row { grid-template-columns: auto 1fr; }
   .qm-head { grid-column: 2; }
   .qm-acts { grid-column: 1 / -1; justify-content: flex-end; }
+  /* 编辑态：正文区横跨整行，输入框撑满、加大更好改 */
+  .qm-row.editing .qm-body { grid-column: 1 / -1; }
+  .qm-row.editing .qm-edit { font-size: 16px; min-height: 180px; padding: 14px 16px; border-radius: 12px; }
+  .qm-row.editing .qm-editbar { margin-top: 10px; }
+  .qm-row.editing .qm-editbar .sm { flex: 1; padding: 11px 16px; font-size: 15px; }
 }
 .done-toggle {
   font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer;

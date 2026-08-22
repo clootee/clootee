@@ -2769,7 +2769,7 @@ function renderQueueModal() {
 
 function qmRow(t, i) {
   const row = document.createElement('div');
-  row.className = 'qm-row' + (t.held ? ' held' : '');
+  row.className = 'qm-row' + (t.held ? ' held' : '') + (QueueModal.editing === t.id ? ' editing' : '');
   row.dataset.task = t.id;
   const editable = t.status === 'pending';
 
@@ -2812,7 +2812,7 @@ function qmRow(t, i) {
     const ta = document.createElement('textarea');
     ta.className = 'qm-edit';
     ta.value = t.prompt;
-    ta.rows = Math.min(8, Math.max(2, t.prompt.split('\n').length));
+    ta.rows = Math.min(14, Math.max(5, t.prompt.split('\n').length + 1));
     const bar = document.createElement('div');
     bar.className = 'qm-editbar';
     const save = document.createElement('button');
