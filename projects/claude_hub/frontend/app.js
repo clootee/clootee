@@ -5112,6 +5112,9 @@ function renderLanGuide() {
     list.appendChild(empty);
   } else {
     urls.forEach((url, i) => {
+      // 每个地址一个 item：行(row) + 可展开的二维码面板(qrPanel)
+      const item = document.createElement('div');
+      item.className = 'lan-addr-item';
       const row = document.createElement('div');
       row.className = 'lan-addr-row';
       if (i === 0) {
@@ -5125,6 +5128,12 @@ function renderLanGuide() {
       const a = document.createElement('span');
       a.className = 'lan-addr-url';
       a.textContent = url;
+      // 二维码展开按钮
+      const qrBtn = document.createElement('button');
+      qrBtn.type = 'button';
+      qrBtn.className = 'lan-qr-btn';
+      qrBtn.textContent = '📱';
+      qrBtn.title = T('lanQrToggle');
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'lan-copy-btn';
@@ -5132,8 +5141,16 @@ function renderLanGuide() {
       btn.title = T('copy');
       btn.addEventListener('click', () => copyText(url, btn, '📋'));
       row.appendChild(a);
+      row.appendChild(qrBtn);
       row.appendChild(btn);
-      list.appendChild(row);
+      item.appendChild(row);
+      // 二维码面板（点开才渲染，避免一次性生成多张）
+      const panel = document.createElement('div');
+      panel.className = 'lan-qr-panel';
+      panel.hidden = true;
+      item.appendChild(panel);
+      qrBtn.addEventListener('click', () => toggleLanQr(url, qrBtn, panel));
+      list.appendChild(item);
     });
   }
   // 未保存/未重启时提示：更改需重启后局域网才真正可访问
@@ -5143,6 +5160,31 @@ function renderLanGuide() {
     ? '⚠️ 开启后需保存并重启服务，局域网访问才会生效。生效后在上面地址首次访问需输入本工作台的访问密码。'
     : '首次访问需输入本工作台的访问密码；打开后可像本机一样使用。';
   hint.textContent = base + (multi ? ' ' + multi : '');
+}
+
+// 展开/收起某个局域网地址的二维码。首次展开时才用本地 qrcode 库生成（离线可用，无需联网）。
+function toggleLanQr(url, btn, panel) {
+  const open = panel.hidden; // 当前隐藏 → 本次要展开
+  panel.hidden = !open;
+  btn.classList.toggle('on', open);
+  if (!open || panel.dataset.rendered === '1') return;
+  panel.dataset.rendered = '1';
+  const box = document.createElement('div');
+  box.className = 'lan-qr-img';
+  try {
+    if (typeof qrcode !== 'function') throw new Error('qr lib missing');
+    const qr = qrcode(0, 'M'); // typeNumber=0 自动，纠错级别 M
+    qr.addData(url);
+    qr.make();
+    box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+  } catch (e) {
+    box.textContent = url; // 兜底：库缺失时至少显示地址
+  }
+  const tip = document.createElement('div');
+  tip.className = 'lan-qr-tip';
+  tip.textContent = T('lanQrTip');
+  panel.appendChild(box);
+  panel.appendChild(tip);
 }
 
 // ══ 设置：板块化导航 ══

@@ -224,6 +224,8 @@ const DICT = {
   assistant: { en: 'Claude', zh: 'Claude' },
   copy: { en: 'Copy', zh: '复制' },
   copied: { en: 'Copied', zh: '已复制' },
+  lanQrToggle: { en: 'Show QR code', zh: '展开二维码' },
+  lanQrTip: { en: 'Point your iPad camera, phone camera, or WeChat "Scan" at this QR code to open the address directly.', zh: '用 iPad 相机、手机相机或微信「扫一扫」对准二维码，即可直接打开该地址。' },
   // ── 执行失败 / 引擎无响应的界面提示 ──
   runFailedTitle: { en: 'Task failed', zh: '任务执行失败' },
   runWarnTitle: { en: 'Engine produced no output', zh: '引擎没有任何输出' },
