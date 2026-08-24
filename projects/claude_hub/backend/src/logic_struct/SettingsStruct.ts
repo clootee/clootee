@@ -4,6 +4,7 @@ import { AppConfig } from '../config/AppConfig';
 import { Engine } from '../models/Types';
 import { OutEnd } from '../helper/OutEnd';
 import { NetHelper } from '../helper/NetHelper';
+import { PackageInfo } from '../helper/PackageInfo';
 
 // 快捷按钮：一个组内互斥（单选，可取消），组与组之间互不影响（可各选一个）
 export interface QuickTag {
@@ -57,6 +58,7 @@ export interface AppSettings {
   outEndReady?: boolean;  // out_end 目录是否已就绪（前端提示是否需 bootstrap）
   port?: number;          // 服务端口（前端展示局域网访问教程用）
   lanUrls?: string[];     // 本机局域网访问地址 http://<ip>:<port>（供前端「允许局域网访问」教程展示+复制）
+  version?: string;       // 当前跑的软件版本（backend/package.json 的 version 字段），顶部版本徽章据此显示
 }
 
 export class SettingsStruct {
@@ -84,6 +86,7 @@ export class SettingsStruct {
       outEndReady: OutEnd.exists(),
       port: AppConfig.PORT,
       lanUrls: NetHelper.lanUrls(AppConfig.PORT),
+      version: PackageInfo.version(),
     };
   }
 

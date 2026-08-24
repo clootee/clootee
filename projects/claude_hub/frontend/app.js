@@ -5,7 +5,7 @@ const State = {
   sessions: [],
   sessionId: '',
   session: null,
-  settings: { defaultEngine: 'claude', platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0 }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址（从后端 /api/settings 加载）
+  settings: { defaultEngine: 'claude', platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0, version: '' }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址 + 软件版本号（从后端 /api/settings 加载）
   running: new Set(),                     // 正在执行任务的会话 id 集合（驱动侧栏"执行中"标识）
   runningTasks: new Map(),                // 会话 id → 该会话正在跑的任务 id 集合；running 即它的非空键集（排队新消息不会误清执行中）
   justFinished: new Set(),                // 刚从执行中变为停止、且用户尚未点开查看的会话 id（驱动侧栏"刚执行"醒目标识，区别于状态"已完成"）
@@ -5200,12 +5200,16 @@ async function loadSettings() {
       State.settings.templateCollectionPath = typeof s.templateCollectionPath === 'string' ? s.templateCollectionPath : '';
       State.settings.quickGroups = Array.isArray(s.quickGroups) ? s.quickGroups : [];
       if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
+      if (typeof s.version === 'string' && s.version) State.settings.version = s.version;
       renderQuick();
     }
   } catch { /* 忽略：用默认值 */ }
   // 仅 Windows 显示「前往」按钮（点击在本机文件管理器中打开根目录）
   const btn = $('openFolderBtn');
   if (btn) btn.hidden = State.settings.platform !== 'win32';
+  // 顶部版本徽章：跟着后端实际跑的 package.json 版本走，不再是写死的字符串
+  const verEl = $('appVersion');
+  if (verEl) verEl.textContent = `V ${State.settings.version}`;
 }
 async function openFolder() {
   const root = currentRoot();
