@@ -26,6 +26,7 @@ const State = {
   notices: [],                            // 运行提示（后端 kind='notice'）：{id,sessionId,taskId,level,message,at}
   dismissedNotices: new Set(),            // 用户手动关掉（或发新消息时清掉）的提示卡片 key，渲染时跳过
   noticeOpen: false,                      // 右下角错误小圆圈是否已展开
+  updateInfo: null,                       // 最近一次软件更新检测结果（/api/update/check 的返回值）
 };
 let NOTICE_SEQ = 0;                       // 提示卡片自增 id：数组下标会随裁剪变动，不能当 key
 
@@ -3941,6 +3942,128 @@ function startEngineInstallProgress(el, headText) {
   return () => { clearInterval(timer); EngineInstall.stop(); };
 }
 
+// ── 软件本身的版本更新（对比本地 git HEAD 与 GitHub 最新 commit）──
+// 后端把 git pull 的输出逐行广播过来（kind='updateApply'），设置面板订阅显示进度。
+const UpdateApplyLog = {
+  handler: null,
+  emit(line) { if (this.handler) this.handler(line); },
+  watch(fn) { this.handler = fn; },
+  stop() { this.handler = null; },
+};
+
+// 每次启动静默检测一次：不打断使用，有更新就在齿轮按钮上点一个红点，
+// 具体信息留给用户自己点进「软件更新」板块查看
+async function checkAppUpdateSilently() {
+  try {
+    State.updateInfo = await api('/api/update/check');
+  } catch {
+    State.updateInfo = null; // 静默失败；手动点「检查更新」时会看到具体错误
+  }
+  renderUpdateDot();
+}
+
+function renderUpdateDot() {
+  const dot = $('settingsUpdateDot');
+  if (dot) dot.hidden = !(State.updateInfo && State.updateInfo.hasUpdate);
+}
+
+function fillUpdatePane() {
+  $('appUpdNote').textContent = T('paneUpdateDesc');
+  $('appUpdCheckBtn').textContent = T('updateCheckBtn');
+  $('appUpdApplyBtn').textContent = T('updateApplyBtn');
+  $('appUpdApplyBtn').disabled = false;
+  $('appUpdStatus').hidden = true;
+  if (State.updateInfo) renderUpdateInfo(State.updateInfo);
+  else $('appUpdInfo').hidden = true;
+}
+
+function formatUpdateCommit(c) {
+  const d = c.date ? new Date(c.date).toLocaleString() : '';
+  return `${c.short || (c.sha || '').slice(0, 7)}  ${c.message}${d ? `  (${d})` : ''}`;
+}
+
+function renderUpdateInfo(u) {
+  const info = $('appUpdInfo');
+  info.hidden = false;
+  info.className = `sx-note sx-pre${u.hasUpdate ? '' : ' ok'}`;
+  info.textContent = [
+    `${T('updateBranchLabel')}: ${u.branch}`,
+    `${T('updateCurrentLabel')}: ${formatUpdateCommit(u.current)}`,
+    `${T('updateLatestLabel')}: ${formatUpdateCommit(u.latest)}`,
+    '',
+    u.hasUpdate ? T('updateAvailableHint') : T('updateUpToDateHint'),
+  ].join('\n');
+  $('appUpdApplyRow').hidden = !u.hasUpdate;
+}
+
+async function checkAppUpdate() {
+  const info = $('appUpdInfo');
+  info.hidden = false;
+  info.className = 'sx-note sx-pre';
+  info.textContent = T('updateCheckingNow');
+  $('appUpdApplyRow').hidden = true;
+  try {
+    State.updateInfo = await api('/api/update/check');
+    renderUpdateInfo(State.updateInfo);
+    renderUpdateDot();
+    renderSettingsNav(); // 板块列表里的摘要文字（有新版本/已是最新）跟着刷新
+  } catch (e) {
+    info.className = 'sx-note sx-pre err';
+    info.textContent = T('updateCheckFail').replace('{err}', e.message);
+  }
+}
+
+async function applyAppUpdate() {
+  if (!confirm(T('updateConfirm'))) return;
+  const box = $('appUpdStatus');
+  box.hidden = false;
+  box.className = 'sx-note sx-pre';
+  $('appUpdApplyBtn').disabled = true;
+  const lines = [T('updateApplying')];
+  const render = () => { box.textContent = lines.join('\n'); box.scrollTop = box.scrollHeight; };
+  UpdateApplyLog.watch((line) => {
+    lines.push(String(line).slice(0, 500));
+    if (lines.length > 40) lines.splice(0, lines.length - 40);
+    render();
+  });
+  render();
+  try {
+    await api('/api/update/apply', {});
+    UpdateApplyLog.stop();
+    box.className = 'sx-note sx-pre ok';
+    lines.push(T('updateApplyDone'));
+    render();
+    waitForAppRestart();
+  } catch (e) {
+    UpdateApplyLog.stop();
+    $('appUpdApplyBtn').disabled = false;
+    box.className = 'sx-note sx-pre err';
+    lines.push(T('updateApplyFail').replace('{err}', e.message));
+    render();
+  }
+}
+
+// 重启期间服务会短暂下线：每 3 秒探一次登录态，探通即说明新版本已跑起来，刷新页面拿新前端资源
+function waitForAppRestart() {
+  const box = $('appUpdStatus');
+  const MAX_TRIES = 40; // 最多等 2 分钟，之后提示用户自己刷新
+  let secs = 0;
+  let tries = 0;
+  const tick = async () => {
+    secs += 3;
+    tries += 1;
+    try {
+      await api('/api/auth/check');
+      location.reload();
+    } catch {
+      box.textContent += `\n${T('updateReconnecting').replace('{s}', secs)}`;
+      box.scrollTop = box.scrollHeight;
+      if (tries < MAX_TRIES) setTimeout(tick, 3000);
+    }
+  };
+  setTimeout(tick, 3000);
+}
+
 // ── WebSocket 实时事件 ──
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -3949,6 +4072,8 @@ function connectWs() {
     const e = JSON.parse(ev.data);
     // 引擎/工具安装进度：没有 sessionId，必须在按会话过滤之前处理
     if (e.kind === 'engineInstall' || e.kind === 'toolInstall') { EngineInstall.emit(e.line); return; }
+    // 软件本身更新（git pull 输出逐行广播），没有 sessionId，同样要在按会话过滤之前处理
+    if (e.kind === 'updateApply') { UpdateApplyLog.emit(e.line); return; }
     // Claude 登录进度：同样没有 sessionId，且登录卡片要实时跟着后端状态走
     if (e.kind === 'claudeLogin') { onClaudeLoginEvent(e); return; }
     // 后端级异常：同样没有 sessionId，顶部横幅直接显示，别只写进服务器日志
@@ -4863,6 +4988,9 @@ function bind() {
   $('tcRefreshBtn').addEventListener('click', renderToolchain);
   $('tcAllBundledBtn').addEventListener('click', () => setToolPreset('bundled'));
   $('tcAutoBtn').addEventListener('click', () => setToolPreset('auto'));
+  // 软件本身的版本更新
+  $('appUpdCheckBtn').addEventListener('click', checkAppUpdate);
+  $('appUpdApplyBtn').addEventListener('click', applyAppUpdate);
   // 模型选择：选定 + 两种检测（当前实际模型 / 可用模型），claude 与 codex 各一套；
   // 同一个下拉（claudeModelSelect/codexModelSelect）与「服务商」区共用，服务商变了会被清空重选
   $('claudeModelSelect').addEventListener('change', () => onModelSelect('claude'));
@@ -5043,6 +5171,7 @@ async function startApp() {
   await loadSettings();
   await loadRoots();
   await markSetupDone();
+  checkAppUpdateSilently(); // 不 await：每次启动静默检测一次，有更新才在齿轮按钮上提示，不打断使用
 }
 
 // 老用户（已有密码即视为老用户）：一律不再弹引导，顺手把 setupDone 补成 true
@@ -5262,6 +5391,19 @@ const SETTINGS_PANES = [
     summary: () => State.settings.templateCollectionPath || T('paneTemplateEmpty'),
     fill: fillTemplatePane,
     save: saveTemplatePane,
+  },
+  {
+    id: 'appupdate',
+    icon: '⬆️',
+    title: () => T('paneUpdate'),
+    desc: () => T('paneUpdateDesc'),
+    summary: () => {
+      const u = State.updateInfo;
+      if (!u) return T('paneUpdateUnknown');
+      return u.hasUpdate ? `🆕 ${T('paneUpdateAvailable')}` : T('paneUpdateUpToDate');
+    },
+    fill: fillUpdatePane,
+    save: null, // 拉取更新是即时动作（点按钮触发），不走统一保存
   },
 ];
 function paneById(id) {

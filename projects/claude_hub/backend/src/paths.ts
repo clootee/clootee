@@ -2,9 +2,13 @@
 import * as path from 'path';
 
 const DATA_ROOT = path.resolve(__dirname, '../../data');
+// 项目根目录（claude_hub 文件夹本身，即 restart.sh/restart.bat 所在处）；
+// 版本更新功能据此定位重启脚本，git 命令的 cwd 也用它（git 会自动向上找到 .git，不要求它正好是仓库顶层）
+const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
 export const Paths = {
   DATA_ROOT,
+  PROJECT_ROOT,
   ROOTS_FILE: path.join(DATA_ROOT, 'roots.json'),
   SETTINGS_FILE: path.join(DATA_ROOT, 'settings.json'),
   SESSION_META_FILE: path.join(DATA_ROOT, 'session_meta.json'),

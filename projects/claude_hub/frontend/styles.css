@@ -2890,3 +2890,10 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
   white-space: nowrap;
   user-select: none;
 }
+
+/* 齿轮按钮右上角的小红点：有新版本可更新时显示，进设置检查更新面板即可 */
+.update-dot {
+  position: absolute; top: 1px; right: 1px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #ff6161; box-shadow: 0 0 0 1px var(--panel);
+}

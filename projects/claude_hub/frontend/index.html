@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="styles.css?v=20260823b" />
+  <link rel="stylesheet" href="styles.css?v=20260824a" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -569,6 +569,19 @@
           <div class="sx-note sx-pre" id="updateStatus" hidden></div>
         </div>
 
+        <!-- ═══ 板块：软件本身的版本更新（对比本地 git 与 GitHub 最新 commit）═══ -->
+        <div class="sx-pane" id="pane-appupdate" hidden>
+          <div class="sx-note" id="appUpdNote"></div>
+          <div class="sx-row">
+            <button class="sx-btn sx-btn-primary" id="appUpdCheckBtn"></button>
+          </div>
+          <div class="sx-note sx-pre" id="appUpdInfo" hidden></div>
+          <div class="sx-row" id="appUpdApplyRow" hidden>
+            <button class="sx-btn sx-btn-primary" id="appUpdApplyBtn"></button>
+          </div>
+          <div class="sx-note sx-pre" id="appUpdStatus" hidden></div>
+        </div>
+
       </div>
       <div class="sx-foot">
         <button class="sx-btn sx-btn-primary" id="settingsPaneSave"></button>
@@ -612,7 +625,7 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;flex:1;min-width:0">
           <!-- 版本号：放在齿轮按钮左边，跟随按钮组一起排布 -->
           <span id="appVersion" class="version-badge">V&nbsp;2.0</span>
-          <button id="settingsBtn" title="settings" style="flex:none;padding:4px 9px">⚙</button>
+          <button id="settingsBtn" title="settings" style="flex:none;padding:4px 9px;position:relative">⚙<span id="settingsUpdateDot" class="update-dot" hidden></span></button>
           <button id="themeBtn" title="theme" style="flex:none;padding:4px 9px"></button>
           <button id="langBtn" style="flex:none;padding:4px 10px"></button>
           <button id="guideBtn" title="guide" style="flex:none;padding:4px 9px">📖</button>
@@ -901,7 +914,7 @@
   <script src="vendor/cm/mode/sass/sass.min.js"></script>
   <script src="vendor/cm/mode/dart/dart.min.js"></script>
   <script src="vendor/cm/mode/swift/swift.min.js"></script>
-  <script src="trans.js?v=20260823b"></script>
+  <script src="trans.js?v=20260824a"></script>
   <script src="workspace.js?v=20260801i"></script>
   <script src="rootwizard.js?v=20260804a"></script>
   <script src="health.js?v=20260820a"></script>
@@ -917,6 +930,6 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="app.js?v=20260823b"></script>
+  <script src="app.js?v=20260824a"></script>
 </body>
 </html>

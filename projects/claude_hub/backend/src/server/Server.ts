@@ -30,6 +30,7 @@ import { FolderOpener } from '../logic_realize/FolderOpener';
 import { TraceStore } from '../logic_realize/TraceStore';
 import { CommandRunner } from '../logic_realize/CommandRunner';
 import { CommandsConfig } from '../config/CommandsConfig';
+import { UpdateChecker } from '../logic_realize/UpdateChecker';
 
 export class Server {
   static start(): void {
@@ -200,6 +201,17 @@ export class Server {
         EngineUpdater.update(String(req.body.engine || ''), (line) =>
           EventBus.broadcast({ kind: 'engineInstall', engine: String(req.body.engine || ''), line }),
         ),
+      ),
+    );
+
+    // ── 软件本身的版本更新（对比本地 git HEAD 与 GitHub 最新 commit）──
+    // 有更新时前端提示确认，确认后拉取 + 触发重新编译与重启（脚本逐行输出通过 WS 广播）
+    app.get('/api/update/check', (_req, res) =>
+      this._wrapAsync(res, 'update.check', () => UpdateChecker.check()),
+    );
+    app.post('/api/update/apply', (_req, res) =>
+      this._wrapAsync(res, 'update.apply', () =>
+        UpdateChecker.apply((line) => EventBus.broadcast({ kind: 'updateApply', line })),
       ),
     );
 
