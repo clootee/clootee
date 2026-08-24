@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="styles.css?v=20260821e" />
+  <link rel="stylesheet" href="styles.css?v=20260823b" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -321,6 +321,9 @@
       </div>
       <div class="sx-body">
         <div class="sx-nav" id="settingsNav"></div>
+        <div class="sx-logout-row">
+          <button id="logoutBtn" class="sx-logout-btn"></button>
+        </div>
       </div>
     </div>
   </div>
@@ -713,11 +716,10 @@
         <select id="engineSelect" class="engine-select" style="display:none"></select>
         <span class="engine-badge" id="engineBadge" style="display:none"></span>
         <span class="spacer"></span>
-        <button id="aiCollapseBtn" class="icon-btn ai-collapse-btn" aria-label="collapse AI messages"></button>
+        <button id="aiCollapseBtn" class="icon-btn ai-collapse-btn" aria-label="collapse AI messages" style="display:none"></button>
         <button id="filesBtn" class="icon-btn files-btn" aria-label="files" title="files">📁</button>
         <button id="traceBtn" class="icon-btn trace-hdr-btn" aria-label="trace" title="全过程" style="display:none">🕒</button>
-        <button id="procBtn" class="icon-btn proc-btn" aria-label="process">⚙</button>
-        <button id="logoutBtn" style="flex:none;padding:4px 10px;font-size:12px"></button>
+        <button id="procBtn" class="icon-btn proc-btn" aria-label="process" style="display:none">⚙</button>
       </div>
 
       <div class="content">
@@ -875,6 +877,7 @@
   <script src="vendor/purify.min.js"></script>
   <script src="vendor/xlsx.full.min.js"></script>
   <script src="vendor/echarts.min.js"></script>
+  <script src="vendor/qrcode.min.js"></script>
   <!-- CodeMirror 5：代码编辑/预览语法高亮（本地 vendor，离线可用） -->
   <script src="vendor/cm/codemirror.min.js"></script>
   <script src="vendor/cm/addon/edit/matchbrackets.min.js"></script>
@@ -898,7 +901,7 @@
   <script src="vendor/cm/mode/sass/sass.min.js"></script>
   <script src="vendor/cm/mode/dart/dart.min.js"></script>
   <script src="vendor/cm/mode/swift/swift.min.js"></script>
-  <script src="trans.js?v=20260821e"></script>
+  <script src="trans.js?v=20260823b"></script>
   <script src="workspace.js?v=20260801i"></script>
   <script src="rootwizard.js?v=20260804a"></script>
   <script src="health.js?v=20260820a"></script>
@@ -914,6 +917,6 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="app.js?v=20260821e"></script>
+  <script src="app.js?v=20260823b"></script>
 </body>
 </html>
