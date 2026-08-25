@@ -1684,6 +1684,15 @@ async function ctxToggleFavorite() {
   refreshFavoriteSessions(false);
 }
 
+// 新建会话后聚焦输入框：仅桌面端（移动端弹出软键盘会挡住内容，且用户通常先要选目录/看列表）
+// 断点与 styles.css 的 @media (max-width: 860px) 抽屉布局保持一致
+function focusTaskInputIfDesktop() {
+  const isDesktop = !window.matchMedia || window.matchMedia('(min-width: 861px)').matches;
+  if (!isDesktop) return;
+  const el = $('taskInput');
+  if (el) el.focus();
+}
+
 async function newSession() {
   closeDrawer(); // 移动端：新建会话（右侧要开新对话/弹目录选择）收起抽屉
   resetSessionSearch(false);
@@ -1694,11 +1703,12 @@ async function newSession() {
     // 与主列表同规则：当前就是该目录下一个空的新会话时直接复用，不重复建
     if (favRoot && cur && cur.rootId === favRoot && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
       selectSession(cur.id);
-      $('taskInput').focus();
+      focusTaskInputIfDesktop();
       return;
     }
     createFavoriteDraftSession();
     if (favRoot) await bindFavoriteDraftRoot(favRoot);
+    focusTaskInputIfDesktop();
     return;
   }
   // 工作台模式：先选择工作目录（近期用过的 / 手动添加，可创建不存在的目录）
@@ -1714,7 +1724,7 @@ async function newSession() {
   const cur = State.session;
   if (cur && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
     selectSession(cur.id);
-    $('taskInput').focus();
+    focusTaskInputIfDesktop();
     return;
   }
   const s = await api('/api/session/create', {
@@ -1724,6 +1734,7 @@ async function newSession() {
   });
   await loadSessions();
   selectSession(s.id);
+  focusTaskInputIfDesktop();
 }
 
 function isFavoriteDraftId(id) {

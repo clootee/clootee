@@ -2,7 +2,7 @@
 // 本文件只承载「新建会话前选择工作目录」的弹窗逻辑；模式开关、列表数据源、目录徽章
 // 等最小改动散落在 app.js（以 isWorkspace() 守卫，不影响经典模式）。
 // 依赖 app.js 已定义的全局：State / api / $ / T / basename / openPicker / loadSessions /
-//   selectSession / escapeHtml。仅在用户交互（点击新建会话）时被调用，无加载顺序问题。
+//   selectSession / escapeHtml / focusTaskInputIfDesktop。仅在用户交互（点击新建会话）时被调用，无加载顺序问题。
 
 // 打开「选择工作目录」弹窗：列出近期用过的目录 + 手动输入/浏览
 function openWsDir() {
@@ -74,7 +74,7 @@ async function wsCreateSessionInRoot(rootId) {
     closeWsDir();
     await loadSessions();
     await selectSession(s.id);
-    $('taskInput').focus();
+    focusTaskInputIfDesktop();
   } catch (e) {
     alert(e.message);
   }
