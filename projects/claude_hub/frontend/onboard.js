@@ -1,13 +1,13 @@
 // 新手引导（首次进入）五步：
 //   ① 语言 + 明暗主题  ② 网络体检  ③ 选执行引擎  ④ 选模型服务商
-//   ⑤ 原版 Claude → 登录账号；第三方 → 填 API Key 并选模型
+//   ⑤ 原版（Claude / Codex）→ 登录账号；第三方 → 填 API Key 并选模型
 // 「网络体检」排在最前面是有意的：国内用户十有八九卡在「连不上 Claude」，
 // 先把这件事查清楚并当场给出路（开代理 / 换国产模型），比走到最后一步再报错友好得多。
-// 全程只调用已有接口：/api/net/check、/api/claude/auth/*、/api/engine/status、
+// 全程只调用已有接口：/api/net/check、/api/claude/auth/*、/api/codex/auth/*、/api/engine/status、
 // /api/engine/providers、/api/engine/models、/api/engine/config、/api/codex/key、
 // /api/codex/profile、/api/engine/update、/api/settings。
 // 依赖 app.js 的 $ / api / applyText / applyTheme，trans.js 的 T / setLang / currentLang，
-// health.js 的 runNetCheck / showNetCheck / renderClaudeLogin。
+// health.js 的 runNetCheck / showNetCheck / renderClaudeLogin / renderCodexLogin。
 
 const OB_STEPS = 5;
 
@@ -97,7 +97,7 @@ function renderOnboard() {
 // 最后一步该走「登录 Claude 账号」还是「填 API Key」：
 // 原版 Claude 用的是账号登录，第三方服务商用的是 API Key，两者互斥。
 function onboardNeedsLogin() {
-  return Onboard.engine === 'claude' && Onboard.provider === 'official';
+  return Onboard.provider === 'official';
 }
 
 // ── 第 1 步：语言 + 主题 ──
@@ -291,16 +291,18 @@ function renderOnboardProvider() {
     el.onclick = () => { Onboard.provider = el.dataset.pv; renderOnboard(); };
   });
   $('onboardBack').hidden = false;
-  // 原版 Claude 后面还有「登录账号」一步；原版 Codex 到此为止
+  // 原版（Claude 或 Codex）后面还有「登录账号」一步；第三方服务商到此为止（下一步填 Key）
   const last = Onboard.provider === 'official' && !onboardNeedsLogin();
   $('onboardNext').textContent = last ? T('obDone') : T('obNext');
   $('onboardNext').disabled = !Onboard.provider;
 }
 
-// ── 第 5 步（原版 Claude）：登录 Anthropic 账号 ──
+// ── 第 5 步（原版 Claude / 原版 Codex）：登录账号 ──
 // 这是小白最容易卡死的一步：没登录时发消息完全没反应、也没有任何报错。
-// 登录链接由后端从 `claude auth login` 的输出里抠出来，这里只负责摆成一个按钮 + 四步指引。
+// 两个引擎登录链接的抠取方式不同（见 health.js 的 renderClaudeLogin / renderCodexLogin），
+// 这里只按当前引擎挑一个来渲染，UI 骨架一致。
 function renderOnboardLogin() {
+  const isClaude = Onboard.engine === 'claude';
   $('onboardTitle').textContent = T('obStepLogin');
   $('onboardSub').textContent = T('obStepLoginSub');
   $('onboardBody').innerHTML =
@@ -315,17 +317,14 @@ function renderOnboardLogin() {
     Onboard.loginSkipped = true;
     $('onboardNext').disabled = false;
   };
-  renderClaudeLogin($('obLoginBox'), {
-    onLoggedIn: () => {
-      Onboard.loggedIn = true;
-      $('onboardNext').disabled = false;
-    },
-  }).then((a) => {
+  const onLoggedIn = () => {
+    Onboard.loggedIn = true;
+    $('onboardNext').disabled = false;
+  };
+  const render = isClaude ? renderClaudeLogin : renderCodexLogin;
+  render($('obLoginBox'), { onLoggedIn }).then((a) => {
     // 已经登录过（或用的是第三方服务商）就直接放行
-    if (a && (a.loggedIn || !a.needsLogin)) {
-      Onboard.loggedIn = true;
-      $('onboardNext').disabled = false;
-    }
+    if (a && (a.loggedIn || (isClaude && !a.needsLogin))) onLoggedIn();
   });
 }
 
@@ -403,7 +402,7 @@ async function onboardNext() {
     return;
   }
   if (Onboard.step === 4) {
-    // 原版 Claude 还要登录账号；原版 Codex 用的是 ChatGPT 登录态，这里直接收尾
+    // 原版（Claude / Codex）还要登录账号，走第 5 步；第三方服务商到此直接收尾（下一步填 Key）
     if (Onboard.provider === 'official' && !onboardNeedsLogin()) { await onboardFinish(''); return; }
     Onboard.step = 5;
     renderOnboard();

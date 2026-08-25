@@ -34,6 +34,11 @@ export class AuthManagerStruct {
     '/claude/auth/login',
     '/claude/auth/code',
     '/claude/auth/cancel',
+    // 引导里的「登录 Codex 账号」整套流程（起流程 / 拿链接短码 / 提交 API Key / 放弃）
+    '/codex/auth/status',
+    '/codex/auth/session',
+    '/codex/auth/login',
+    '/codex/auth/cancel',
     // 引导里缺什么装什么（Node / Git / 引擎）
     '/toolchain/status',
     '/toolchain/install',

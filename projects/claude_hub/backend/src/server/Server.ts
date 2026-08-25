@@ -18,6 +18,7 @@ import { FileManager } from '../logic_realize/FileManager';
 import { Uploader } from '../logic_realize/Uploader';
 import { Settings } from '../logic_realize/Settings';
 import { CodexProfile } from '../logic_realize/CodexProfile';
+import { CodexLogin } from '../logic_realize/CodexLogin';
 import { EngineConfig } from '../logic_realize/EngineConfig';
 import { EngineUpdater } from '../logic_realize/EngineUpdater';
 import { Toolchain } from '../logic_realize/Toolchain';
@@ -238,6 +239,21 @@ export class Server {
       this._wrapAsync(res, 'model.available', async () => ({
         models: await ModelManager.available(req.body.engine, !!req.body.verify),
       })),
+    );
+
+    // ── Codex 账号登录（原版订阅 / API Key）──
+    // 与 claude 同一套思路：起流程 → 拿到链接+短码 → 用户在浏览器里填码 → 自动完成（不需要粘任何东西回来）
+    app.get('/api/codex/auth/status', (_req, res) =>
+      this._wrapAsync(res, 'codex.authStatus', () => CodexLogin.status()),
+    );
+    app.get('/api/codex/auth/session', (_req, res) => this._ok(res, CodexLogin.session()));
+    app.post('/api/codex/auth/login', (req, res) =>
+      this._wrapAsync(res, 'codex.authLogin', () =>
+        CodexLogin.start(req.body.mode === 'apiKey' ? 'apiKey' : 'chatgpt', String(req.body.apiKey || '')),
+      ),
+    );
+    app.post('/api/codex/auth/cancel', (_req, res) =>
+      this._wrap(res, 'codex.authCancel', () => CodexLogin.cancel()),
     );
 
     // ── Codex 档位（原版 ChatGPT ↔ Kimi K3）──

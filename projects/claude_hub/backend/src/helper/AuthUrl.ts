@@ -22,6 +22,9 @@ const LINK_HEAD_RE = /^https?:\/\//i;
 // 「请粘贴授权码」的提示（中英文都可能出现）
 const PASTE_RE = /(paste\s+(the\s+)?code|授权码|粘贴|enter\s+the\s+code|authorization\s+code)/i;
 
+// 一次性短码（device-auth 类流程常见形态，如 `BBF5-ELZ6R`）：4~8 位大写字母数字，中间可能有一个短横线
+const DEVICE_CODE_RE = /\b[A-Z0-9]{4,8}-[A-Z0-9]{4,8}\b/;
+
 export class AuthUrl {
   // 去掉 ANSI 控制符，便于后续匹配与展示
   static clean(text: string): string {
@@ -44,6 +47,13 @@ export class AuthUrl {
   static awaitsCode(text: string): boolean {
     if (typeof text !== 'string') throw new Error(`AuthUrl.awaitsCode: invalid text=${text}`);
     return PASTE_RE.test(this.clean(text));
+  }
+
+  // 抽取一次性短码（device-auth 类流程）；没有则返回 ''
+  static extractCode(text: string): string {
+    if (typeof text !== 'string') throw new Error(`AuthUrl.extractCode: invalid text=${text}`);
+    const m = this.clean(text).match(DEVICE_CODE_RE);
+    return m ? m[0] : '';
   }
 
   // 用户粘回来的这一串是不是链接（而不是授权码）

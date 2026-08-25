@@ -4098,6 +4098,8 @@ function connectWs() {
     if (e.kind === 'updateApply') { UpdateApplyLog.emit(e.line); return; }
     // Claude 登录进度：同样没有 sessionId，且登录卡片要实时跟着后端状态走
     if (e.kind === 'claudeLogin') { onClaudeLoginEvent(e); return; }
+    // Codex 登录进度：同上，没有 sessionId
+    if (e.kind === 'codexLogin') { onCodexLoginEvent(e); return; }
     // 后端级异常：同样没有 sessionId，顶部横幅直接显示，别只写进服务器日志
     if (e.kind === 'serverError') { showServerError(e.message); return; }
     if (e.kind === 'session') {
@@ -6159,8 +6161,8 @@ function providerUi(engine) {
     model: $(`${p}ModelSelect`), modelInput: $(`${p}ModelInput`), modelList: $(`${p}ModelList`),
     modelHint: $(`${p}ModelHint`), modelBox: $(`${p}ModelBox`), status: $(`${p}ProviderStatus`),
     effort: $(`${p}EffortSelect`),
-    // 「Claude 账号登录」卡片只有 claude 侧有（原版才是订阅登录），codex 侧取到 null
-    login: engine === 'claude' ? $('clBox') : null,
+    // 账号登录卡片：claude 侧是 Claude 登录，codex 侧是 Codex 登录（原版才是订阅登录）
+    login: engine === 'claude' ? $('clBox') : $('cxBox'),
   };
 }
 
@@ -6173,6 +6175,13 @@ function renderClaudeLoginBox(engine) {
   // forceOfficial：用户可能刚把下拉切到原版还没点保存，后端记的仍是第三方，
   // 不加这个标记登录卡会显示成「不需要登录」，正好把要登录的人挡在门外
   renderClaudeLogin(box, { forceOfficial: true });
+}
+
+// 同上，但用于 Codex（原版 ChatGPT 走订阅登录 / API Key，见 renderCodexLogin）
+function renderCodexLoginBox(engine) {
+  const box = providerUi(engine).login;
+  if (!box) return;
+  renderCodexLogin(box, { forceOfficial: true });
 }
 
 // 思考强度档位的 id 顺序由后端 /api/model/state 下发（避免前端写死一份），
@@ -6223,8 +6232,12 @@ function syncProviderVisibility(engine) {
   // 只有原版才是订阅登录，第三方走 API Key，没有账号可言 —— 整块登录卡都不出现
   if (u.login) {
     u.login.hidden = provider !== 'official';
-    if (provider === 'official') renderClaudeLoginBox(engine);
-    else u.login.innerHTML = '';
+    if (provider === 'official') {
+      if (engine === 'claude') renderClaudeLoginBox(engine);
+      else renderCodexLoginBox(engine);
+    } else {
+      u.login.innerHTML = '';
+    }
   }
 }
 // 用户在下拉里手动切换服务商 → 联动：**彻底隔离**。

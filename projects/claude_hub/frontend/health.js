@@ -13,6 +13,8 @@ const Health = {
   loginWay: 'code',
   loginCode: '',
   loginLink: '',
+  // 登录方式：'claudeai'=订阅（Claude Pro/Max，推荐，通常比按量付费的 API 更省钱）；'console'=控制台账号（按 API 用量计费）
+  loginMode: 'claudeai',
   busy: false,
 };
 
@@ -186,15 +188,27 @@ function claudeLoginIdleHtml(s) {
   const err = s && s.error
     ? `<div class="cl-err sx-pre">${escapeHtml(s.error)}</div>`
     : '';
+  const mode = Health.loginMode === 'console' ? 'console' : 'claudeai';
   return (
     `<div class="cl-hint">${T('clWhy')}</div>` +
     err +
+    `<div class="cl-q">${T('clPickMode')}</div>` +
+    `<div class="cl-ways">` +
+    clWayBtnHtml2('cl-mode', 'claudeai', mode, T('clModeSub'), T('clModeSubSub')) +
+    clWayBtnHtml2('cl-mode', 'console', mode, T('clModeConsole'), T('clModeConsoleSub')) +
+    `</div>` +
     `<div class="cl-acts">` +
     `<button type="button" class="hc-btn hc-btn-primary" data-cl-start="1">${T('clStart')}</button>` +
     `<button type="button" class="hc-btn" data-cl-recheck="1">${T('clDoneOutside')}</button>` +
     `</div>` +
     `<div class="cl-note">${T('clManual')}<code>claude auth login</code></div>`
   );
+}
+
+// 与 clWayBtnHtml 同款外观，但用于「登录方式」的单选（data-attr 名可复用不同前缀）
+function clWayBtnHtml2(attr, id, cur, title, sub) {
+  return `<button type="button" class="cl-way${id === cur ? ' on' : ''}" data-${attr}="${id}">` +
+    `<b>${title}</b><span>${sub}</span></button>`;
 }
 
 // 拿到链接之后的核心界面：打开授权页 → 让用户自己认领「看到的是哪种情况」→ 分支指引
@@ -273,15 +287,18 @@ function bindClaudeLogin(el) {
   on('[data-cl-cancel]', cancelClaudeLogin);
   on('[data-cl-submit]', submitClaudeCode);
   on('[data-cl-way]', (ev) => pickClaudeLoginWay(ev.currentTarget.dataset.clWay));
+  on('[data-cl-mode]', (ev) => {
+    Health.loginMode = ev.currentTarget.dataset.clMode === 'console' ? 'console' : 'claudeai';
+    paintClaudeLogin();
+  });
   on('[data-cl-openlink]', openClaudeVerifyLink);
   on('[data-cl-reopen]', reopenClaudeAuthPage);
-  on('[data-cl-copy]', () => {
+  on('[data-cl-copy]', (ev) => {
     const url = (Health.login || {}).url || '';
     if (!url) return;
-    navigator.clipboard.writeText(url).then(
-      () => { const m = $('clMsg'); if (m) m.textContent = T('clCopied'); },
-      () => undefined,
-    );
+    copyText(url, ev.currentTarget, T('clCopyUrl'));
+    const m = $('clMsg');
+    if (m) m.textContent = T('clCopied');
   });
   const input = el.querySelector('#clCodeInput');
   if (input) input.onkeydown = (ev) => { if (ev.key === 'Enter') submitClaudeCode(); };
@@ -326,7 +343,7 @@ async function startClaudeLogin() {
   Health.login = { phase: 'starting', url: '', message: T('clStarting'), log: [], error: '' };
   paintClaudeLogin();
   try {
-    Health.login = await api('/api/claude/auth/login', { mode: 'claudeai' });
+    Health.login = await api('/api/claude/auth/login', { mode: Health.loginMode === 'console' ? 'console' : 'claudeai' });
   } catch (e) {
     Health.login = { phase: 'failed', url: '', message: '', log: [], error: e.message || '' };
   } finally {
@@ -403,4 +420,206 @@ function onClaudeLoginEvent(e) {
   const typing = document.activeElement;
   if (typing && (typing.id === 'clCodeInput' || typing.id === 'clLinkInput') && e.phase === 'awaitCode') return;
   paintClaudeLogin();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  三、Codex 账号登录（订阅 device-auth / API Key 二选一）
+// ══════════════════════════════════════════════════════════════════════
+
+Object.assign(Health, {
+  cxAuth: null,      // 最近一次 codex 登录态
+  cxLogin: null,     // 正在进行的登录流程快照
+  cxLoginBox: null,
+  cxLoginOpts: {},
+  cxMode: 'chatgpt', // 'chatgpt'=订阅（device-auth）；'apiKey'=OpenAI API Key
+  cxKey: '',
+  cxBusy: false,
+});
+
+async function renderCodexLogin(el, opts) {
+  if (!el) return null;
+  Health.cxLoginBox = el;
+  Health.cxLoginOpts = opts || {};
+  el.innerHTML = `<div class="cl"><div class="cl-hint">${T('cxChecking')}</div></div>`;
+  try {
+    Health.cxAuth = await api('/api/codex/auth/status');
+  } catch (e) {
+    el.innerHTML = `<div class="cl bad"><div class="cl-hint">${T('cxStatusFail')}${escapeHtml(e.message || '')}</div>` +
+      `<div class="cl-acts"><button type="button" class="hc-btn" data-cx-recheck="1">${T('cxRecheck')}</button></div></div>`;
+    bindCodexLogin(el);
+    return null;
+  }
+  paintCodexLogin();
+  return Health.cxAuth;
+}
+
+function paintCodexLogin() {
+  const el = Health.cxLoginBox;
+  if (!el) return;
+  const key = $('cxKeyInput');
+  if (key) Health.cxKey = key.value;
+  el.innerHTML = codexLoginHtml(Health.cxAuth || {}, Health.cxLogin);
+  bindCodexLogin(el);
+}
+
+function codexLoginHtml(a, s) {
+  if (!Health.cxLoginOpts.forceOfficial && a.provider && a.provider !== 'official')
+    return `<div class="cl ok"><div class="cl-h"><b>${T('cxTitle')}</b>` +
+      `<span class="hc-badge ok">${T('cxNotNeeded')}</span></div>` +
+      `<div class="cl-hint">${T('cxThirdParty').replace('{p}', escapeHtml(providerLabel(a.provider)))}</div></div>`;
+
+  if (!a.cliFound)
+    return `<div class="cl bad"><div class="cl-h"><b>${T('cxTitle')}</b>` +
+      `<span class="hc-badge bad">${T('cxNoCli')}</span></div>` +
+      `<div class="cl-hint">${T('cxNoCliHint')}</div></div>`;
+
+  if (a.loggedIn && !s)
+    return `<div class="cl ok"><div class="cl-h"><b>${T('cxTitle')}</b>` +
+      `<span class="hc-badge ok">${T('cxLoggedIn')}</span></div>` +
+      (a.raw ? `<div class="cl-who">${escapeHtml(a.raw)}</div>` : '') +
+      `<div class="cl-acts"><button type="button" class="hc-btn" data-cx-start="1">${T('cxRelogin')}</button>` +
+      `<button type="button" class="hc-btn" data-cx-recheck="1">${T('cxRecheck')}</button></div></div>`;
+
+  const phase = (s && s.phase) || 'idle';
+  const body = phase === 'idle' || phase === 'canceled' || phase === 'failed'
+    ? codexLoginIdleHtml(s)
+    : codexLoginRunningHtml(s);
+  const tone = phase === 'done' ? 'ok' : phase === 'failed' ? 'bad' : 'warn';
+  const badge = phase === 'done' ? T('cxLoggedIn') : T('cxNeedLogin');
+  return `<div class="cl ${tone}"><div class="cl-h"><b>${T('cxTitle')}</b>` +
+    `<span class="hc-badge ${tone}">${badge}</span></div>${body}</div>`;
+}
+
+function codexLoginIdleHtml(s) {
+  const err = s && s.error ? `<div class="cl-err sx-pre">${escapeHtml(s.error)}</div>` : '';
+  const mode = Health.cxMode === 'apiKey' ? 'apiKey' : 'chatgpt';
+  const keyBox = mode === 'apiKey'
+    ? `<div class="cl-code">` +
+      `<input type="text" id="cxKeyInput" placeholder="${T('cxKeyPlaceholder')}" autocomplete="off"` +
+      ` value="${escapeHtml(Health.cxKey || '')}" />` +
+      `</div>`
+    : '';
+  return (
+    `<div class="cl-hint">${T('cxWhy')}</div>` +
+    err +
+    `<div class="cl-q">${T('cxPickMode')}</div>` +
+    `<div class="cl-ways">` +
+    clWayBtnHtml2('cx-mode', 'chatgpt', mode, T('cxModeSub'), T('cxModeSubSub')) +
+    clWayBtnHtml2('cx-mode', 'apiKey', mode, T('cxModeKey'), T('cxModeKeySub')) +
+    `</div>` +
+    keyBox +
+    `<div class="cl-acts">` +
+    `<button type="button" class="hc-btn hc-btn-primary" data-cx-start="1">${mode === 'apiKey' ? T('cxSubmitKey') : T('cxStart')}</button>` +
+    `<button type="button" class="hc-btn" data-cx-recheck="1">${T('cxDoneOutside')}</button>` +
+    `</div>` +
+    `<div class="cl-note">${T('cxManual')}<code>codex login --device-auth</code></div>`
+  );
+}
+
+function codexLoginRunningHtml(s) {
+  if (s.mode === 'apiKey' || !s.url)
+    return `<div class="cl-hint">${escapeHtml(s.message || T('cxStarting'))}</div>` +
+      `<div class="cl-acts"><button type="button" class="hc-btn" data-cx-cancel="1">${T('cxCancel')}</button></div>`;
+  const done = s.phase === 'done';
+  if (done)
+    return `<div class="cl-hint">${escapeHtml(s.message || '')}</div>` +
+      `<div class="cl-acts"><button type="button" class="hc-btn" data-cx-recheck="1">${T('cxRecheck')}</button></div>`;
+  return (
+    `<div class="cl-hint">${T('cxRunHint')}</div>` +
+    `<div class="cl-acts">` +
+    `<a class="hc-btn hc-btn-primary cl-open" href="${escapeHtml(s.url)}" target="_blank" rel="noreferrer">${T('cxOpenUrl')}</a>` +
+    `</div>` +
+    `<div class="cl-url" title="${escapeHtml(s.url)}">${escapeHtml(s.url)}</div>` +
+    `<div class="cl-q">${T('cxCodeLabel')}</div>` +
+    `<div class="cl-code">` +
+    `<input type="text" readonly value="${escapeHtml(s.code || '')}" />` +
+    `<button type="button" class="hc-btn" data-cx-copy="1">${T('cxCopyCode')}</button>` +
+    `</div>` +
+    `<div class="cl-msg" id="cxMsg">${escapeHtml(s.message || '')}</div>` +
+    `<div class="cl-acts"><button type="button" class="hc-btn" data-cx-cancel="1">${T('cxCancel')}</button></div>`
+  );
+}
+
+function bindCodexLogin(el) {
+  const on = (sel, fn) => el.querySelectorAll(sel).forEach((b) => { b.onclick = fn; });
+  on('[data-cx-start]', startCodexLogin);
+  on('[data-cx-recheck]', () => renderCodexLogin(el, Health.cxLoginOpts));
+  on('[data-cx-cancel]', cancelCodexLogin);
+  on('[data-cx-mode]', (ev) => {
+    Health.cxMode = ev.currentTarget.dataset.cxMode === 'apiKey' ? 'apiKey' : 'chatgpt';
+    paintCodexLogin();
+  });
+  on('[data-cx-copy]', (ev) => {
+    const code = (Health.cxLogin || {}).code || '';
+    if (!code) return;
+    copyText(code, ev.currentTarget, T('cxCopyCode'));
+    const m = $('cxMsg');
+    if (m) m.textContent = T('cxCopied');
+  });
+  const keyInput = el.querySelector('#cxKeyInput');
+  if (keyInput) keyInput.onkeydown = (ev) => { if (ev.key === 'Enter') startCodexLogin(); };
+}
+
+async function startCodexLogin() {
+  if (Health.cxBusy) return;
+  const mode = Health.cxMode === 'apiKey' ? 'apiKey' : 'chatgpt';
+  let apiKey = '';
+  if (mode === 'apiKey') {
+    const input = $('cxKeyInput');
+    apiKey = ((input && input.value) || '').trim();
+    Health.cxKey = apiKey;
+    if (!apiKey) {
+      Health.cxLogin = { ...(Health.cxLogin || {}), phase: 'failed', mode, error: T('cxNeedKey') };
+      paintCodexLogin();
+      return;
+    }
+  }
+  Health.cxBusy = true;
+  Health.cxLogin = { phase: 'starting', mode, url: '', code: '', message: T('cxStarting'), log: [], error: '' };
+  paintCodexLogin();
+  try {
+    Health.cxLogin = await api('/api/codex/auth/login', { mode, apiKey });
+  } catch (e) {
+    Health.cxLogin = { ...(Health.cxLogin || {}), phase: 'failed', error: e.message || '' };
+  }
+  Health.cxBusy = false;
+  try {
+    Health.cxAuth = await api('/api/codex/auth/status');
+  } catch { /* 保留上一次状态 */ }
+  if (Health.cxAuth && Health.cxAuth.loggedIn) {
+    Health.cxLogin = null;
+    Health.cxKey = '';
+    // 登录成功即代表用户要用「原版 ChatGPT」这一档：把 config.toml 档位切过去，
+    // 否则之前如果配的是 kimi，登录成功了也不会生效（codex 仍按 kimi 代理走）。
+    try { await api('/api/codex/profile', { profile: 'chatgpt' }); } catch { /* 忽略，不阻断登录成功的反馈 */ }
+    paintCodexLogin();
+    if (Health.cxLoginOpts.onLoggedIn) Health.cxLoginOpts.onLoggedIn(Health.cxAuth);
+    return;
+  }
+  paintCodexLogin();
+}
+
+async function cancelCodexLogin() {
+  try {
+    await api('/api/codex/auth/cancel', {});
+  } catch { /* 进程可能已经结束 */ }
+  Health.cxLogin = null;
+  Health.cxKey = '';
+  renderCodexLogin(Health.cxLoginBox, Health.cxLoginOpts);
+}
+
+// WebSocket 推来的登录进度（kind='codexLogin'）：没有 sessionId，必须在按会话过滤之前处理
+function onCodexLoginEvent(e) {
+  if (!Health.cxLoginBox) return;
+  const prev = Health.cxLogin || { log: [] };
+  Health.cxLogin = {
+    phase: e.phase,
+    mode: prev.mode || 'chatgpt',
+    url: e.url || prev.url || '',
+    code: e.code || prev.code || '',
+    message: e.message || prev.message || '',
+    error: e.error || '',
+    log: prev.log || [],
+  };
+  paintCodexLogin();
 }
