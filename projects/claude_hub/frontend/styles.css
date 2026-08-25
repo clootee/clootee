@@ -1666,6 +1666,12 @@ body.show-process .process-panel { display: flex; }
   padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel2);
 }
 .qm-row.held { opacity: 0.7; border-style: dashed; }
+.qm-row.flash-highlight { animation: qmRowFlash 1s ease; }
+@keyframes qmRowFlash {
+  0% { background: var(--panel2); }
+  25% { background: color-mix(in srgb, var(--accent) 40%, var(--panel2)); }
+  100% { background: var(--panel2); }
+}
 .qm-check { display: flex; align-items: center; justify-content: center; min-width: 16px; padding-top: 4px; }
 .qm-check.disabled { cursor: not-allowed; }
 .qm-check.disabled input { opacity: 0.4; cursor: not-allowed; }

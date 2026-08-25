@@ -2673,7 +2673,7 @@ function renderQueue() {
     more.className = 'qmore';
     more.textContent = `+${hidden} ${T('more')}`;
     more.title = T('expandManage');
-    more.addEventListener('click', openQueueModal);
+    more.addEventListener('click', () => openQueueModal());
     box.appendChild(more);
   }
   updateQueueToggle(tasks.length);
@@ -2693,7 +2693,7 @@ function taskEl(t, i) {
   el.dataset.task = t.id;
   // 失败任务的悬浮提示直接带上原因，不用点进弹窗才知道为什么没跑起来
   el.title = t.status === 'error' && t.error ? `${t.prompt}\n\n${t.error}` : t.prompt;
-  el.addEventListener('click', openQueueModal);
+  el.addEventListener('click', () => openQueueModal(t.id));
   const text = escapeHtml(t.prompt.slice(0, 24));
   const holdMark = t.held ? `<span class="qhold" title="${T('held')}">⏸</span>` : '';
   // 仅 pending（尚未开始）任务可直接删除
@@ -2735,12 +2735,23 @@ function upsertTask(t) {
 // ── 任务管理弹窗（整体展开：更大空间 + 批量删除 / 修改 / 复制 / 暂定）──
 const QueueModal = { selected: new Set(), editing: null };
 
-function openQueueModal() {
+function openQueueModal(focusTaskId) {
   if (!State.session) return;
   QueueModal.selected.clear();
   QueueModal.editing = null;
   $('queueModal').hidden = false;
   renderQueueModal();
+  if (focusTaskId) requestAnimationFrame(() => focusQueueModalTask(focusTaskId));
+}
+// 滚动定位到指定任务行并闪烁一次高亮（点内联任务 chip 进弹窗时，让用户一眼找到点的是哪条）
+function focusQueueModalTask(taskId) {
+  const row = $('qmList').querySelector(`[data-task="${CSS.escape(taskId)}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.remove('flash-highlight');
+  void row.offsetWidth; // 强制重排，允许连续点击同一任务时动画能重新触发
+  row.classList.add('flash-highlight');
+  row.addEventListener('animationend', () => row.classList.remove('flash-highlight'), { once: true });
 }
 function closeQueueModal() {
   $('queueModal').hidden = true;
