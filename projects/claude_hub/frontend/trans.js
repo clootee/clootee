@@ -76,6 +76,7 @@ const DICT = {
   wsUseDir: { en: 'Use this directory & new session', zh: '使用此目录并新建会话' },
   sessions: { en: 'Sessions', zh: '会话' },
   newSession: { en: 'New Session', zh: '新建会话' },
+  alreadyNewSession: { en: 'Already a new session', zh: '当前已是新会话' },
   noSessions: { en: 'No sessions under this workspace', zh: '该工作目录下暂无会话' },
   search: { en: 'Search', zh: '搜索' },
   searchSessions: { en: 'Search session titles…', zh: '搜索会话标题…' },

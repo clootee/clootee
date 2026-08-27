@@ -592,6 +592,26 @@ function hideGitPushToast() {
   clearTimeout(gitPushToastTimer);
   $('gitPushToast').hidden = true;
 }
+
+// ── 通用小型提示（如「已经是新会话」），避免用户以为按钮失效 ──
+let miniToastTimer = null;
+function showMiniToast(msg) {
+  clearTimeout(miniToastTimer);
+  const box = $('miniToast');
+  $('miniToastMsg').textContent = msg;
+  box.hidden = false;
+  miniToastTimer = setTimeout(() => (box.hidden = true), 2500);
+}
+
+// 会话列表里对应会话行闪烁一次高亮，提示用户「就是这个」
+function flashSessionRow(sid) {
+  const row = $('sessionList').querySelector(`[data-sid="${CSS.escape(sid)}"]`);
+  if (!row) return;
+  row.classList.remove('flash-highlight');
+  void row.offsetWidth;
+  row.classList.add('flash-highlight');
+  row.addEventListener('animationend', () => row.classList.remove('flash-highlight'), { once: true });
+}
 async function gitPush() {
   const root = currentRoot();
   if (!root) {
@@ -1702,7 +1722,16 @@ async function newSession() {
     const cur = State.session;
     // 与主列表同规则：当前就是该目录下一个空的新会话时直接复用，不重复建
     if (favRoot && cur && cur.rootId === favRoot && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
+      showMiniToast(T('alreadyNewSession'));
+      flashSessionRow(cur.id);
       selectSession(cur.id);
+      focusTaskInputIfDesktop();
+      return;
+    }
+    // 已经是收藏草稿会话（哪怕还没选目录）也算「已经是新会话」，不重复弹目录选择
+    if (cur && isFavoriteDraftId(cur.id)) {
+      showMiniToast(T('alreadyNewSession'));
+      flashSessionRow(cur.id);
       focusTaskInputIfDesktop();
       return;
     }
@@ -1723,6 +1752,8 @@ async function newSession() {
   // 当前已是空的新会话（未发起、无任务）则不再重复创建，直接复用并聚焦输入框
   const cur = State.session;
   if (cur && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
+    showMiniToast(T('alreadyNewSession'));
+    flashSessionRow(cur.id);
     selectSession(cur.id);
     focusTaskInputIfDesktop();
     return;
@@ -3871,8 +3902,15 @@ async function submitTasks() {
   const prompts = parseTaskLines();
   if (prompts.length === 0 || !State.sessionId) return;
   if (State.session && !State.session.rootId) {
-    alert(T('favoriteRootRequired'));
-    return;
+    // 收藏夹草稿会话已预选目录（用户还没点确认）：直接发消息即视为确认，省去多余一步
+    const preferredRootId = isFavoriteDraftId(State.session.id) ? State.session.preferredRootId : '';
+    if (preferredRootId) {
+      await bindFavoriteDraftRoot(preferredRootId);
+      if (!State.session || !State.session.rootId) return; // 绑定失败已弹出错误提示
+    } else {
+      alert(T('favoriteRootRequired'));
+      return;
+    }
   }
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
   await api('/api/task/add', { sessionId: State.sessionId, prompts: prompts.map(applyQuickPrefix) });
