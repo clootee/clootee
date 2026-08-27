@@ -14,6 +14,9 @@ export class RunAsUser {
     if (!cfg || !cfg.enabled || !cfg.user || !cfg.user.trim()) return { bin, args };
     if (process.platform === 'win32') return { bin, args }; // Windows 没有对应机制，忽略
     if (typeof process.getuid !== 'function' || process.getuid() !== 0) return { bin, args }; // 不是 root，不需要切
-    return { bin: 'sudo', args: ['-H', '-u', cfg.user.trim(), '--', bin, ...args] };
+    // --preserve-env=PATH：sudo 默认用自己的 secure_path 覆盖 PATH，而 claude/codex 在 Linux 下
+    // 常常是「裸命令名」（ClaudeBin/CodexBin 靠 PATH 查找，不落地绝对路径），
+    // 不保留 PATH 会导致 sudo 切换用户后直接报 "command not found"（root 自己跑却正常）。
+    return { bin: 'sudo', args: ['-H', '--preserve-env=PATH', '-u', cfg.user.trim(), '--', bin, ...args] };
   }
 }
