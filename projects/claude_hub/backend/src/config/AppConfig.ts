@@ -11,7 +11,8 @@ export const AppConfig = {
 
   // Kimi 转译代理端口：codex 0.141 只支持 Responses API，而 Kimi 只有 Chat Completions，
   // 故本地起一个代理把 codex 的 kimi provider（base_url 指向此端口）转译到 Moonshot。
-  KIMI_PROXY_PORT: Number(process.env.KIMI_PROXY_PORT) || 8972,
+  // 默认取 PORT+2（而非写死 8972）：写死会在 PORT 本身被部署成 8972 时把主端口占掉，导致后端起不来。
+  KIMI_PROXY_PORT: Number(process.env.KIMI_PROXY_PORT) || (Number(process.env.PORT) || 8970) + 2,
 
   // 新建会话时的默认引擎（可被前端设置覆盖并持久化到 data/settings.json）
   DEFAULT_ENGINE: (process.env.DEFAULT_ENGINE === 'codex' ? 'codex' : 'claude') as 'claude' | 'codex',
