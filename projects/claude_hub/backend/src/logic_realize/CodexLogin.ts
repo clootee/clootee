@@ -14,8 +14,10 @@ import { AuthUrl } from '../helper/AuthUrl';
 import { EventBus } from '../helper/EventBus';
 import { Logger } from '../helper/Logger';
 import { RunDiag } from '../helper/RunDiag';
+import { RunAsUser } from '../helper/RunAsUser';
 import { AppConfig } from '../config/AppConfig';
 import { CodexProfile } from './CodexProfile';
+import { Settings } from './Settings';
 
 const LOG_MAX = 200;
 
@@ -60,9 +62,10 @@ export class CodexLogin extends CodexLoginStruct {
         resolve({ loggedIn: false, raw: '', error: RunDiag.explain(e, AppConfig.CODEX_BIN) });
         return;
       }
+      const wrapped = RunAsUser.wrap(r.bin, [...r.prefixArgs, 'login', 'status'], Settings.runAsUser());
       execFile(
-        r.bin,
-        [...r.prefixArgs, 'login', 'status'],
+        wrapped.bin,
+        wrapped.args,
         { timeout: 15000, windowsHide: true, encoding: 'utf-8' },
         (err, stdout, stderr) => {
           const text = AuthUrl.clean(String(stdout || '') + String(stderr || '')).trim();
@@ -74,7 +77,7 @@ export class CodexLogin extends CodexLoginStruct {
             resolve({ loggedIn: false, raw: text });
             return;
           }
-          resolve({ loggedIn: false, raw: text, error: RunDiag.explain(err, r.bin) });
+          resolve({ loggedIn: false, raw: text, error: RunDiag.explain(err, wrapped.bin) });
         },
       );
     });
@@ -106,7 +109,10 @@ export class CodexLogin extends CodexLoginStruct {
     child.stdin?.end();
   }
 
-  private static _spawn(bin: string, args: string[]): ChildProcess {
+  // 登录切到与任务执行同一个用户（见 CodexRunnerStruct 同样的 RunAsUser.wrap），
+  // 否则会出现"以 root 登录成功，但任务实际以 claudeuser 运行、读不到凭据"的错位。
+  private static _spawn(rawBin: string, rawArgs: string[]): ChildProcess {
+    const { bin, args } = RunAsUser.wrap(rawBin, rawArgs, Settings.runAsUser());
     Logger.info('CodexLogin', 'spawn', { bin, args: args.map((a) => (a.length > 40 ? '<redacted>' : a)) });
     const child = spawn(bin, args, {
       shell: false,

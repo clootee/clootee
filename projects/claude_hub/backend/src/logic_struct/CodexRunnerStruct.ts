@@ -2,6 +2,7 @@
 // 与 ClaudeRunnerStruct 对称：只负责"运行一个任务并把事件吐出去"，不负责排队/调度。
 import { ProcessSpawner, SpawnHandle } from '../helper/ProcessSpawner';
 import { CodexBin } from '../helper/CodexBin';
+import { RunAsUser } from '../helper/RunAsUser';
 import { RunDiag, RunDiagInput } from '../helper/RunDiag';
 import { AppConfig } from '../config/AppConfig';
 import { Logger } from '../helper/Logger';
@@ -23,11 +24,10 @@ export class CodexRunnerStruct {
     if (!prompt || !prompt.trim()) throw new Error('execute: empty prompt');
 
     const cliArgs = this._buildArgs(session, rootPath);
-    const { bin, prefixArgs, useShell } = CodexBin.resolve(
-      AppConfig.CODEX_BIN,
-      Toolchain.preferBundled('codex'),
-    );
-    const args = [...prefixArgs, ...cliArgs];
+    const resolved = CodexBin.resolve(AppConfig.CODEX_BIN, Toolchain.preferBundled('codex'));
+    const useShell = resolved.useShell;
+    // 同 ClaudeRunnerStruct：codex 的免确认模式在 root 下同样会被拒绝，默认切到 claudeuser
+    const { bin, args } = RunAsUser.wrap(resolved.bin, [...resolved.prefixArgs, ...cliArgs], Settings.runAsUser());
 
     Logger.info('CodexRunner', 'execute start', {
       sessionId: session.id,

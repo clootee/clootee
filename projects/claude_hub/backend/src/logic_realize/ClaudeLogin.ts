@@ -18,8 +18,10 @@ import { AuthUrl } from '../helper/AuthUrl';
 import { EventBus } from '../helper/EventBus';
 import { Logger } from '../helper/Logger';
 import { RunDiag } from '../helper/RunDiag';
+import { RunAsUser } from '../helper/RunAsUser';
 import { AppConfig } from '../config/AppConfig';
 import { EngineConfig } from './EngineConfig';
+import { Settings } from './Settings';
 
 // 输出日志最多留这么多行（够排查，又不至于把内存堆爆）
 const LOG_MAX = 200;
@@ -64,9 +66,12 @@ export class ClaudeLogin extends ClaudeLoginStruct {
         resolve({ json: null, error: RunDiag.explain(e, AppConfig.CLAUDE_BIN) });
         return;
       }
+      // 状态查询必须与实际跑任务/登录用的是同一个系统用户，否则会出现
+      // "root 已登录，界面却显示未登录"（因为查询走了 root，任务却切到了 claudeuser）这种错位。
+      const wrapped = RunAsUser.wrap(r.bin, [...r.prefixArgs, 'auth', 'status', '--json'], Settings.runAsUser());
       execFile(
-        r.bin,
-        [...r.prefixArgs, 'auth', 'status', '--json'],
+        wrapped.bin,
+        wrapped.args,
         { timeout: 25000, windowsHide: true, encoding: 'utf-8' },
         (err, stdout, stderr) => {
           const text = String(stdout || '') + String(stderr || '');
@@ -79,7 +84,7 @@ export class ClaudeLogin extends ClaudeLoginStruct {
           const hint = /unknown command|未知命令/i.test(text)
             ? '当前 Claude Code 版本过低，没有 `claude auth` 命令，请先在「运行环境」里更新到最新版'
             : err
-              ? RunDiag.explain(err, r.bin)
+              ? RunDiag.explain(err, wrapped.bin)
               : '无法解析 claude auth status 的输出';
           resolve({ json: null, error: `${hint}${text.trim() ? `｜原始输出：${text.trim().slice(0, 300)}` : ''}` });
         },
@@ -112,9 +117,12 @@ export class ClaudeLogin extends ClaudeLoginStruct {
 
   protected static _spawn(mode: LoginMode): void {
     const r = ClaudeBin.resolve(AppConfig.CLAUDE_BIN, false);
-    const args = [...r.prefixArgs, 'auth', 'login', mode === 'console' ? '--console' : '--claudeai'];
-    Logger.info('ClaudeLogin', 'spawn', { bin: r.bin, args });
-    const child = spawn(r.bin, args, {
+    const cliArgs = [...r.prefixArgs, 'auth', 'login', mode === 'console' ? '--console' : '--claudeai'];
+    // 登录也要切到与任务执行同一个用户（见 execute 侧同样的 RunAsUser.wrap），
+    // 否则会出现"以 root 登录成功，但任务实际以 claudeuser 运行、读不到凭据"的错位。
+    const { bin, args } = RunAsUser.wrap(r.bin, cliArgs, Settings.runAsUser());
+    Logger.info('ClaudeLogin', 'spawn', { bin, args });
+    const child = spawn(bin, args, {
       shell: false,
       windowsHide: true,
       env: process.env,
@@ -127,7 +135,7 @@ export class ClaudeLogin extends ClaudeLoginStruct {
     child.stderr?.setEncoding('utf-8');
     child.stdout?.on('data', (c: string) => this._absorb(c));
     child.stderr?.on('data', (c: string) => this._absorb(c));
-    child.on('error', (e) => this._fail(RunDiag.explain(e, r.bin)));
+    child.on('error', (e) => this._fail(RunDiag.explain(e, bin)));
     child.on('close', (code) => this._onClose(code));
   }
 

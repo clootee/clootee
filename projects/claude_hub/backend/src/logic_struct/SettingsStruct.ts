@@ -59,6 +59,19 @@ export interface AppSettings {
   port?: number;          // 服务端口（前端展示局域网访问教程用）
   lanUrls?: string[];     // 本机局域网访问地址 http://<ip>:<port>（供前端「允许局域网访问」教程展示+复制）
   version?: string;       // 当前跑的软件版本（backend/package.json 的 version 字段），顶部版本徽章据此显示
+  // 以哪个系统用户身份运行 claude/codex（仅 Linux/macOS 生效）。
+  // 背景：claude/codex 的免确认模式明确拒绝在 root 下执行；本工具常被安装在以 root 起服务的服务器上。
+  // 默认值不落盘、每次读取时动态判断：Linux/macOS 下用 root 起的服务 → 默认启用且用户名 claudeuser；
+  // 其余情况（本来就是普通用户、或 Windows）→ 默认关闭。用户可在设置里覆盖，覆盖后按落盘值为准。
+  runAsUserEnabled: boolean;
+  runAsUserName: string;
+}
+
+// 未落盘过 runAsUser* 时的动态默认值：Linux/macOS 下用 root 起的服务 → 默认启用、默认用户 claudeuser；
+// 其余情况（Windows，或本来就是普通用户在跑）→ 默认关闭。
+const DEFAULT_RUN_AS_USER_NAME = 'claudeuser';
+function isRoot(): boolean {
+  return process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() === 0;
 }
 
 export class SettingsStruct {
@@ -68,6 +81,12 @@ export class SettingsStruct {
       raw && (raw.defaultEngine === 'codex' || raw.defaultEngine === 'claude')
         ? raw.defaultEngine
         : AppConfig.DEFAULT_ENGINE;
+    const hasRunAsUserEnabled = !!raw && typeof raw.runAsUserEnabled === 'boolean';
+    const runAsUserEnabled = hasRunAsUserEnabled ? !!raw!.runAsUserEnabled : isRoot();
+    const runAsUserName =
+      raw && typeof raw.runAsUserName === 'string' && raw.runAsUserName.trim()
+        ? raw.runAsUserName.trim()
+        : DEFAULT_RUN_AS_USER_NAME;
     return {
       defaultEngine: eng,
       allowLan: !!(raw && raw.allowLan),
@@ -87,7 +106,15 @@ export class SettingsStruct {
       port: AppConfig.PORT,
       lanUrls: NetHelper.lanUrls(AppConfig.PORT),
       version: PackageInfo.version(),
+      runAsUserEnabled,
+      runAsUserName,
     };
+  }
+
+  // 供 Runner/Login 取值：始终返回合法配置（enabled 已按「是否显式设置过」与 root 判断计算好）
+  static runAsUser(): { enabled: boolean; user: string } {
+    const s = this.get();
+    return { enabled: s.runAsUserEnabled, user: s.runAsUserName };
   }
 
   static setDefaultEngine(engine: Engine): AppSettings {
@@ -117,6 +144,12 @@ export class SettingsStruct {
     if (typeof patch.templateCollectionPath === 'string')
       next.templateCollectionPath = patch.templateCollectionPath.trim();
     if (patch.autoCompact) next.autoCompact = this._sanitizeAutoCompact(patch.autoCompact);
+    if (typeof patch.runAsUserEnabled === 'boolean') next.runAsUserEnabled = patch.runAsUserEnabled;
+    if (typeof patch.runAsUserName === 'string') {
+      const name = patch.runAsUserName.trim();
+      if (!name) throw new Error('update: runAsUserName 不能为空');
+      next.runAsUserName = name;
+    }
     return this._patch(next);
   }
 
@@ -133,6 +166,8 @@ export class SettingsStruct {
       quickGroups: patch.quickGroups ?? cur.quickGroups,
       templateCollectionPath: patch.templateCollectionPath ?? cur.templateCollectionPath,
       autoCompact: patch.autoCompact ?? cur.autoCompact,
+      runAsUserEnabled: patch.runAsUserEnabled ?? cur.runAsUserEnabled,
+      runAsUserName: patch.runAsUserName ?? cur.runAsUserName,
     };
     this._write(merged);
     return this.get();

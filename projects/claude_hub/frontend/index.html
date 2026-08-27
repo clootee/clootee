@@ -569,6 +569,23 @@
           <div id="tcList"></div>
           <div class="sx-note sx-pre" id="tcStatus"></div>
           <div class="sx-note sx-pre" id="updateStatus" hidden></div>
+
+          <!-- 高级：以哪个系统用户运行 claude/codex（仅 Linux/macOS；Windows 无此机制，不显示）。
+               默认收起：大多数人不需要碰，只有本工具以 root 起服务时才需要留意。 -->
+          <details class="tc-advanced" id="runAsUserBox" hidden>
+            <summary>高级：以系统用户身份运行</summary>
+            <div class="sx-note">
+              claude / codex 的免确认模式不允许在 root 下直接执行。检测到本工具当前以 root 运行时，
+              默认会自动切到一个普通用户（<code>claudeuser</code>）身份去跑 claude/codex 和它们的登录流程；
+              你也可以关掉这个开关，或改成别的用户名（该用户需要已存在于本机）。
+            </div>
+            <label class="sx-chk"><input type="checkbox" id="runAsUserChk" /><span class="sx-chk-txt"><b>以指定系统用户运行</b><em>关闭=直接用当前进程的用户身份跑（root 下会被 claude/codex 拒绝）</em></span></label>
+            <div class="sx-row">
+              <input class="sx-input" id="runAsUserName" placeholder="claudeuser" style="max-width:200px" />
+              <button class="sx-btn sx-btn-auto" id="runAsUserSaveBtn">保存</button>
+            </div>
+            <div class="sx-note sx-pre" id="runAsUserStatus"></div>
+          </details>
         </div>
 
         <!-- ═══ 板块：软件本身的版本更新（对比本地 git 与 GitHub 最新 commit）═══ -->

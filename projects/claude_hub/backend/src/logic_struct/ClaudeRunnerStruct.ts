@@ -2,6 +2,7 @@
 // 不负责排队/调度，只负责"运行一个任务并把事件吐出去"
 import { ProcessSpawner, SpawnHandle } from '../helper/ProcessSpawner';
 import { ClaudeBin } from '../helper/ClaudeBin';
+import { RunAsUser } from '../helper/RunAsUser';
 import { RunDiag, RunDiagInput } from '../helper/RunDiag';
 import { AppConfig } from '../config/AppConfig';
 import { Logger } from '../helper/Logger';
@@ -52,11 +53,11 @@ export class ClaudeRunnerStruct {
     // 解析真实可执行文件：Windows 下把 claude.cmd 解析成 claude.exe/`node cli.js` 并用 shell:false，
     // 避免含换行/引号的 --append-system-prompt 在 shell 拼接时截断命令、丢掉 --resume（会话分裂根因）。
     // 用本机版还是内置版由「运行环境」面板的偏好决定（默认本机优先，本机没有才用内置）。
-    const { bin, prefixArgs, useShell } = ClaudeBin.resolve(
-      AppConfig.CLAUDE_BIN,
-      Toolchain.preferBundled('claude'),
-    );
-    const args = [...prefixArgs, ...cliArgs];
+    const resolved = ClaudeBin.resolve(AppConfig.CLAUDE_BIN, Toolchain.preferBundled('claude'));
+    const useShell = resolved.useShell;
+    // root 下跑 claude 的免确认模式会被它自己拒绝（--dangerously-skip-permissions 明确禁止 root）；
+    // 默认切到 claudeuser（见 Settings.runAsUser 的默认值规则），用户可在设置里关掉或改用户名。
+    const { bin, args } = RunAsUser.wrap(resolved.bin, [...resolved.prefixArgs, ...cliArgs], Settings.runAsUser());
 
     // 启动前记录完整上下文：命令、参数、工作目录、prompt 摘要、会话状态
     Logger.info('ClaudeRunner', 'execute start', {

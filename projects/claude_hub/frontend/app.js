@@ -5,7 +5,7 @@ const State = {
   sessions: [],
   sessionId: '',
   session: null,
-  settings: { defaultEngine: 'claude', platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0, version: '' }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址 + 软件版本号（从后端 /api/settings 加载）
+  settings: { defaultEngine: 'claude', platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0, version: '', runAsUserEnabled: false, runAsUserName: 'claudeuser' }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址 + 软件版本号 + 以系统用户运行（从后端 /api/settings 加载）
   running: new Set(),                     // 正在执行任务的会话 id 集合（驱动侧栏"执行中"标识）
   runningTasks: new Map(),                // 会话 id → 该会话正在跑的任务 id 集合；running 即它的非空键集（排队新消息不会误清执行中）
   justFinished: new Set(),                // 刚从执行中变为停止、且用户尚未点开查看的会话 id（驱动侧栏"刚执行"醒目标识，区别于状态"已完成"）
@@ -5053,6 +5053,7 @@ function bind() {
   $('codexSaveBtn').addEventListener('click', () => saveEngineProvider('codex'));
   // 更新引擎 + 修改密码
   $('tcRefreshBtn').addEventListener('click', renderToolchain);
+  $('runAsUserSaveBtn').addEventListener('click', saveRunAsUser);
   $('tcAllBundledBtn').addEventListener('click', () => setToolPreset('bundled'));
   $('tcAutoBtn').addEventListener('click', () => setToolPreset('auto'));
   // 软件本身的版本更新
@@ -5268,6 +5269,8 @@ async function loadSettings() {
       State.settings.quickGroups = Array.isArray(s.quickGroups) ? s.quickGroups : [];
       if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
       if (typeof s.version === 'string' && s.version) State.settings.version = s.version;
+      State.settings.runAsUserEnabled = !!s.runAsUserEnabled;
+      State.settings.runAsUserName = typeof s.runAsUserName === 'string' ? s.runAsUserName : 'claudeuser';
       renderQuick();
     }
   } catch { /* 忽略：用默认值 */ }
@@ -5841,6 +5844,44 @@ function fillRuntimePane() {
   // 网络体检排在工具链前面（决定「能不能连上」）。
   // Claude 账号登录已移到「AI 引擎」板块的原版服务商下——只有原版才需要登录
   runNetCheck($('hcBox'), {});
+  renderRunAsUserBox();
+}
+
+// 「以系统用户身份运行」折叠块：只在 Linux/macOS 显示（Windows 没有对应机制）。
+// 折叠默认收起——大多数人（本来就是普通用户在跑）根本不需要碰这个开关。
+function renderRunAsUserBox() {
+  const box = $('runAsUserBox');
+  if (State.settings.platform === 'win32') {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  $('runAsUserChk').checked = !!State.settings.runAsUserEnabled;
+  $('runAsUserName').value = State.settings.runAsUserName || 'claudeuser';
+  $('runAsUserStatus').textContent = '';
+}
+
+async function saveRunAsUser() {
+  const enabled = $('runAsUserChk').checked;
+  const name = $('runAsUserName').value.trim();
+  const statusEl = $('runAsUserStatus');
+  if (enabled && !name) {
+    statusEl.textContent = '用户名不能为空';
+    statusEl.className = 'sx-note sx-pre err';
+    return;
+  }
+  statusEl.textContent = '保存中…';
+  statusEl.className = 'sx-note sx-pre';
+  const s = await patchSettings({ runAsUserEnabled: enabled, runAsUserName: name || 'claudeuser' });
+  if (!s) {
+    statusEl.textContent = '保存失败，请重试';
+    statusEl.className = 'sx-note sx-pre err';
+    return;
+  }
+  State.settings.runAsUserEnabled = !!s.runAsUserEnabled;
+  State.settings.runAsUserName = s.runAsUserName || 'claudeuser';
+  statusEl.textContent = '已保存';
+  statusEl.className = 'sx-note sx-pre';
 }
 
 async function renderToolchain() {
