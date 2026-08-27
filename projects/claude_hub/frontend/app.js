@@ -1706,8 +1706,8 @@ async function newSession() {
       focusTaskInputIfDesktop();
       return;
     }
-    createFavoriteDraftSession();
-    if (favRoot) await bindFavoriteDraftRoot(favRoot);
+    // 不再自动绑定：即使收藏夹按目录筛选中，也只是把该目录预选中，仍需用户点确认才真正建会话
+    createFavoriteDraftSession(favRoot);
     focusTaskInputIfDesktop();
     return;
   }
@@ -1741,11 +1741,12 @@ function isFavoriteDraftId(id) {
   return String(id || '').startsWith('favorite-draft-');
 }
 
-function createFavoriteDraftSession() {
+function createFavoriteDraftSession(preferredRootId = '') {
   const now = Date.now();
   const draft = {
     id: `favorite-draft-${now}`,
     rootId: '',
+    preferredRootId,
     name: '',
     engine: State.settings.defaultEngine,
     claudeSessionId: '',
@@ -2051,6 +2052,11 @@ function favoriteDraftRootPickerEl() {
     o.textContent = `${r.name} (${r.path})`;
     sel.appendChild(o);
   });
+  // 收藏夹按目录筛选时，把该目录预选为默认项，但仍需用户点「确认」才真正建会话，不自动触发
+  const preferredRootId = State.session?.preferredRootId || '';
+  if (preferredRootId && sortedRoots().some((r) => r.id === preferredRootId)) {
+    sel.value = preferredRootId;
+  }
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'primary sm';
@@ -3794,10 +3800,9 @@ async function ensureSession() {
   if (State.sessionId) return true;
   // 收藏夹视图：创建一个待绑定根目录的草稿会话（后续仍需绑定根目录才能发任务）。
   if (State.favoritesOnly) {
-    createFavoriteDraftSession();
-    const favRoot = favFilterRootId();
-    if (favRoot) await bindFavoriteDraftRoot(favRoot); // 目录筛选中 → 直接绑定，省掉「请先选目录」
-    return !!State.sessionId;
+    // 即使目录筛选中也不自动绑定：只预选该目录，仍需用户点确认，避免误发到错误目录
+    createFavoriteDraftSession(favFilterRootId());
+    return false;
   }
   // 工作台模式：必须先选工作目录，无法静默创建，走原有目录选择流程。
   if (isWorkspace()) {
