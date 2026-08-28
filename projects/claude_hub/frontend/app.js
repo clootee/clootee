@@ -2063,9 +2063,8 @@ function gsRootChooserEl() {
   return row;
 }
 
-// 收藏夹草稿会话缺目录时的引导：不再是自成一套的下拉选择，而是与左侧「＋」完全复用
-// 同一套流程（选已有目录 / 新建项目，新建项目再走「输入名字＋选父目录」），点了才真正绑定。
-// 若当前是按目录筛选进来的，额外给一个「直接用 xxx」的快捷按钮，但同样需要用户主动点击确认。
+// 收藏夹草稿会话缺目录时的引导：左边是「选已注册目录（默认当前筛选目录）＋确认」，
+// 右边「＋ 新建目录」与左侧「＋」按钮完全复用同一套引导（选已有目录/新建项目）。
 function favoriteDraftRootPickerEl() {
   const wrap = document.createElement('div');
   wrap.className = 'favorite-root-required';
@@ -2074,31 +2073,42 @@ function favoriteDraftRootPickerEl() {
   label.textContent = T('favoriteRootRequired');
   const row = document.createElement('div');
   row.className = 'frr-row';
+  const sel = document.createElement('select');
+  sel.className = 'frr-select';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = T('selectRootFirst');
+  sel.appendChild(empty);
+  sortedRoots().forEach((r) => {
+    const o = document.createElement('option');
+    o.value = r.id;
+    o.textContent = `${r.name} (${r.path})`;
+    sel.appendChild(o);
+  });
+  // 收藏夹按目录筛选时，把该目录预选为默认项，但仍需用户点「确认」才真正建会话，不自动触发
+  const preferredRootId = State.session?.preferredRootId || '';
+  if (preferredRootId && sortedRoots().some((r) => r.id === preferredRootId)) {
+    sel.value = preferredRootId;
+  }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'primary sm';
+  btn.textContent = T('confirm');
   const progress = document.createElement('div');
   progress.className = 'frr-progress';
   progress.setAttribute('role', 'progressbar');
   progress.hidden = true;
-  const controls = { wrap, progress };
-
-  const preferredRootId = State.session?.preferredRootId || '';
-  const preferredRoot = preferredRootId ? sortedRoots().find((r) => r.id === preferredRootId) : null;
-  if (preferredRoot) {
-    const useBtn = document.createElement('button');
-    useBtn.type = 'button';
-    useBtn.className = 'primary sm';
-    useBtn.textContent = `${T('confirm')}: ${preferredRoot.name}`;
-    useBtn.addEventListener('click', () => bindFavoriteDraftRoot(preferredRoot.id, controls));
-    row.appendChild(useBtn);
-  }
-
+  const controls = { wrap, sel, btn, progress };
+  btn.addEventListener('click', () => bindFavoriteDraftRoot(sel.value, controls));
   // 与左侧「＋」按钮完全同一套引导：选已有目录（走目录浏览器）或新建项目，再回调绑定本草稿会话
-  const pickBtn = document.createElement('button');
-  pickBtn.type = 'button';
-  pickBtn.className = preferredRoot ? 'sm' : 'primary sm';
-  pickBtn.textContent = T('selectRootFirst');
-  pickBtn.addEventListener('click', pickNewFavoriteRoot);
-  row.appendChild(pickBtn);
-
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'sm';
+  addBtn.textContent = '＋ ' + T('addNewDir');
+  addBtn.addEventListener('click', pickNewFavoriteRoot);
+  row.appendChild(sel);
+  row.appendChild(btn);
+  row.appendChild(addBtn);
   wrap.appendChild(label);
   wrap.appendChild(row);
   wrap.appendChild(progress);
