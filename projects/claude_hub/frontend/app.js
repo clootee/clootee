@@ -2100,6 +2100,11 @@ function favoriteDraftRootPickerEl() {
   progress.hidden = true;
   const controls = { wrap, sel, btn, progress };
   btn.addEventListener('click', () => bindFavoriteDraftRoot(sel.value, controls));
+  // 下拉选中的目录先记到草稿会话上：不立刻绑定，但若用户直接发消息，就用它当默认确认
+  sel.addEventListener('change', () => {
+    if (State.session) State.session.pendingRootId = sel.value;
+  });
+  if (State.session) State.session.pendingRootId = sel.value;
   // 与左侧「＋」按钮完全同一套引导：选已有目录（走目录浏览器）或新建项目，再回调绑定本草稿会话
   const addBtn = document.createElement('button');
   addBtn.type = 'button';
@@ -3857,8 +3862,15 @@ async function addTask() {
   if (!raw) return;
   if (!State.sessionId && !(await ensureSession())) return;
   if (State.session && !State.session.rootId) {
-    alert(T('favoriteRootRequired'));
-    return;
+    // 下拉框已经选好目录时，直接发消息就等同于替用户点了一次确认，不用再多点一下
+    const pendingRootId = State.session.pendingRootId || '';
+    if (pendingRootId) {
+      await bindFavoriteDraftRoot(pendingRootId);
+    }
+    if (!State.session || !State.session.rootId) {
+      alert(T('favoriteRootRequired'));
+      return;
+    }
   }
   ta.value = '';
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
@@ -3898,10 +3910,10 @@ async function submitTasks() {
   const prompts = parseTaskLines();
   if (prompts.length === 0 || !State.sessionId) return;
   if (State.session && !State.session.rootId) {
-    // 收藏夹草稿会话已预选目录（用户还没点确认）：直接发消息即视为确认，省去多余一步
-    const preferredRootId = isFavoriteDraftId(State.session.id) ? State.session.preferredRootId : '';
-    if (preferredRootId) {
-      await bindFavoriteDraftRoot(preferredRootId);
+    // 收藏夹草稿会话下拉框已选好目录（用户还没点确认）：直接发消息即视为确认，省去多余一步
+    const pendingRootId = State.session.pendingRootId || '';
+    if (pendingRootId) {
+      await bindFavoriteDraftRoot(pendingRootId);
       if (!State.session || !State.session.rootId) return; // 绑定失败已弹出错误提示
     } else {
       alert(T('favoriteRootRequired'));
