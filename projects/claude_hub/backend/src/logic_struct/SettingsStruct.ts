@@ -5,6 +5,7 @@ import { Engine } from '../models/Types';
 import { OutEnd } from '../helper/OutEnd';
 import { NetHelper } from '../helper/NetHelper';
 import { PackageInfo } from '../helper/PackageInfo';
+import { RunAsUser } from '../helper/RunAsUser';
 
 // 快捷按钮：一个组内互斥（单选，可取消），组与组之间互不影响（可各选一个）
 export interface QuickTag {
@@ -115,6 +116,14 @@ export class SettingsStruct {
   static runAsUser(): { enabled: boolean; user: string } {
     const s = this.get();
     return { enabled: s.runAsUserEnabled, user: s.runAsUserName };
+  }
+
+  // claude/codex 子进程实际落地的家目录：仅当 runAsUser 真会切换身份（root + 已启用）时才不同于
+  // 当前进程自己的 home——此时找会话 jsonl / claude 自身 settings.json 等必须去这个目录，否则永远读到空。
+  // 未触发切换时返回 undefined，调用方按 os.homedir() 原样处理即可。
+  static effectiveHomeDir(): string | undefined {
+    const cfg = this.runAsUser();
+    return RunAsUser.isActive(cfg) ? RunAsUser.homeDirFor(cfg.user) : undefined;
   }
 
   static setDefaultEngine(engine: Engine): AppSettings {

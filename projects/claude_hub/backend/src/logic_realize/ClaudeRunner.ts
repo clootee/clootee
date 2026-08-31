@@ -42,7 +42,7 @@ export class ClaudeRunner extends ClaudeRunnerStruct {
     //   "No conversation found" 且退出码仍为 0 → 本条消息静默丢失。此时退回首跑
     //   （不传 --resume），让 claude 生成新 id，再由 stream-json 回读校正，消息绝不丢。
     if (session.claudeSessionId) {
-      if (ClaudeStoreHelper.sessionExists(rootPath, session.claudeSessionId)) {
+      if (ClaudeStoreHelper.sessionExists(rootPath, session.claudeSessionId, Settings.effectiveHomeDir())) {
         args.push('--resume', session.claudeSessionId);
       } else {
         Logger.warn('ClaudeRunner', 'stale claudeSessionId, jsonl 不存在，改为首跑新建', {

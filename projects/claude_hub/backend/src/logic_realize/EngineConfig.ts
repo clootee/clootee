@@ -12,6 +12,7 @@ import { CodexStoreHelper } from '../helper/CodexStoreHelper';
 import { CodexTomlHelper } from '../helper/CodexTomlHelper';
 import { AppConfig } from '../config/AppConfig';
 import { EngineProviderConfig } from '../models/Types';
+import { Settings } from './Settings';
 
 export class EngineConfig extends EngineConfigStruct {
   // 返回落盘的原始 JSON。可能是旧的扁平结构（各服务商共用一份字段），
@@ -48,7 +49,7 @@ export class EngineConfig extends EngineConfigStruct {
   // ~/.claude/settings.json 的 env 段：只增删 MANAGED_ENV_KEYS，用户自己写的键/其他字段原样保留。
   // 文件坏掉（非法 JSON / 非对象）时另存为 settings.json.broken 再重建，避免把 claude 配成起不来。
   protected static _syncClaudeSettings(env: Record<string, string>): void {
-    const file = ClaudeStoreHelper.settingsFile();
+    const file = ClaudeStoreHelper.settingsFile(Settings.effectiveHomeDir());
     // 原版订阅 + 文件本来就不存在 → 没什么要清的，不必凭空造一个 settings.json
     if (!fs.existsSync(file) && Object.keys(env).length === 0) return;
     let json: any = {};

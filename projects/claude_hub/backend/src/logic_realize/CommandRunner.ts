@@ -7,6 +7,7 @@ import { ClaudeRunner } from './ClaudeRunner';
 import { ClaudeStoreHelper } from '../helper/ClaudeStoreHelper';
 import { Logger } from '../helper/Logger';
 import { Session } from '../models/Types';
+import { Settings } from './Settings';
 
 export class CommandRunner extends CommandRunnerStruct {
   protected static _resolveContext(sessionId: string, spec: CommandSpec): CommandContext {
@@ -20,7 +21,8 @@ export class CommandRunner extends CommandRunnerStruct {
     if (spec.needsSession) {
       // 依赖当前对话上下文（如 /compact）：必须有真实 jsonl 才能 --resume 续接执行
       const started =
-        !!session.claudeSessionId && ClaudeStoreHelper.sessionExists(rootPath, session.claudeSessionId);
+        !!session.claudeSessionId &&
+        ClaudeStoreHelper.sessionExists(rootPath, session.claudeSessionId, Settings.effectiveHomeDir());
       if (!started) {
         throw new Error(`命令「${spec.slash}」需要一个已经开始对话的会话`);
       }
@@ -91,7 +93,7 @@ export class CommandRunner extends CommandRunnerStruct {
 
   protected static _cleanup(rootPath: string, realSessionId: string): void {
     if (!realSessionId) return;
-    ClaudeStoreHelper.removeSessionFile(rootPath, realSessionId);
+    ClaudeStoreHelper.removeSessionFile(rootPath, realSessionId, Settings.effectiveHomeDir());
     Logger.info('CommandRunner', 'cleaned throwaway session jsonl', { rootPath, realSessionId });
   }
 }

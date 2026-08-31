@@ -7,6 +7,7 @@ import { RootManager } from './RootManager';
 import { ClaudeStoreHelper } from '../helper/ClaudeStoreHelper';
 import { CodexStoreHelper } from '../helper/CodexStoreHelper';
 import { JsonStore } from '../helper/JsonStore';
+import { Settings } from './Settings';
 import { Paths } from '../paths';
 import { Session, Message, SessionSearchHit } from '../models/Types';
 
@@ -72,7 +73,7 @@ export class SessionManager extends SessionManagerStruct {
   protected static _nativeMetas(rootId: string): Session[] {
     try {
       const root = RootManager.getRoot(rootId);
-      return NativeSession.metas(root.path, rootId);
+      return NativeSession.metas(root.path, rootId, Settings.effectiveHomeDir());
     } catch {
       return [];
     }
@@ -98,7 +99,7 @@ export class SessionManager extends SessionManagerStruct {
       return null;
     }
     try {
-      return NativeSession.metaOne(root.path, rootId, uuid);
+      return NativeSession.metaOne(root.path, rootId, uuid, Settings.effectiveHomeDir());
     } catch {
       /* 非 claude 会话，试 codex */
     }
@@ -117,7 +118,7 @@ export class SessionManager extends SessionManagerStruct {
         return CodexSession.importMessages(session.claudeSessionId);
       }
       const root = RootManager.getRoot(session.rootId);
-      return NativeSession.importMessages(root.path, session.claudeSessionId);
+      return NativeSession.importMessages(root.path, session.claudeSessionId, Settings.effectiveHomeDir());
     } catch {
       return [];
     }
@@ -160,13 +161,13 @@ export class SessionManager extends SessionManagerStruct {
       }
       if (engine === 'claude') {
         const root = RootManager.getRoot(rootId);
-        ClaudeStoreHelper.removeSessionFile(root.path, realUuid);
+        ClaudeStoreHelper.removeSessionFile(root.path, realUuid, Settings.effectiveHomeDir());
         return;
       }
       // 引擎未知（非 live，从 id 无法判定）：两边都尝试删，命中即止
       try {
         const root = RootManager.getRoot(rootId);
-        ClaudeStoreHelper.removeSessionFile(root.path, realUuid);
+        ClaudeStoreHelper.removeSessionFile(root.path, realUuid, Settings.effectiveHomeDir());
       } catch {
         /* ignore */
       }

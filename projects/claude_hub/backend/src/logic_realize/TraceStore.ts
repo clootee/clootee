@@ -7,6 +7,7 @@ import { JsonlStore } from '../helper/JsonlStore';
 import { ClaudeStoreHelper } from '../helper/ClaudeStoreHelper';
 import { Paths } from '../paths';
 import { RootManager } from './RootManager';
+import { Settings } from './Settings';
 import { TraceEvent, TraceStats, TraceToolStat, TraceSlow, TraceTaskStat, TracePhaseBreakdown, TraceCounts } from '../models/Types';
 
 interface RawFrame {
@@ -50,11 +51,12 @@ export class TraceStore extends TraceStoreStruct {
     } catch {
       return [];
     }
-    if (!ClaudeStoreHelper.sessionExists(rootPath, uuid)) return [];
+    const homeDir = Settings.effectiveHomeDir();
+    if (!ClaudeStoreHelper.sessionExists(rootPath, uuid, homeDir)) return [];
 
     const out: TraceEvent[] = [];
     let seq = 0;
-    for (const ln of ClaudeStoreHelper.readLines(ClaudeStoreHelper.sessionFile(rootPath, uuid))) {
+    for (const ln of ClaudeStoreHelper.readLines(ClaudeStoreHelper.sessionFile(rootPath, uuid, homeDir))) {
       const f = this._parseFrame(ln);
       if (!f) continue;
       const ts = f.timestamp ? Date.parse(f.timestamp) || 0 : 0;
