@@ -340,6 +340,11 @@ export class Server {
         RootManager.resetExternalApiToken(String(req.body.id || '')),
       ),
     );
+    app.post('/api/root/external/base-url', (req, res) =>
+      this._wrap(res, 'root.externalBaseUrl', () =>
+        RootManager.setExternalApiBaseUrl(String(req.body.id || ''), String(req.body.baseUrl || '')),
+      ),
+    );
 
     // ── 项目模板（缺少 CLAUDE.md/AGENTS.md 时引导选模板）──
     app.get('/api/template/need', (req, res) =>

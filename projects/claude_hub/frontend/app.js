@@ -157,9 +157,14 @@ function applyText() {
   $('extApiTokenLabel').textContent = T('extApiTokenLabel');
   $('extApiCopyToken').textContent = T('extApiCopyToken');
   $('extApiResetToken').textContent = T('extApiResetToken');
+  $('extApiBaseUrlLabel').textContent = T('extApiBaseUrlLabel');
+  $('extApiBaseUrlHint').textContent = T('extApiBaseUrlHint');
+  $('extApiSaveBaseUrl').textContent = T('save');
   $('extApiExampleLabel').textContent = T('extApiExampleLabel');
   $('extApiDone').textContent = T('extApiDone');
   $('extApiBtn').title = T('extApiTitle');
+  $('extMsgToastGo').textContent = T('extMsgToastGo');
+  $('extMsgToastClose').title = T('close');
   $('sessionsLabel').textContent = T('sessions');
   refreshNewSessionButton();
   $('wsDirTitle').textContent = T('wsPickDirTitle');
@@ -614,6 +619,30 @@ function showMiniToast(msg) {
   miniToastTimer = setTimeout(() => (box.hidden = true), 2500);
 }
 
+// ── 外部消息到达提示（不管当前正看哪个会话，落地就弹）──
+let extMsgToastTimer = null;
+function showExtMsgToast(sessionId, promptPreview) {
+  clearTimeout(extMsgToastTimer);
+  const box = $('extMsgToast');
+  $('extMsgToastMsg').textContent = T('extMsgToastMsg', { text: (promptPreview || '').slice(0, 60) });
+  $('extMsgToastGo').onclick = () => {
+    box.hidden = true;
+    jumpToExternalSession(sessionId);
+  };
+  box.hidden = false;
+  extMsgToastTimer = setTimeout(() => (box.hidden = true), 15000);
+}
+// 切到外部消息所在的根目录（如果不是当前正看的）并打开该会话
+async function jumpToExternalSession(sessionId) {
+  const rootId = (sessionId || '').split(':')[0];
+  if (rootId && rootId !== State.rootId) {
+    applyRootSelection(rootId);
+    await loadSessions();
+  }
+  selectSession(sessionId);
+  flashSessionRow(sessionId);
+}
+
 // 会话列表里对应会话行闪烁一次高亮，提示用户「就是这个」
 function flashSessionRow(sid) {
   const row = $('sessionList').querySelector(`[data-sid="${CSS.escape(sid)}"]`);
@@ -708,11 +737,25 @@ function closeExternalApi() {
 function fillExternalApiPanel(rootId, status) {
   $('extApiOpenChk').checked = status.externalApiOpen !== false;
   $('extApiToken').value = status.externalApiToken || '';
+  $('extApiBaseUrl').value = status.externalApiBaseUrl || '';
+  const base = status.externalApiBaseUrl || location.origin;
   $('extApiExample').value =
-    `curl -X POST ${location.origin}/api/external/message \\\n` +
+    `curl -X POST ${base}/api/external/message \\\n` +
     `  -H "Content-Type: application/json" \\\n` +
     `  -d '{"rootId":"${rootId}","token":"${status.externalApiToken || ''}",` +
-    `"sessionId":"<sessionId>","content":"<回复内容>"}'`;
+    `"sessionId":"<sessionId>","content":"<回复内容>"}'\n\n` +
+    `# 会话里的 AI 也可以直接读环境变量自己拼，不用你手填：\n` +
+    `# CLOOTEE_ROOT_ID / CLOOTEE_SESSION_ID / CLOOTEE_EXTERNAL_TOKEN / CLOOTEE_EXTERNAL_BASE_URL`;
+}
+async function saveExternalApiBaseUrl() {
+  const root = currentRoot();
+  if (!root) return;
+  try {
+    const status = await api('/api/root/external/base-url', { id: root.id, baseUrl: $('extApiBaseUrl').value.trim() });
+    fillExternalApiPanel(root.id, status);
+  } catch (e) {
+    alert(e.message);
+  }
 }
 async function toggleExternalApiOpen() {
   const root = currentRoot();
@@ -4316,6 +4359,8 @@ function connectWs() {
     if (e.kind === 'task') {
       updateRunningFromTask(e.sessionId, e.task);
       if (e.task.status === 'done') dropTaskNotices(e.task.id); // 跑通了就撤掉中途的告警
+      // 外部系统推送来的消息：不管现在正看哪个会话都弹一下，不能让用户全靠手动刷新才发现
+      if (e.task.external && e.task.status === 'pending') showExtMsgToast(e.sessionId, e.task.prompt);
     }
     // 运行提示（引擎无响应等）：任务还没结束就要让用户看到
     if (e.kind === 'notice') { pushNotice(e); return; }
@@ -5335,6 +5380,8 @@ function bind() {
   $('extApiOpenChk').addEventListener('change', toggleExternalApiOpen);
   $('extApiResetToken').addEventListener('click', resetExternalApiToken);
   $('extApiCopyToken').addEventListener('click', copyExternalApiToken);
+  $('extApiSaveBaseUrl').addEventListener('click', saveExternalApiBaseUrl);
+  $('extMsgToastClose').addEventListener('click', () => { $('extMsgToast').hidden = true; });
   $('closeProcessBtn').addEventListener('click', () => document.body.classList.remove('show-process'));
   // 右下角错误小圆圈：点开/收起；点浮层外面或按 Esc 收起（点圆圈本身交给它自己 toggle）
   $('noticeFab').addEventListener('click', (e) => { e.stopPropagation(); toggleNoticePop(); });

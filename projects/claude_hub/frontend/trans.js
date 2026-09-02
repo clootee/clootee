@@ -1011,8 +1011,12 @@ const DICT = {
   extApiCopyToken: { en: 'Copy', zh: '复制' },
   extApiResetToken: { en: 'Reset', zh: '重置' },
   extApiResetConfirm: { en: 'Reset the token? The old token will stop working immediately.', zh: '确定重置 token？旧 token 立即失效。' },
+  extApiBaseUrlLabel: { en: 'Publicly reachable address', zh: '对外可达地址' },
+  extApiBaseUrlHint: { en: 'Optional. Fill this in if this machine is exposed via a tunnel (e.g. relay) so it is not directly reachable at this browser\'s address — the AI running inside a session reads it from CLOOTEE_EXTERNAL_BASE_URL automatically.', zh: '可选。如果这台机器是经隧道（如 relay）暴露出去的、外部系统打不通浏览器地址栏这个地址，就填在这里——会话里的 AI 会自动从 CLOOTEE_EXTERNAL_BASE_URL 读到它。' },
   extApiExampleLabel: { en: 'Example call', zh: '调用示例' },
   extApiDone: { en: 'Done', zh: '完成' },
+  extMsgToastMsg: { en: 'External message arrived: {text}', zh: '收到外部消息：{text}' },
+  extMsgToastGo: { en: 'View', zh: '查看' },
 };
 
 let LANG = localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');

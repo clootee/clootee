@@ -149,6 +149,17 @@ export class RootManagerStruct {
     return root;
   }
 
+  // 设置该根目录对外可达的地址（供运行中的 AI 通过环境变量拿到，自己拼 bridge 参数）；传空串=清除
+  static setExternalApiBaseUrl(id: string, baseUrl: string): Root {
+    if (!id) throw new Error(`setExternalApiBaseUrl: invalid id=${id}`);
+    const roots = this.listRoots();
+    const root = roots.find((r) => r.id === id);
+    if (!root) throw new Error(`setExternalApiBaseUrl: not found, id=${id}`);
+    root.externalApiBaseUrl = (baseUrl || '').trim();
+    JsonStore.write(Paths.ROOTS_FILE, roots);
+    return root;
+  }
+
   // 开放/关闭某根目录的外部消息注入 API（开放时若无 token 顺带生成）
   static setExternalApiOpen(id: string, open: boolean): Root {
     if (!id) throw new Error(`setExternalApiOpen: invalid id=${id}`);

@@ -9,6 +9,8 @@ import { Logger } from '../helper/Logger';
 import { Session } from '../models/Types';
 import { Settings } from '../logic_realize/Settings';
 import { Toolchain } from '../logic_realize/Toolchain';
+import { RootManager } from '../logic_realize/RootManager';
+import { ExternalEnv } from '../helper/ExternalEnv';
 import { TraceInput } from './TraceStoreStruct';
 
 // 执行器上报的轨迹事件：taskId 由队列侧补（执行器不关心任务编号）
@@ -163,6 +165,7 @@ export class ClaudeRunnerStruct {
       prompt,
       useShell,
       AppConfig.ENGINE_SILENCE_WARN_MS,
+      ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
     );
   }
 

@@ -37,7 +37,7 @@ export class ExternalInboxStruct {
     const text = target.fallback
       ? `[外部消息 - 原会话已不存在，已改投新会话]\n${content}`
       : content;
-    return TaskQueue.addTasks(target.sessionId, [text]);
+    return TaskQueue.addTasks(target.sessionId, [text], true);
   }
 
   // 目标会话是否仍存在；不存在则在同根目录下新建一个会话兜底承接（并标记收藏，避免消息悄悄丢失）

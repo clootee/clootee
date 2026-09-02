@@ -25,6 +25,7 @@ export class ProcessSpawner {
     stdinInput?: string, // 若提供，写入子进程 stdin（避免命令行参数的引号/空格问题）
     useShell: boolean = process.platform === 'win32', // 是否经 shell 启动（默认沿用旧行为）
     startupSilenceMs = 0, // >0 时启用「启动后零输出」看门狗；0=不监控
+    extraEnv?: Record<string, string>, // 额外注入的环境变量（叠加在 process.env 之上），无则不传
   ): SpawnHandle {
     // 注意：shell:true 时参数仅被拼接、不转义，含换行/引号的参数（如 --append-system-prompt）
     // 会破坏命令行、丢失后续参数。调用方应尽量传入可直接执行的可执行文件并令 useShell=false。
@@ -32,7 +33,7 @@ export class ProcessSpawner {
       cwd,
       shell: useShell,
       windowsHide: true,
-      env: process.env,
+      env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
     });
 
     if (stdinInput !== undefined) {

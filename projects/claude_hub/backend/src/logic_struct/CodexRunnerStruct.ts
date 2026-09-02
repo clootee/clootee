@@ -10,6 +10,8 @@ import { Session } from '../models/Types';
 import { RunCallbacks } from './ClaudeRunnerStruct';
 import { Settings } from '../logic_realize/Settings';
 import { Toolchain } from '../logic_realize/Toolchain';
+import { RootManager } from '../logic_realize/RootManager';
+import { ExternalEnv } from '../helper/ExternalEnv';
 
 export class CodexRunnerStruct {
   // ── 调度骨架：execute ──
@@ -127,6 +129,7 @@ export class CodexRunnerStruct {
       prompt,
       useShell,
       AppConfig.ENGINE_SILENCE_WARN_MS,
+      ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
     );
   }
 

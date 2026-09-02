@@ -29,7 +29,7 @@ export class TaskQueueStruct {
   // 一次可提交多个任务，全部以 pending 入队；若当前正在执行则自动累计，等前一个完成再继续
   // this._appendTasks  → 把任务写入会话并落盘（realize）
   // this._tick         → 触发调度，尝试启动下一个任务
-  static addTasks(sessionId: string, prompts: string[]): Task[] {
+  static addTasks(sessionId: string, prompts: string[], external = false): Task[] {
     if (!sessionId) throw new Error(`addTasks: invalid sessionId=${sessionId}`);
     const cleaned = prompts.map((p) => (p || '').trim()).filter((p) => p.length > 0);
     if (cleaned.length === 0) throw new Error('addTasks: no valid prompts');
@@ -42,6 +42,7 @@ export class TaskQueueStruct {
       status: 'pending',
       createdAt: Date.now(),
       supplement,
+      external,
     }));
 
     this._appendTasks(sessionId, tasks, supplement);

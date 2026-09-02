@@ -16,6 +16,7 @@ export interface Root {
   templateSkipped?: boolean; // 用户已明确选择「不使用模板」→ 之后不再弹模板选择
   externalApiOpen?: boolean;  // 是否开放外部消息注入 API（undefined 视为 true，默认开放）
   externalApiToken?: string;  // 外部系统调用时需携带的令牌（首次开放时生成，可重置）
+  externalApiBaseUrl?: string; // 该根目录对外可达的地址（如 relay 隧道地址），供运行中的 AI 自己拼 bridge 参数
 }
 
 // 执行引擎：claude code（默认）或 codex。会话创建时选定，一旦开始（有 claudeSessionId 或任务）即锁定。
@@ -132,6 +133,7 @@ export interface Task {
   error?: string;
   held?: boolean;             // 暂定：仍在队列但调度器跳过、不执行（仅对 pending 有意义）
   supplement?: boolean;       // 补充任务：暂停整条序列期间新增，插到冻结队列最前、可越过暂停立即执行
+  external?: boolean;         // 由外部消息注入 API 推送而来（非用户在界面亲自输入），前端据此弹「有外部消息」提示
 }
 
 // 会话文件元信息（用于聊天内附件卡片 / 文件面板 / 预览）
