@@ -3123,6 +3123,15 @@ function stopCmdProgress() {
 async function uploadFiles(files) {
   if (!files || !files.length) return;
   if (!State.sessionId) { alert(T('selectRootFirst')); return; }
+  // 收藏夹草稿会话下拉框已选好目录时，截图/上传文件同样等同于替用户点了一次确认，不必先点确定
+  if (State.session && !State.session.rootId) {
+    const pendingRootId = State.session.pendingRootId || '';
+    if (pendingRootId) await bindFavoriteDraftRoot(pendingRootId);
+    if (!State.session || !State.session.rootId) {
+      alert(T('favoriteRootRequired'));
+      return;
+    }
+  }
   const ta = $('taskInput');
   const names = [];
   for (const file of files) {
