@@ -4299,6 +4299,17 @@ function connectWs() {
         refreshPauseBtn();
         refreshEngineControl(); // 拿到会话 id 即已开始 → 引擎锁定为徽章
       }
+      // 全新会话（如外部推送兜底新建）：当前正看着它所在的根目录时，直接插进列表最前面，
+      // 不需要用户手动刷新页面才能看见——bumpSessionUpdatedAt 只会更新已存在的条目，覆盖不到这种情况。
+      if (
+        !State.favoritesOnly && !isWorkspace() &&
+        e.session.rootId === State.rootId &&
+        Array.isArray(State.sessions) &&
+        !State.sessions.some((s) => s.id === e.session.id)
+      ) {
+        State.sessions = [e.session, ...State.sessions];
+        renderSessions();
+      }
       return;
     }
     // 任务事件：无论是否当前会话，都据此更新侧栏"执行中"标识

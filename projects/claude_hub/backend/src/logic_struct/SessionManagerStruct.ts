@@ -4,6 +4,7 @@
 // 会话 id = `<rootId>:<claude uuid>`；尚未开始的新会话草稿为 `<rootId>:draft-<rand>`（纯内存）。
 import { Ids } from '../helper/Ids';
 import { Logger } from '../helper/Logger';
+import { EventBus } from '../helper/EventBus';
 import { AppConfig } from '../config/AppConfig';
 import { SessionMeta } from '../logic_realize/SessionMeta';
 import { SessionStatus } from './SessionMetaStruct';
@@ -187,6 +188,9 @@ export class SessionManagerStruct {
       source: 'empty', // 草稿尚无对话
     };
     this._put(session);
+    // 前端会话列表靠这个事件才知道"多了一个会话"（不是改已有会话状态那种 'session' 广播场景，
+    // 比如原会话已删、外部推送兜底新建的场景，用户不刷新页面也得看见）
+    EventBus.broadcast({ kind: 'session', session });
     return session;
   }
 
