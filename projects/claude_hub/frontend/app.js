@@ -5158,7 +5158,12 @@ function bind() {
   // 会话工具命令菜单 + 结果弹窗
   $('cmdMenuBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleCmdMenu(); });
   document.addEventListener('click', (e) => {
-    if (CmdMenu.open && !e.target.closest('.cmd-wrap')) closeCmdMenu();
+    // 用 composedPath()（事件派发时就固定好的祖先链）而不是 e.target.closest()：
+    // 点击 /skill 这类 'group' 项会在同一次点击里同步 renderCmdMenu() 重建 DOM，
+    // 把被点击的按钮从树上摘掉；此时 e.target.parentElement 已是 null，closest() 永远找不到
+    // .cmd-wrap，会被误判成"点了菜单外面"从而把刚展开的二级列表又关掉。
+    const wrap = $('cmdMenu') && $('cmdMenu').closest('.cmd-wrap');
+    if (CmdMenu.open && wrap && !e.composedPath().includes(wrap)) closeCmdMenu();
   });
   $('slashPrefixClear').addEventListener('click', clearSlashPrefix);
   $('cmdClose').addEventListener('click', closeCmdResult);
