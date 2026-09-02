@@ -996,6 +996,16 @@ const DICT = {
   tooLargeToEdit: { en: 'File too large — opened read-only (truncated).', zh: '文件过大，只读打开（已截断）。' },
   noFilesHere: { en: 'No files or folders here', zh: '此处暂无文件或文件夹' },
   loadFail: { en: 'Load failed', zh: '加载失败' },
+  // 外部消息注入 API（齿轮）
+  extApiTitle: { en: 'External API', zh: '外部消息接口' },
+  extApiOpenLabel: { en: 'Allow external systems to push messages into this directory’s sessions', zh: '允许外部系统向该目录下的会话推送消息' },
+  extApiHint: { en: 'Default: open. Any caller holding the token below can inject a message into any session under this directory, equivalent to the user typing it.', zh: '默认开放。持有下方 token 的任何调用方都可向该目录下任意会话注入一条消息，效果等同于用户亲自输入。' },
+  extApiTokenLabel: { en: 'Token', zh: 'Token' },
+  extApiCopyToken: { en: 'Copy', zh: '复制' },
+  extApiResetToken: { en: 'Reset', zh: '重置' },
+  extApiResetConfirm: { en: 'Reset the token? The old token will stop working immediately.', zh: '确定重置 token？旧 token 立即失效。' },
+  extApiExampleLabel: { en: 'Example call', zh: '调用示例' },
+  extApiDone: { en: 'Done', zh: '完成' },
 };
 
 let LANG = localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');

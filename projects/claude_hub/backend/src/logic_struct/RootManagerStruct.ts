@@ -130,6 +130,48 @@ export class RootManagerStruct {
     JsonStore.write(Paths.ROOTS_FILE, roots);
   }
 
+  // 读取某根目录的外部消息注入 API 状态；从未设置过则视为默认开放，并顺带补一个 token
+  static ensureExternalApi(id: string): Root {
+    if (!id) throw new Error(`ensureExternalApi: invalid id=${id}`);
+    const roots = this.listRoots();
+    const root = roots.find((r) => r.id === id);
+    if (!root) throw new Error(`ensureExternalApi: not found, id=${id}`);
+    let changed = false;
+    if (root.externalApiOpen === undefined) {
+      root.externalApiOpen = true;
+      changed = true;
+    }
+    if (!root.externalApiToken) {
+      root.externalApiToken = Ids.short('ext');
+      changed = true;
+    }
+    if (changed) JsonStore.write(Paths.ROOTS_FILE, roots);
+    return root;
+  }
+
+  // 开放/关闭某根目录的外部消息注入 API（开放时若无 token 顺带生成）
+  static setExternalApiOpen(id: string, open: boolean): Root {
+    if (!id) throw new Error(`setExternalApiOpen: invalid id=${id}`);
+    const roots = this.listRoots();
+    const root = roots.find((r) => r.id === id);
+    if (!root) throw new Error(`setExternalApiOpen: not found, id=${id}`);
+    root.externalApiOpen = open;
+    if (open && !root.externalApiToken) root.externalApiToken = Ids.short('ext');
+    JsonStore.write(Paths.ROOTS_FILE, roots);
+    return root;
+  }
+
+  // 重置某根目录的外部 API token（旧 token 立即失效）
+  static resetExternalApiToken(id: string): Root {
+    if (!id) throw new Error(`resetExternalApiToken: invalid id=${id}`);
+    const roots = this.listRoots();
+    const root = roots.find((r) => r.id === id);
+    if (!root) throw new Error(`resetExternalApiToken: not found, id=${id}`);
+    root.externalApiToken = Ids.short('ext');
+    JsonStore.write(Paths.ROOTS_FILE, roots);
+    return root;
+  }
+
   // 批量删除根目录：一次读取 → 按 id 集合过滤 → 一次落盘（避免多次读写）
   static removeRoots(ids: string[]): { removed: string[] } {
     if (!Array.isArray(ids) || ids.length === 0)

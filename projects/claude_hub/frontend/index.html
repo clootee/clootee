@@ -236,6 +236,35 @@
     </div>
   </div>
 
+  <!-- 外部消息注入 API：目录级开放开关 + token（供 bug_tracker 等第三方系统接入） -->
+  <div class="login-overlay" id="extApiOverlay" hidden>
+    <div class="picker-card" style="width:560px">
+      <div class="picker-head">
+        <span id="extApiTitle"></span>
+        <button id="extApiClose" style="flex:none;padding:2px 9px">✕</button>
+      </div>
+      <div style="padding:14px;overflow-y:auto">
+        <label class="fld-row" style="align-items:center;gap:8px">
+          <input type="checkbox" id="extApiOpenChk" style="width:auto" />
+          <span id="extApiOpenLabel"></span>
+        </label>
+        <p class="hint" id="extApiHint" style="margin:6px 0 14px"></p>
+        <label class="fld-label" id="extApiTokenLabel"></label>
+        <div class="fld-row" style="gap:8px">
+          <input id="extApiToken" readonly style="flex:1" />
+          <button id="extApiCopyToken" class="sm" style="flex:none"></button>
+          <button id="extApiResetToken" class="sm danger" style="flex:none"></button>
+        </div>
+        <label class="fld-label" id="extApiExampleLabel" style="margin-top:14px"></label>
+        <textarea id="extApiExample" rows="6" readonly style="resize:vertical;font-family:monospace;font-size:12px"></textarea>
+      </div>
+      <div class="picker-foot">
+        <span class="spacer"></span>
+        <button id="extApiDone" class="primary" style="flex:none"></button>
+      </div>
+    </div>
+  </div>
+
   <!-- 批量管理根目录：勾选后批量删除 -->
   <div class="login-overlay" id="rootManageOverlay" hidden>
     <div class="picker-card" style="width:560px">
@@ -757,6 +786,7 @@
         <button id="filesBtn" class="icon-btn files-btn" aria-label="files" title="files">📁</button>
         <button id="traceBtn" class="icon-btn trace-hdr-btn" aria-label="trace" title="全过程" style="display:none">🕒</button>
         <button id="procBtn" class="icon-btn proc-btn" aria-label="process" style="display:none">⚙</button>
+        <button id="extApiBtn" class="icon-btn ext-api-btn" aria-label="external api" style="display:none">🛰</button>
       </div>
 
       <div class="content">
@@ -938,7 +968,7 @@
   <script src="vendor/cm/mode/sass/sass.min.js"></script>
   <script src="vendor/cm/mode/dart/dart.min.js"></script>
   <script src="vendor/cm/mode/swift/swift.min.js"></script>
-  <script src="trans.js?v=20260824a"></script>
+  <script src="trans.js?v=20260902a"></script>
   <script src="workspace.js?v=20260825a"></script>
   <script src="rootwizard.js?v=20260804a"></script>
   <script src="health.js?v=20260820a"></script>
@@ -954,6 +984,6 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="app.js?v=20260831b"></script>
+  <script src="app.js?v=20260902a"></script>
 </body>
 </html>

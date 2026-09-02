@@ -151,6 +151,15 @@ function applyText() {
   $('linksLabel').textContent = T('links');
   $('addLinkBtn').textContent = T('addLink');
   $('rootEditSave').textContent = T('save');
+  $('extApiTitle').textContent = T('extApiTitle');
+  $('extApiOpenLabel').textContent = T('extApiOpenLabel');
+  $('extApiHint').textContent = T('extApiHint');
+  $('extApiTokenLabel').textContent = T('extApiTokenLabel');
+  $('extApiCopyToken').textContent = T('extApiCopyToken');
+  $('extApiResetToken').textContent = T('extApiResetToken');
+  $('extApiExampleLabel').textContent = T('extApiExampleLabel');
+  $('extApiDone').textContent = T('extApiDone');
+  $('extApiBtn').title = T('extApiTitle');
   $('sessionsLabel').textContent = T('sessions');
   refreshNewSessionButton();
   $('wsDirTitle').textContent = T('wsPickDirTitle');
@@ -523,6 +532,8 @@ function renderWorkdirBar() {
   el.textContent = root ? root.path : '';
   el.title = root ? root.path : '';
   if (row) row.hidden = !root; // 整行（含边框）随目录有无一起显隐
+  const extBtn = $('extApiBtn');
+  if (extBtn) extBtn.style.display = root ? '' : 'none';
 }
 
 // 侧栏渲染根目录的备注与链接（链接 _blank 打开）。编辑入口集成在此处的 ✎
@@ -672,6 +683,62 @@ async function saveRootEdit() {
   });
   closeRootEdit();
   await loadRoots();
+}
+
+// ── 外部消息注入 API（齿轮）：查看/切换该根目录是否开放，看/换 token ──
+async function openExternalApi() {
+  const root = currentRoot();
+  if (!root) {
+    alert(T('selectRootFirst'));
+    return;
+  }
+  let status;
+  try {
+    status = await api('/api/root/external?id=' + encodeURIComponent(root.id));
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  fillExternalApiPanel(root.id, status);
+  $('extApiOverlay').hidden = false;
+}
+function closeExternalApi() {
+  $('extApiOverlay').hidden = true;
+}
+function fillExternalApiPanel(rootId, status) {
+  $('extApiOpenChk').checked = status.externalApiOpen !== false;
+  $('extApiToken').value = status.externalApiToken || '';
+  $('extApiExample').value =
+    `curl -X POST ${location.origin}/api/external/message \\\n` +
+    `  -H "Content-Type: application/json" \\\n` +
+    `  -d '{"rootId":"${rootId}","token":"${status.externalApiToken || ''}",` +
+    `"sessionId":"<sessionId>","content":"<回复内容>"}'`;
+}
+async function toggleExternalApiOpen() {
+  const root = currentRoot();
+  if (!root) return;
+  try {
+    const status = await api('/api/root/external', { id: root.id, open: $('extApiOpenChk').checked });
+    fillExternalApiPanel(root.id, status);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+async function resetExternalApiToken() {
+  const root = currentRoot();
+  if (!root) return;
+  if (!confirm(T('extApiResetConfirm'))) return;
+  try {
+    const status = await api('/api/root/external/reset-token', { id: root.id });
+    fillExternalApiPanel(root.id, status);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+function copyExternalApiToken() {
+  const val = $('extApiToken').value;
+  if (!val) return;
+  navigator.clipboard?.writeText(val).catch(() => {});
 }
 
 // ── 移动端抽屉 ──
@@ -5189,6 +5256,12 @@ function bind() {
     if (e.target === $('trOverlay')) closeTrace();
   });
   $('procBtn').addEventListener('click', () => document.body.classList.toggle('show-process'));
+  $('extApiBtn').addEventListener('click', openExternalApi);
+  $('extApiClose').addEventListener('click', closeExternalApi);
+  $('extApiDone').addEventListener('click', closeExternalApi);
+  $('extApiOpenChk').addEventListener('change', toggleExternalApiOpen);
+  $('extApiResetToken').addEventListener('click', resetExternalApiToken);
+  $('extApiCopyToken').addEventListener('click', copyExternalApiToken);
   $('closeProcessBtn').addEventListener('click', () => document.body.classList.remove('show-process'));
   // 右下角错误小圆圈：点开/收起；点浮层外面或按 Esc 收起（点圆圈本身交给它自己 toggle）
   $('noticeFab').addEventListener('click', (e) => { e.stopPropagation(); toggleNoticePop(); });

@@ -14,6 +14,8 @@ export interface Root {
   links?: RootLink[];   // 快捷链接（点击 _blank 打开）
   favorites?: string[]; // 重点文件夹（相对根目录的路径，文件管理器快捷访问）
   templateSkipped?: boolean; // 用户已明确选择「不使用模板」→ 之后不再弹模板选择
+  externalApiOpen?: boolean;  // 是否开放外部消息注入 API（undefined 视为 true，默认开放）
+  externalApiToken?: string;  // 外部系统调用时需携带的令牌（首次开放时生成，可重置）
 }
 
 // 执行引擎：claude code（默认）或 codex。会话创建时选定，一旦开始（有 claudeSessionId 或任务）即锁定。

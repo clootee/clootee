@@ -32,6 +32,7 @@ import { TraceStore } from '../logic_realize/TraceStore';
 import { CommandRunner } from '../logic_realize/CommandRunner';
 import { CommandsConfig } from '../config/CommandsConfig';
 import { UpdateChecker } from '../logic_realize/UpdateChecker';
+import { ExternalInbox } from '../logic_realize/ExternalInbox';
 
 export class Server {
   static start(): void {
@@ -50,6 +51,20 @@ export class Server {
     // ── 登录（无需鉴权） ──
     app.post('/api/auth/login', (req, res) =>
       this._wrap(res, 'auth.login', () => ({ token: AuthManager.login(req.body.password) })),
+    );
+
+    // ── 外部消息注入（供第三方系统接入，如 bug_tracker 回复转发）：
+    //    鉴权走各根目录自己的 externalApiToken（齿轮设置里可开关/换 token），不走登录 token，
+    //    因此必须注册在下面的登录鉴权中间件之前 ──
+    app.post('/api/external/message', (req, res) =>
+      this._wrap(res, 'external.message', () =>
+        ExternalInbox.postMessage(
+          String(req.body.rootId || ''),
+          String(req.body.token || ''),
+          String(req.body.sessionId || ''),
+          String(req.body.content || ''),
+        ),
+      ),
     );
 
     // ── 鉴权中间件：其余 /api/* 必须携带有效 token ──
@@ -311,6 +326,20 @@ export class Server {
     app.post('/api/root/open', (req, res) =>
       this._wrap(res, 'root.open', () => FolderOpener.open(req.body.rootId)),
     );
+    // 外部消息注入 API 的开放状态（会话右上角齿轮）：查询会顺带补默认值+token
+    app.get('/api/root/external', (req, res) =>
+      this._wrap(res, 'root.externalGet', () => RootManager.ensureExternalApi(String(req.query.id || ''))),
+    );
+    app.post('/api/root/external', (req, res) =>
+      this._wrap(res, 'root.externalSet', () =>
+        RootManager.setExternalApiOpen(String(req.body.id || ''), !!req.body.open),
+      ),
+    );
+    app.post('/api/root/external/reset-token', (req, res) =>
+      this._wrap(res, 'root.externalReset', () =>
+        RootManager.resetExternalApiToken(String(req.body.id || '')),
+      ),
+    );
 
     // ── 项目模板（缺少 CLAUDE.md/AGENTS.md 时引导选模板）──
     app.get('/api/template/need', (req, res) =>
@@ -363,7 +392,7 @@ export class Server {
     );
     // 全文搜索：跨会话读 jsonl 找关键词（标题 + 全部对话正文）。rootId 缺省=跨全部根目录
     app.get('/api/session/search', (req, res) =>
-      this._wrap(res, 'session.search', () =>
+      this._wrapAsync(res, 'session.search', () =>
         SessionManager.searchSessions(String(req.query.q || ''), String(req.query.rootId || '') || undefined),
       ),
     );

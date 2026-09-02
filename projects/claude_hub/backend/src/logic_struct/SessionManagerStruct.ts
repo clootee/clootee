@@ -65,16 +65,19 @@ export class SessionManagerStruct {
   }
 
   // 全文搜索：跨会话在「标题 + 全部对话正文」里找关键词。
-  // 前端只加载当前打开会话的正文，故全文搜索必须走后端逐会话读 jsonl。
+  // 前端只加载当前打开会话的正文，故全文搜索必须走后端逐会话读 jsonl（含从未在前端打开过的会话）。
   // rootId 传入 = 只搜该根目录（经典模式）；缺省 = 跨全部根目录（工作台模式）。
-  static searchSessions(query: string, rootId?: string): SessionSearchHit[] {
+  // 逐会话匹配是异步 IO（读 jsonl），分批并发跑，避免候选会话很多时一个个同步阻塞、耗时暴涨。
+  static async searchSessions(query: string, rootId?: string): Promise<SessionSearchHit[]> {
     const q = (query || '').trim().toLowerCase();
     if (!q) throw new Error(`searchSessions: invalid query=${query}`);
     const candidates = rootId ? this.listSessions(rootId) : this.listAllSessions();
+    const CONCURRENCY = 8;
     const hits: SessionSearchHit[] = [];
-    for (const s of candidates) {
-      const hit = this._matchSessionText(s, q);
-      if (hit) hits.push(hit);
+    for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+      const batch = candidates.slice(i, i + CONCURRENCY);
+      const results = await Promise.all(batch.map((s) => this._matchSessionText(s, q)));
+      for (const hit of results) if (hit) hits.push(hit);
     }
     return hits;
   }
@@ -352,7 +355,7 @@ export class SessionManagerStruct {
     throw new Error('Not implemented');
   }
   // 单个会话是否命中关键词（标题或正文）；命中返回 {id, snippet}，否则 null
-  protected static _matchSessionText(_session: Session, _q: string): SessionSearchHit | null {
+  protected static _matchSessionText(_session: Session, _q: string): Promise<SessionSearchHit | null> {
     throw new Error('Not implemented');
   }
   // 删除会话对应的 claude jsonl
