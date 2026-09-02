@@ -949,6 +949,13 @@ const DICT = {
     en: 'Show your Claude Code usage and rate-limit status: how much of the current session / week you have used and when it resets. Read-only — it does not touch this conversation.',
     zh: '查看你的 Claude Code 用量与额度状态：当前会话 / 本周已用多少、何时重置。只读，不会改动当前对话。',
   },
+  cmd_goal_name: { en: 'Goal', zh: '目标' },
+  cmd_goal_desc: {
+    en: 'Mark the next message to be sent as "/goal ...". Does not touch what you already typed — click ✕ on the tag to cancel.',
+    zh: '标记下一条消息将以 "/goal ..." 发出，不改写你已输入的内容——点标签上的 ✕ 可取消。',
+  },
+  cmd_skill_name: { en: 'Skill', zh: '技能' },
+  cmd_skill_desc: { en: 'Pick a skill to prefix the next message with', zh: '选择一个技能，标记下一条消息以它开头' },
   screenshot: { en: 'Screenshot', zh: '截屏' },
   shotUnsupported: { en: 'Screenshot not supported in this browser', zh: '当前浏览器不支持截屏' },
   shotPreview: { en: 'Screenshot preview', zh: '截屏预览' },

@@ -3089,19 +3089,28 @@ function pickSlash(i) {
   closeSlashMenu();
 }
 
-// ── 会话工具命令菜单（/usage /compact …）──
-// 与"输入框打 / 透传"不同：这里点击菜单直接调后端执行 claude 原生斜杠命令，
-// 把真实输出展示在结果弹窗里——真的看到反馈。每个命令都带用途解释。
-const CMD_ITEMS = [
-  { id: 'usage', slash: '/usage' },
+// ── 会话工具命令菜单（/usage /goal /skill …）──
+// 三种条目类型：
+//   'exec'   — 点击即调后端立即执行 claude 原生斜杠命令，结果展示在弹窗里（如 /usage）
+//   'prefix' — 点击不执行、不改写输入框，只是"标记"本次发送将以该命令开头（如 /goal）
+//   'group'  — 点击展开二级列表（如 /skill → 具体 skill 名），叶子节点按 'prefix' 处理
+const SKILL_LIST = [
+  'dataviz', 'update-config', 'keybindings-help', 'code-review', 'simplify',
+  'fewer-permission-prompts', 'loop', 'schedule', 'claude-api', 'run', 'init', 'security-review',
 ];
-const CmdMenu = { open: false, running: false };
+const CMD_ITEMS = [
+  { id: 'usage', slash: '/usage', type: 'exec' },
+  { id: 'goal', slash: '/goal', type: 'prefix' },
+  { id: 'skill', slash: '/skill', type: 'group', children: SKILL_LIST.map((name) => ({ id: 'skill-' + name, slash: '/' + name, type: 'prefix' })) },
+];
+const CmdMenu = { open: false, running: false, view: 'root' };
 
 function toggleCmdMenu() {
   if (CmdMenu.open) closeCmdMenu();
   else openCmdMenu();
 }
 function openCmdMenu() {
+  CmdMenu.view = 'root';
   renderCmdMenu();
   $('cmdMenu').hidden = false;
   CmdMenu.open = true;
@@ -3113,17 +3122,68 @@ function closeCmdMenu() {
 function renderCmdMenu() {
   const menu = $('cmdMenu');
   menu.innerHTML = '';
-  CMD_ITEMS.forEach((c) => {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'cmd-item';
-    row.innerHTML =
-      `<span class="cmd-item-top"><span class="cmd-item-cmd">${escapeHtml(c.slash)}</span>` +
-      `<span class="cmd-item-name">${escapeHtml(T('cmd_' + c.id + '_name'))}</span></span>` +
-      `<span class="cmd-item-desc">${escapeHtml(T('cmd_' + c.id + '_desc'))}</span>`;
-    row.addEventListener('click', () => runCommand(c.id));
-    menu.appendChild(row);
+  if (CmdMenu.view === 'root') {
+    CMD_ITEMS.forEach((c) => menu.appendChild(buildCmdItemRow(c)));
+    return;
+  }
+  // 二级列表（目前只有 /skill）：带一个返回按钮回到根菜单
+  const group = CMD_ITEMS.find((c) => c.id === CmdMenu.view);
+  if (!group) { CmdMenu.view = 'root'; return renderCmdMenu(); }
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'cmd-back';
+  back.textContent = '← ' + group.slash;
+  back.addEventListener('click', () => { CmdMenu.view = 'root'; renderCmdMenu(); });
+  menu.appendChild(back);
+  const sep = document.createElement('div');
+  sep.className = 'cmd-menu-sep';
+  menu.appendChild(sep);
+  (group.children || []).forEach((c) => menu.appendChild(buildCmdItemRow(c)));
+}
+function buildCmdItemRow(c) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'cmd-item';
+  const hasMeta = DICT['cmd_' + c.id + '_name'] != null;
+  const name = hasMeta ? T('cmd_' + c.id + '_name') : '';
+  const desc = hasMeta ? T('cmd_' + c.id + '_desc') : '';
+  row.innerHTML =
+    `<span class="cmd-item-top"><span class="cmd-item-cmd">${escapeHtml(c.slash)}</span>` +
+    (name ? `<span class="cmd-item-name">${escapeHtml(name)}</span>` : '') +
+    (c.type === 'group' ? `<span class="cmd-item-arrow">›</span>` : '') +
+    `</span>` +
+    (desc ? `<span class="cmd-item-desc">${escapeHtml(desc)}</span>` : '');
+  row.addEventListener('click', () => {
+    if (c.type === 'exec') runCommand(c.id);
+    else if (c.type === 'group') { CmdMenu.view = c.id; renderCmdMenu(); }
+    else setSlashPrefix(c.slash);
   });
+  return row;
+}
+
+// ── 斜杠命令前缀标记：只标记、不改写输入框，发送时才拼接 ──
+const SlashPrefix = { cmd: null };
+function setSlashPrefix(cmd) {
+  SlashPrefix.cmd = cmd;
+  renderSlashPrefixPill();
+  closeCmdMenu();
+  const ta = $('taskInput');
+  if (ta) ta.focus();
+}
+function clearSlashPrefix() {
+  SlashPrefix.cmd = null;
+  renderSlashPrefixPill();
+}
+function renderSlashPrefixPill() {
+  const pill = $('slashPrefixPill');
+  if (!pill) return;
+  if (!SlashPrefix.cmd) { pill.hidden = true; return; }
+  $('slashPrefixLabel').textContent = SlashPrefix.cmd;
+  pill.hidden = false;
+}
+// 发送前把标记的斜杠命令拼到正文最前面（单次使用，发送成功后清除；失败则保留，方便重试）
+function applySlashPrefix(text) {
+  return SlashPrefix.cmd ? SlashPrefix.cmd + ' ' + text : text;
 }
 
 // 执行某个工具命令：调后端 → 弹窗展示输出（执行中→结果/错误）
@@ -3951,7 +4011,8 @@ async function addTask() {
   ta.value = '';
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
   try {
-    await api('/api/task/add', { sessionId: State.sessionId, prompts: [applyQuickPrefix(raw)] });
+    await api('/api/task/add', { sessionId: State.sessionId, prompts: [applyQuickPrefix(applySlashPrefix(raw))] });
+    clearSlashPrefix(); // 单次使用：发送成功后自动摘掉标记
   } catch (e) {
     ta.value = raw;
     alert(e.message || 'Submit failed');
@@ -5028,6 +5089,7 @@ function bind() {
   document.addEventListener('click', (e) => {
     if (CmdMenu.open && !e.target.closest('.cmd-wrap')) closeCmdMenu();
   });
+  $('slashPrefixClear').addEventListener('click', clearSlashPrefix);
   $('cmdClose').addEventListener('click', closeCmdResult);
   $('cmdGotIt').addEventListener('click', closeCmdResult);
   $('cmdOverlay').addEventListener('click', (e) => { if (e.target.id === 'cmdOverlay') closeCmdResult(); });

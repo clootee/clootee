@@ -1816,6 +1816,18 @@ body.cyber .typing-dots i {
   border-style: solid; border-color: var(--accent, #4c8dff);
   color: var(--accent, #4c8dff); background: var(--active);
 }
+/* 斜杠命令前缀标记：本次发送会自动以该命令开头，不改写输入框内容，点 ✕ 可取消 */
+.slash-prefix-pill {
+  display: inline-flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  padding: 3px 6px 3px 10px; border-radius: 999px; font-size: 12px;
+  border: 1px solid var(--accent, #4c8dff); background: var(--active); color: var(--accent, #4c8dff);
+}
+.slash-prefix-pill span { font-family: monospace; font-weight: 600; }
+.slash-prefix-pill button {
+  flex: none; width: 18px; height: 18px; line-height: 16px; text-align: center;
+  border: none; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; font-size: 12px; padding: 0;
+}
+.slash-prefix-pill button:hover { background: rgba(76,141,255,.18); }
 /* 斜杠命令候选菜单：浮在输入框上方 */
 .composer-input { position: relative; }
 .slash-menu {
@@ -1850,6 +1862,14 @@ body.cyber .typing-dots i {
 .cmd-item-cmd { font-family: monospace; color: var(--accent); font-size: 13px; font-weight: 600; }
 .cmd-item-name { font-size: 13px; font-weight: 600; }
 .cmd-item-desc { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.cmd-item-arrow { margin-left: auto; color: var(--muted); }
+.cmd-menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+.cmd-back {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  padding: 8px 11px; border: none; background: transparent; border-radius: 7px; cursor: pointer;
+  color: var(--muted); font-size: 12px; margin-bottom: 2px;
+}
+.cmd-back:hover { background: var(--hover); }
 
 /* ── 命令结果弹窗 ── */
 .cmd-card { max-width: 640px; width: 92vw; }
