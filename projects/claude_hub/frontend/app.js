@@ -1883,6 +1883,7 @@ function isFavoriteDraftId(id) {
 }
 
 function createFavoriteDraftSession(preferredRootId = '') {
+  const prevKey = State.sessionId;
   const now = Date.now();
   const draft = {
     id: `favorite-draft-${now}`,
@@ -1906,6 +1907,7 @@ function createFavoriteDraftSession(preferredRootId = '') {
   State.sessions = State.favoriteSessions;
   State.sessionId = draft.id;
   State.session = draft;
+  quickCarryKey(prevKey, draft.id);
   $('processLog').innerHTML = '';
   $('sessionTitle').textContent = sessionTitle(draft);
   renderMessages();
@@ -1913,6 +1915,7 @@ function createFavoriteDraftSession(preferredRootId = '') {
   refreshPauseBtn();
   refreshEngineControl();
   renderSessions();
+  renderQuick();
 }
 
 async function selectSession(id) {
@@ -2273,6 +2276,7 @@ async function bindFavoriteDraftRoot(rootId, controls = null) {
     State.sessions = State.favoriteSessions;
     State.sessionId = real.id;
     State.session = real;
+    quickCarryKey(draftId, real.id);
     setTabRootId(rootId);
     $('sessionTitle').textContent = sessionTitle(real);
     renderMessages();
@@ -2280,6 +2284,7 @@ async function bindFavoriteDraftRoot(rootId, controls = null) {
     refreshPauseBtn();
     refreshEngineControl();
     renderSessions();
+    renderQuick();
     refreshRootRecency().then(() => renderSessions()).catch(() => {});
     // 从下拉直接选已有目录绑定时，同样按「选用该目录工作」的通用规则至少问一次模板
     // （走加号引导新建/新建项目时模板早已问过，TemplateAsk.asked 会让这里自然跳过，不重复打扰）
@@ -3952,6 +3957,18 @@ function quickSave() {
 function quickKey() {
   return State.sessionId || '__none__';
 }
+// 会话 id 发生「草稿 → 真实」置换时（收藏夹草稿绑定根目录后换发真实 sessionId），
+// 把草稿 id 下已选的标签迁移到新 id，否则选中态会静默丢失（按钮仍显示选中，但下次发送已经取不到）。
+function quickCarryKey(oldKey, newKey) {
+  const from = oldKey || '__none__';
+  const to = newKey || '__none__';
+  if (from === to) return;
+  const sel = Quick.map[from];
+  if (!sel) return;
+  delete Quick.map[from];
+  Quick.map[to] = sel;
+  quickSave();
+}
 function quickSel() {
   const s = Quick.map[quickKey()];
   return s && typeof s === 'object' ? s : {};
@@ -3986,20 +4003,18 @@ function renderQuick() {
     bar.appendChild(b);
   });
 }
-// 选中按钮实际插入的一段文字：优先用按钮自定义的「含义/提示词」，留空则退化为 [按钮文字]；
-// 组提示词（可选）拼在该组这段文字前面。
-function quickTagText(group, tag) {
-  const body = (tag.prompt || '').trim() || '[' + tag.label + ']';
-  const gp = (group.prompt || '').trim();
-  return gp ? gp + ' ' + body : body;
+// 选中按钮实际插入的一段文字：纯前端字符串拼接，始终是 [按钮文字]，与是否配置了「含义」无关。
+// 含义/提示词只用于写入项目 CLAUDE.md/AGENTS.md（见后端 QuickTagPrompt），不出现在消息正文里。
+function quickTagText(tag) {
+  return '[' + tag.label + ']';
 }
-// 发送前给正文加上前缀（按组顺序拼接每个已选按钮的含义；未选中则原样返回）
+// 发送前给正文加上前缀（按组顺序拼接每个已选按钮的 [标签]；未选中则原样返回）
 function applyQuickPrefix(text) {
   const sel = quickSel();
   const parts = [];
   quickGroups().forEach((g) => {
     const tag = (g.tags || []).find((t) => t.label === sel[g.name]);
-    if (tag) parts.push(quickTagText(g, tag));
+    if (tag) parts.push(quickTagText(tag));
   });
   return parts.length ? parts.join(' ') + ' ' + text : text;
 }
@@ -5951,7 +5966,7 @@ function quickEditGroupCard(g, gi) {
 
   const gp = document.createElement('input');
   gp.className = 'sx-input qedit-gprompt';
-  gp.placeholder = '组提示词（可选，选中该组任一按钮时一并附加）';
+  gp.placeholder = '组说明（可选，写入 CLAUDE.md/AGENTS.md，不影响消息正文）';
   gp.value = g.prompt;
   gp.addEventListener('input', () => (g.prompt = gp.value));
 
@@ -5982,7 +5997,7 @@ function quickEditTagRow(g, gi, t, ti) {
   labelIn.addEventListener('input', () => (t.label = labelIn.value));
   const promptIn = document.createElement('input');
   promptIn.className = 'sx-input qedit-tprompt';
-  promptIn.placeholder = '含义 / 对应提示词（可选，留空则加 [按钮文字] 前缀）';
+  promptIn.placeholder = '含义说明（可选，写入 CLAUDE.md/AGENTS.md 供 AI 理解；消息里始终只插入 [按钮文字]）';
   promptIn.value = t.prompt;
   promptIn.addEventListener('input', () => (t.prompt = promptIn.value));
   const del = document.createElement('button');

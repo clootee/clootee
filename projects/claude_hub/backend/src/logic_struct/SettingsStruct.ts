@@ -9,8 +9,8 @@ import { RunAsUser } from '../helper/RunAsUser';
 
 // 快捷按钮：一个组内互斥（单选，可取消），组与组之间互不影响（可各选一个）
 export interface QuickTag {
-  label: string;   // 按钮显示文字
-  prompt?: string; // 该按钮的含义/对应提示词（发送时插入正文前）；留空则回落为 `[label]` 前缀
+  label: string;   // 按钮显示文字；选中后发送时始终原样以 `[label]` 前缀插入正文最前面
+  prompt?: string; // 该按钮的含义说明：不影响发送内容，而是写入项目 CLAUDE.md/AGENTS.md，帮助 AI 理解 [label] 前缀
 }
 export interface QuickGroup {
   name: string;    // 组名（界面提示用）

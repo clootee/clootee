@@ -1,7 +1,9 @@
 // 预设系统提示词注入（调度骨架）
-// 设置里填了「预设系统提示词」后，每次发消息前检查当前项目根目录的 CLAUDE.md 与 AGENTS.md
-// （大小写变体都算，如 claude.md / Claude.md），没写过这段提示词就写进去（幂等，带标记块）。
+// 设置里填了「预设系统提示词」和/或配置了「快捷标签」后，每次发消息前检查当前项目根目录的
+// CLAUDE.md 与 AGENTS.md（大小写变体都算，如 claude.md / Claude.md），没写过就写进去（幂等，带标记块）。
+// 快捷标签的说明文字不管用户实际有没有选用某个标签，都一并写入，让 AI 能理解消息里出现的 [标签] 前缀。
 import { PromptBlock } from '../helper/PromptBlock';
+import { QuickTagPrompt } from '../helper/QuickTagPrompt';
 import { Settings } from '../logic_realize/Settings';
 
 export type PromptEnsureAction = 'skip' | 'appended' | 'created' | 'updated';
@@ -13,10 +15,13 @@ export interface PromptEnsureResult {
 
 export class ProjectPromptStruct {
   // ── 调度骨架：ensure ───────────────────────────────────────────────
-  // Settings.get().systemPrompt 为空 → 什么都不做；否则两个目标文件各处理一次
+  // 系统提示词 + 快捷标签说明拼成一段完整文本；两者都空 → 什么都不做；否则两个目标文件各处理一次
   static ensure(rootPath: string): PromptEnsureResult[] {
     if (!rootPath) throw new Error(`ProjectPromptStruct.ensure: invalid rootPath=${rootPath}`);
-    const prompt = (Settings.get().systemPrompt || '').trim();
+    const s = Settings.get();
+    const base = (s.systemPrompt || '').trim();
+    const legend = QuickTagPrompt.render(s.quickGroups || []);
+    const prompt = [base, legend].filter(Boolean).join('\n\n');
     if (!prompt) return [];
     const claude = this._ensureOne(rootPath, 'CLAUDE.md', prompt);
     const agents = this._ensureOne(rootPath, 'AGENTS.md', prompt);
