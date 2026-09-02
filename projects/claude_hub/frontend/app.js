@@ -624,7 +624,7 @@ let extMsgToastTimer = null;
 function showExtMsgToast(sessionId, promptPreview) {
   clearTimeout(extMsgToastTimer);
   const box = $('extMsgToast');
-  $('extMsgToastMsg').textContent = T('extMsgToastMsg', { text: (promptPreview || '').slice(0, 60) });
+  $('extMsgToastMsg').textContent = T('extMsgToastMsg').replace('{text}', (promptPreview || '').slice(0, 60));
   $('extMsgToastGo').onclick = () => {
     box.hidden = true;
     jumpToExternalSession(sessionId);
