@@ -31,6 +31,7 @@ export const CLAUDE_BUILTIN_MODELS: ModelOption[] = [
   { id: 'claude-opus-5', label: 'Claude Opus 5', source: 'builtin' },
   { id: 'claude-sonnet-5', label: 'Claude Sonnet 5', source: 'builtin' },
   { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', source: 'builtin' },
+  { id: 'claude-fable-5-1', label: 'Claude Fable 5.1', source: 'builtin' },
   { id: 'claude-fable-5', label: 'Claude Fable 5', source: 'builtin' },
 ];
 
