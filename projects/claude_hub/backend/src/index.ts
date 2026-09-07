@@ -7,10 +7,13 @@ import { KimiProxy } from './logic_realize/KimiProxy';
 import { EngineConfig } from './logic_realize/EngineConfig';
 import { TaskQueue } from './logic_realize/TaskQueue';
 import { Toolchain } from './logic_realize/Toolchain';
+import { LifeGuard } from './logic_realize/LifeGuard';
 
 // 后端级异常：既写日志，也推到界面。否则用户只看到"点了没反应"，日志在服务器上没人会去翻。
 function reportFatal(kind: string, e: unknown): void {
   Logger.error('Process', kind, e);
+  // 未捕获异常同时进生命周期日志：服务突然打不开时，这一行就是「它自己崩了」的直接证据
+  LifeGuard.reportShutdown('fatal', `${kind}: ${e instanceof Error ? e.message : String(e)}`);
   const message = e instanceof Error ? `${e.message}` : String(e);
   EventBus.broadcast({ kind: 'serverError', message: `后端异常（${kind}）：${message}` });
 }

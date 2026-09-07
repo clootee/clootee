@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws';
 import { AppConfig } from '../config/AppConfig';
 import { Paths } from '../paths';
 import { Logger } from '../helper/Logger';
+import { LifeGuard } from '../logic_realize/LifeGuard';
 import { ErrorHandler } from '../helper/ErrorHandler';
 import { EventBus } from '../helper/EventBus';
 import { RootManager } from '../logic_realize/RootManager';
@@ -587,7 +588,17 @@ export class Server {
     // 后端不参与，也就没有「忘了重启就失灵」这回事。见 frontend/learn-assist.js。
 
     const server = http.createServer(app);
+    // 绑定失败（最常见是 EADDRINUSE：端口被别的进程、或上一个没死干净的自己占着）时，
+    // 不能只在 stderr 甩一句 "address already in use"——要把占用方是谁写进生命周期日志。
+    // 必须抢在 new WebSocketServer 之前注册：ws 会往 server 上挂一个「把 error 转发给 wss」的
+    // 监听器，而 wss 上没人接 error 就会当场抛成 uncaughtException，排在它后面的处理器根本轮不到。
+    server.on('error', (e) => {
+      LifeGuard.reportBindFailure(AppConfig.PORT, e);
+      Logger.error('Server', 'listen failed', e);
+    });
     const wss = new WebSocketServer({ server, path: '/ws' });
+    // ws 转发过来的同一个 error：这里必须有人接，否则 EventEmitter 会把它抛成未捕获异常。
+    wss.on('error', (e) => Logger.error('Server', 'websocket server error', e));
     wss.on('connection', (ws, req) => {
       // WebSocket 同样校验 token（通过 query 传入）
       const token = new URL(req.url || '', 'http://x').searchParams.get('token') || undefined;
@@ -601,13 +612,15 @@ export class Server {
     // 安全：默认仅 localhost 可访问；设置里开启「允许局域网访问」后才绑定 0.0.0.0（需重启生效）。
     const allowLan = Settings.get().allowLan;
     const host = allowLan ? '0.0.0.0' : '127.0.0.1';
-    server.listen(AppConfig.PORT, host, () =>
+    server.listen(AppConfig.PORT, host, () => {
       Logger.info(
         'Server',
         `claude-hub listening on http://localhost:${AppConfig.PORT}` +
           (allowLan ? `（局域网可访问 0.0.0.0:${AppConfig.PORT}）` : '（仅 localhost）'),
-      ),
-    );
+      );
+      // 端口到手后才开始看护：记开机行、挂信号钩子、开心跳
+      LifeGuard.install(AppConfig.PORT);
+    });
   }
 
   // 统一成功响应

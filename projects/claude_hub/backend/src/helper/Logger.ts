@@ -19,6 +19,17 @@ export class Logger {
     this._write('ERROR', module, message, error);
   }
 
+  // 生命周期事件：同时进 app.log（保持上下文连贯）和独立的 lifecycle.log（便于事后单独查阅）。
+  // 不受 MIN_LEVEL / MODULE_FILTER 影响——这类事件永远要留底，否则出事时正好没记。
+  static life(message: string, data?: unknown): void {
+    const line = `[${new Date().toISOString()}] [LIFE] ${message}` +
+      (data === undefined ? '' : ' ' + this._safe(data));
+    // eslint-disable-next-line no-console
+    console.log(line);
+    this._append(LogConfig.LIFECYCLE_PATH, line);
+    if (LogConfig.FILE_ENABLED) this._append(LogConfig.FILE_PATH, line);
+  }
+
   private static _write(level: LogLevel, module: string, message: string, data?: unknown): void {
     if (!LogConfig.ENABLED) return;
     if (ORDER[level] < ORDER[LogConfig.MIN_LEVEL]) return;
@@ -45,9 +56,13 @@ export class Logger {
   }
 
   private static _toFile(line: string): void {
+    this._append(LogConfig.FILE_PATH, line);
+  }
+
+  private static _append(file: string, line: string): void {
     try {
-      fs.mkdirSync(path.dirname(LogConfig.FILE_PATH), { recursive: true });
-      fs.appendFileSync(LogConfig.FILE_PATH, line + '\n');
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(file, line + '\n');
     } catch {
       /* 文件写入失败不应影响主流程 */
     }
