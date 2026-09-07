@@ -6937,6 +6937,14 @@ async function onEngineChange() {
   const s = State.session;
   if (!s || !isDraftSession(s)) return;
   const eng = $('engineSelect').value === 'codex' ? 'codex' : 'claude';
+  // 收藏夹草稿只在前端存在，后端没有这个会话；直接改本地，等绑定目录时带过去
+  if (isFavoriteDraftId(s.id)) {
+    s.engine = eng;
+    const inDraftList = State.sessions.find((x) => x.id === s.id);
+    if (inDraftList) inDraftList.engine = eng;
+    renderSessions();
+    return;
+  }
   try {
     const updated = await api('/api/session/engine', { id: s.id, engine: eng });
     s.engine = updated.engine;
