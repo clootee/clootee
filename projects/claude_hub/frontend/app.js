@@ -4900,21 +4900,26 @@ function formatUpdateCommit(c) {
 function renderUpdateInfo(u) {
   const info = $('appUpdInfo');
   info.hidden = false;
-  info.className = `sx-note sx-pre${u.hasUpdate ? '' : ' ok'}`;
-  // 清单可用时版本号是权威结论，commit 只作为「差了哪些提交」的补充信息
+  info.className = `sx-note sx-pre${u.hasUpdate || !u.manifestOk ? '' : ' ok'}`;
+  // 结论只看版本号（清单）。commit 只是附注：让用户知道本地代码和远端差了什么，
+  // 但「已是最新版本」时不会因为本地有未推送的提交就冒出「拉取更新并重启」。
   const lines = [];
   if (u.manifestOk) {
-    lines.push(`${T('updateCurrentLabel')}: ${u.currentVersion}`,
-               `${T('updateLatestLabel')}: ${u.latestVersion}`, '');
+    lines.push(
+      `${T('updateCurrentLabel')}: ${u.currentVersion}`,
+      `${T('updateLatestLabel')}: ${u.latestVersion}`,
+      '',
+      u.hasUpdate ? T('updateAvailableHint') : T('updateUpToDateHint'),
+    );
+    if (u.hasUpdate && u.notes) lines.push('', u.notes);
+  } else {
+    lines.push(`${T('updateCurrentLabel')}: ${u.currentVersion}`, '', T('updateManifestUnavailable'));
   }
-  lines.push(
-    `${T('updateBranchLabel')}: ${u.branch}`,
-    `${T('updateCurrentLabel')}: ${formatUpdateCommit(u.current)}`,
-    `${T('updateLatestLabel')}: ${formatUpdateCommit(u.latest)}`,
-    '',
-    u.hasUpdate ? T('updateAvailableHint') : T('updateUpToDateHint'),
-  );
-  if (u.hasUpdate && u.notes) lines.push('', u.notes);
+  if (u.commitDiffers) {
+    lines.push('', T('updateCommitNote')
+      .replace('{local}', u.current.short || '')
+      .replace('{remote}', u.latest.short || ''));
+  }
   info.textContent = lines.join('\n');
   $('appUpdApplyRow').hidden = !u.hasUpdate;
 }
@@ -4978,12 +4983,10 @@ const UpdateModal = {
   SKIP_KEY: 'updateSkipVersion',
   forced: false,
 
-  // 只有版本清单读到了才弹：清单是发版的唯一开关。
-  // 清单读不到时 check() 会退回 commit 差异兜底，那时 latestVersion 只是本机版本号
-  // （会显示成没有意义的「2.1.0 → 2.1.0」），而且开发机上本地有未推送的提交就会常驻为真——
-  // 这种情况只在设置里点个红点提示，不打扰用户。
+  // hasUpdate 只由 version.json 的版本号得出（清单读不到即为 false），所以到这里
+  // 一定是「清单说有更高版本」，不会再出现「2.1.0 → 2.1.0」这种无意义的弹窗。
   maybeOpen(u) {
-    if (!u || !u.hasUpdate || !u.manifestOk) return;
+    if (!u || !u.hasUpdate) return;
     if (!u.mandatory && localStorage.getItem(this.SKIP_KEY) === String(u.latestVersion)) return;
     this.open(u);
   },

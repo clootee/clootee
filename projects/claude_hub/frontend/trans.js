@@ -759,6 +759,14 @@ const DICT = {
   },
   updateReconnecting: { en: 'Restarting… reconnecting in {s}s', zh: '重启中…{s} 秒后重新连接' },
   updateViewChanges: { en: 'View changes on GitHub', zh: '在 GitHub 上查看改动' },
+  updateManifestUnavailable: {
+    en: 'Could not read the release manifest (version.json) from GitHub, so update status is unknown. Check your network and try again.',
+    zh: '没能从 GitHub 读到发布清单 version.json，无法确认是否有新版本。请检查网络后重试。',
+  },
+  updateCommitNote: {
+    en: 'Note: local code ({local}) differs from the remote branch ({remote}). This does not by itself mean a new release.',
+    zh: '附注：本地代码（{local}）与远端分支（{remote}）不一致。这本身并不代表有新版本发布。',
+  },
   // ── 启动时的新版本弹窗（强制 / 可选两种形态）──
   updateModalTitle: { en: 'A new version is available', zh: '发现新版本' },
   updateModalTitleForced: { en: 'Update required', zh: '需要更新' },

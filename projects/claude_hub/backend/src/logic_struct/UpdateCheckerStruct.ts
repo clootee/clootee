@@ -1,8 +1,9 @@
-// 软件版本更新（调度骨架）。两条判断来源，同时给前端：
-//   1）版本清单 version.json —— 仓库根目录的一份 JSON，托管在 GitHub 上按分支读取。
-//      它决定「版本号是多少」「是否强制更新」「更新说明写什么」，是对外发版的唯一开关。
-//   2）git commit —— 本地 HEAD 与 GitHub 同名分支最新 commit 对比，作为清单不可用时的兜底，
-//      也用于展示「具体差了哪些提交」。
+// 软件版本更新（调度骨架）。
+// 「有没有新版本」**只由版本清单 version.json 决定**——它是仓库根目录的一份 JSON，
+// 托管在 GitHub 上按分支读取，规定版本号、是否强制更新、更新说明，是对外发版的唯一开关。
+// git commit 对比（本地 HEAD vs GitHub 同名分支）只作为展示信息：告诉用户本地代码和远端
+// 差了哪些提交。它**不参与**判定，否则开发机上任何一个未推送的本地提交都会被当成「有新版本」，
+// 于是已经是最新版也照样弹窗、照样显示「拉取更新并重启」。
 // 确认更新后拉取 + 触发重新编译与重启（脚本由 Realize 复用 restart.sh/restart.bat）。
 
 export interface UpdateCommitInfo {
@@ -23,8 +24,9 @@ export interface UpdateManifest {
 }
 
 export interface UpdateCheckResult {
-  hasUpdate: boolean;
+  hasUpdate: boolean;         // 清单里的版本号高于本机才为 true；清单不可用时恒为 false
   mandatory: boolean;         // true = 强制更新，前端弹不可关闭的窗
+  commitDiffers: boolean;     // 本地 HEAD 与远端分支不同，仅供展示，不代表有新版本
   currentVersion: string;     // 本机正在跑的版本（backend/package.json）
   latestVersion: string;      // 清单里的最新版本；清单不可用时等于 currentVersion
   manifestOk: boolean;        // 清单是否成功读到（false 表示本次结论只来自 commit 兜底）
@@ -52,10 +54,11 @@ export class UpdateCheckerStruct {
     const currentVersion = this._localVersion();
     const manifest = await this._remoteManifest(branch);
     const latest = await this._remoteCommit(branch);
-    const verdict = this._decide(currentVersion, manifest, current.sha !== latest.sha, lang);
+    const verdict = this._decide(currentVersion, manifest, lang);
     return {
       hasUpdate: verdict.hasUpdate,
       mandatory: verdict.mandatory,
+      commitDiffers: current.sha !== latest.sha,
       currentVersion,
       latestVersion: verdict.latestVersion,
       manifestOk: manifest !== null,
@@ -96,7 +99,6 @@ export class UpdateCheckerStruct {
   protected static _decide(
     _currentVersion: string,
     _manifest: UpdateManifest | null,
-    _commitDiffers: boolean,
     _lang?: string,
   ): { hasUpdate: boolean; mandatory: boolean; latestVersion: string; notes: string; releasedAt: string } {
     throw new Error('UpdateCheckerStruct._decide: Not implemented');

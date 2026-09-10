@@ -89,27 +89,27 @@ export class UpdateChecker extends UpdateCheckerStruct {
     }
   }
 
-  // 汇总结论。清单可用时以版本号为准；清单缺失或版本号非法时退回 commit 对比，且一律不强制。
+  // 汇总结论。清单读不到、或两边版本号有一个不合法，都判定为「无法确认有新版本」→ hasUpdate=false。
+  // 这里不拿 commit 差异兜底：判定权只在清单，兜底会把本地未推送的提交误报成新版本。
   protected static _decide(
     currentVersion: string,
     manifest: UpdateManifest | null,
-    commitDiffers: boolean,
     lang?: string,
   ): { hasUpdate: boolean; mandatory: boolean; latestVersion: string; notes: string; releasedAt: string } {
-    const fallback = {
-      hasUpdate: commitDiffers,
+    const unknown = {
+      hasUpdate: false,
       mandatory: false,
       latestVersion: currentVersion,
       notes: '',
       releasedAt: '',
     };
-    if (!manifest) return fallback;
+    if (!manifest) return unknown;
     if (SemVer.parse(manifest.version) === null || SemVer.parse(currentVersion) === null) {
-      Logger.info('UpdateChecker', 'version not comparable, fall back to commit diff', {
+      Logger.info('UpdateChecker', 'version not comparable, treat as no update', {
         currentVersion,
         latestVersion: manifest.version,
       });
-      return fallback;
+      return unknown;
     }
     const hasUpdate = SemVer.gt(manifest.version, currentVersion);
     return {
