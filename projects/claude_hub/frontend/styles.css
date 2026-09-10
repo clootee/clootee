@@ -1592,6 +1592,14 @@ body.show-process .process-panel { display: flex; }
 .shot-img { display: block; max-width: 84vw; max-height: 64vh; user-select: none; }
 .shot-sel { position: absolute; border: 2px dashed var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
 .shot-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.shot-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shot-tool-group { display: flex; align-items: center; gap: 4px; }
+.shot-tool-sep { width: 1px; height: 18px; background: var(--border); }
+.shot-tool { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 8px; font-size: 13px; cursor: pointer; }
+.shot-tool.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.shot-swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
+.shot-swatch.on { border-color: var(--fg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+.shot-ann { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .queue-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .queue-toggle {
   flex: none;

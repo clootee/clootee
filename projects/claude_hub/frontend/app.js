@@ -217,7 +217,8 @@ function applyText() {
   if (!$('cmdMenu').hidden) renderCmdMenu();
   if (!$('cmdOverlay').hidden) $('cmdGotIt').textContent = T('guideGotIt');
   $('shotHead').textContent = T('shotPreview');
-  $('shotTip').textContent = T('shotDragTip');
+  $('shotTip').textContent = T('shotAnnTip');
+  if (!$('shotOverlay').hidden) renderShotTools();
   $('shotCancel').textContent = T('cancel');
   $('shotConfirm').textContent = T('confirm');
   $('dropHint').textContent = T('dropToUpload');
@@ -3388,8 +3389,22 @@ async function onPasteImage(e) {
   if (files.length) await uploadFiles(files);
 }
 
-// ── 截屏：屏幕共享抓一帧 → 预览（可框选裁剪）→ 确定后上传 ──
-const Shot = { dataUrl: null, sel: null, drag: null };
+// ── 截屏：屏幕共享抓一帧 → 预览（框选裁剪 + 圈/框/箭头/文字标注）→ 确定后上传 ──
+// 标注坐标统一存"原图像素"，SVG 预览用 viewBox=原图尺寸，导出时同一套坐标直接画到 canvas，预览与结果一致
+const SHOT_TOOLS = ['crop', 'circle', 'rect', 'arrow', 'text'];
+const SHOT_COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff', '#000000'];
+const SHOT_SIZES = [{ id: 'S', k: 2.2 }, { id: 'M', k: 3.4 }, { id: 'L', k: 5.2 }];
+const Shot = {
+  dataUrl: null, w: 0, h: 0, sel: null, drag: null,
+  tool: 'circle', color: SHOT_COLORS[0], sizeId: 'M', anns: [], draft: null,
+};
+
+// 当前字号/线宽（按原图尺寸自适应，保证在 4K 截图上也看得见）
+function shotFontPx() {
+  const k = (SHOT_SIZES.find((x) => x.id === Shot.sizeId) || SHOT_SIZES[1]).k;
+  return Math.max(10, (Math.max(Shot.w, Shot.h) / 100) * k);
+}
+function shotLinePx() { return Math.max(2, shotFontPx() / 4); }
 
 async function captureScreenshot() {
   if (!State.sessionId) { alert(T('selectRootFirst')); return; }
@@ -3407,23 +3422,63 @@ async function captureScreenshot() {
     const ctx = canvas.getContext('2d');
     if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     stream.getTracks().forEach((tk) => tk.stop());
-    openShot(canvas.toDataURL('image/png'));
+    openShot(canvas.toDataURL('image/png'), canvas.width, canvas.height);
   } catch (e) {
     alert((e && e.message) ? e.message : T('shotUnsupported'));
   }
 }
 
-function openShot(dataUrl) {
+function openShot(dataUrl, w, h) {
   Shot.dataUrl = dataUrl;
-  Shot.sel = null;
-  $('shotImg').src = dataUrl;
+  Shot.sel = null; Shot.drag = null; Shot.draft = null; Shot.anns = [];
+  Shot.w = w || 0; Shot.h = h || 0;
+  const img = $('shotImg');
+  img.onload = () => { Shot.w = img.naturalWidth; Shot.h = img.naturalHeight; paintAnn(); };
+  img.src = dataUrl;
   $('shotSel').hidden = true;
   $('shotOverlay').hidden = false;
+  renderShotTools();
+  paintAnn();
 }
 function closeShot() {
-  Shot.dataUrl = null; Shot.sel = null; Shot.drag = null;
+  Shot.dataUrl = null; Shot.sel = null; Shot.drag = null; Shot.draft = null; Shot.anns = [];
   $('shotOverlay').hidden = true;
   $('shotImg').src = '';
+  paintAnn();
+}
+
+// 工具条（工具 / 颜色 / 字号）
+function renderShotTools() {
+  const tools = $('shotToolBtns');
+  tools.innerHTML = '';
+  SHOT_TOOLS.forEach((id) => {
+    const b = document.createElement('button');
+    b.className = 'shot-tool' + (Shot.tool === id ? ' on' : '');
+    b.textContent = T('shotTool' + id.charAt(0).toUpperCase() + id.slice(1));
+    b.addEventListener('click', () => { Shot.tool = id; renderShotTools(); });
+    tools.appendChild(b);
+  });
+  const colors = $('shotColors');
+  colors.innerHTML = '';
+  SHOT_COLORS.forEach((c) => {
+    const b = document.createElement('button');
+    b.className = 'shot-swatch' + (Shot.color === c ? ' on' : '');
+    b.style.background = c;
+    b.addEventListener('click', () => { Shot.color = c; renderShotTools(); });
+    colors.appendChild(b);
+  });
+  const sizes = $('shotSizes');
+  sizes.innerHTML = '';
+  SHOT_SIZES.forEach((sz) => {
+    const b = document.createElement('button');
+    b.className = 'shot-tool' + (Shot.sizeId === sz.id ? ' on' : '');
+    b.textContent = T('shotSize' + sz.id);
+    b.addEventListener('click', () => { Shot.sizeId = sz.id; renderShotTools(); });
+    sizes.appendChild(b);
+  });
+  $('shotUndo').textContent = T('shotUndo');
+  $('shotClear').textContent = T('shotClear');
+  $('shotStage').style.cursor = Shot.tool === 'text' ? 'text' : 'crosshair';
 }
 
 // 框选（坐标按图片显示区归一到 0~1），确定时按原图分辨率裁剪
@@ -3447,36 +3502,144 @@ function paintSel() {
 function shotDown(e) {
   e.currentTarget.setPointerCapture(e.pointerId);
   const { nx, ny } = shotPos(e);
+  if (Shot.tool === 'text') { addShotText(nx * Shot.w, ny * Shot.h); return; }
+  if (Shot.tool === 'crop') {
+    Shot.drag = { ox: nx, oy: ny };
+    Shot.sel = { x: nx, y: ny, w: 0, h: 0 };
+    paintSel();
+    return;
+  }
   Shot.drag = { ox: nx, oy: ny };
-  Shot.sel = { x: nx, y: ny, w: 0, h: 0 };
-  paintSel();
+  Shot.draft = { type: Shot.tool, x1: nx * Shot.w, y1: ny * Shot.h, x2: nx * Shot.w, y2: ny * Shot.h, color: Shot.color, line: shotLinePx() };
+  paintAnn();
 }
 function shotMove(e) {
   if (!Shot.drag) return;
   const { nx, ny } = shotPos(e);
   const { ox, oy } = Shot.drag;
-  Shot.sel = { x: Math.min(ox, nx), y: Math.min(oy, ny), w: Math.abs(nx - ox), h: Math.abs(ny - oy) };
-  paintSel();
+  if (Shot.tool === 'crop') {
+    Shot.sel = { x: Math.min(ox, nx), y: Math.min(oy, ny), w: Math.abs(nx - ox), h: Math.abs(ny - oy) };
+    paintSel();
+    return;
+  }
+  if (!Shot.draft) return;
+  Shot.draft.x2 = nx * Shot.w;
+  Shot.draft.y2 = ny * Shot.h;
+  paintAnn();
 }
 function shotUp() {
   Shot.drag = null;
-  if (Shot.sel && (Shot.sel.w < 0.01 || Shot.sel.h < 0.01)) { Shot.sel = null; paintSel(); } // 误点/过小 → 整图
+  if (Shot.tool === 'crop') {
+    if (Shot.sel && (Shot.sel.w < 0.01 || Shot.sel.h < 0.01)) { Shot.sel = null; paintSel(); } // 误点/过小 → 整图
+    return;
+  }
+  const d = Shot.draft;
+  Shot.draft = null;
+  if (d && Math.abs(d.x2 - d.x1) + Math.abs(d.y2 - d.y1) > shotLinePx()) Shot.anns.push(d); // 误点忽略
+  paintAnn();
+}
+function addShotText(x, y) {
+  const txt = prompt(T('shotTextPrompt'), '');
+  if (!txt) return;
+  Shot.anns.push({ type: 'text', x, y, text: txt, color: Shot.color, font: shotFontPx() });
+  paintAnn();
+}
+function undoShot() { Shot.anns.pop(); paintAnn(); }
+function clearShot() { Shot.anns = []; Shot.draft = null; Shot.sel = null; paintSel(); paintAnn(); }
+
+// 箭头头部三角形的三个点（在原图坐标系里算）
+function arrowHead(a) {
+  const ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
+  const len = Math.max((a.line || 2) * 3.2, 8);
+  const spread = 0.42;
+  return [
+    [a.x2, a.y2],
+    [a.x2 - len * Math.cos(ang - spread), a.y2 - len * Math.sin(ang - spread)],
+    [a.x2 - len * Math.cos(ang + spread), a.y2 - len * Math.sin(ang + spread)],
+  ];
 }
 
-function cropShot() {
+// SVG 预览：与导出 drawAnns 用同一份坐标
+function paintAnn() {
+  const svg = $('shotAnn');
+  if (!svg) return;
+  svg.setAttribute('viewBox', '0 0 ' + (Shot.w || 1) + ' ' + (Shot.h || 1));
+  const list = Shot.anns.concat(Shot.draft ? [Shot.draft] : []);
+  svg.innerHTML = list.map((a) => {
+    if (a.type === 'text') {
+      return `<text x="${a.x}" y="${a.y}" fill="${a.color}" font-size="${a.font}" font-family="sans-serif" dominant-baseline="hanging" style="paint-order:stroke;stroke:rgba(0,0,0,.45);stroke-width:${a.font / 12}">${escapeHtml(a.text)}</text>`;
+    }
+    if (a.type === 'rect') {
+      const x = Math.min(a.x1, a.x2), y = Math.min(a.y1, a.y2);
+      return `<rect x="${x}" y="${y}" width="${Math.abs(a.x2 - a.x1)}" height="${Math.abs(a.y2 - a.y1)}" fill="none" stroke="${a.color}" stroke-width="${a.line}" />`;
+    }
+    if (a.type === 'circle') {
+      return `<ellipse cx="${(a.x1 + a.x2) / 2}" cy="${(a.y1 + a.y2) / 2}" rx="${Math.abs(a.x2 - a.x1) / 2}" ry="${Math.abs(a.y2 - a.y1) / 2}" fill="none" stroke="${a.color}" stroke-width="${a.line}" />`;
+    }
+    const pts = arrowHead(a).map((pt) => pt.join(',')).join(' ');
+    return `<line x1="${a.x1}" y1="${a.y1}" x2="${a.x2}" y2="${a.y2}" stroke="${a.color}" stroke-width="${a.line}" stroke-linecap="round" /><polygon points="${pts}" fill="${a.color}" />`;
+  }).join('');
+}
+
+// 导出：把标注按原图坐标画到 canvas
+function drawAnns(ctx) {
+  Shot.anns.forEach((a) => {
+    ctx.save();
+    ctx.strokeStyle = a.color;
+    ctx.fillStyle = a.color;
+    ctx.lineWidth = a.line || 2;
+    if (a.type === 'text') {
+      ctx.font = a.font + 'px sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.lineWidth = a.font / 12;
+      ctx.strokeStyle = 'rgba(0,0,0,.45)';
+      ctx.strokeText(a.text, a.x, a.y);
+      ctx.fillText(a.text, a.x, a.y);
+    } else if (a.type === 'rect') {
+      ctx.strokeRect(Math.min(a.x1, a.x2), Math.min(a.y1, a.y2), Math.abs(a.x2 - a.x1), Math.abs(a.y2 - a.y1));
+    } else if (a.type === 'circle') {
+      ctx.beginPath();
+      ctx.ellipse((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2, Math.abs(a.x2 - a.x1) / 2, Math.abs(a.y2 - a.y1) / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(a.x1, a.y1); ctx.lineTo(a.x2, a.y2);
+      ctx.stroke();
+      const pts = arrowHead(a);
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      ctx.lineTo(pts[1][0], pts[1][1]);
+      ctx.lineTo(pts[2][0], pts[2][1]);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+// 先画原图 + 标注，再按框选裁剪
+function renderShot() {
   return new Promise((resolve) => {
-    if (!Shot.dataUrl || !Shot.sel) { resolve(Shot.dataUrl || ''); return; }
-    const sel = Shot.sel;
+    if (!Shot.dataUrl) { resolve(''); return; }
     const img = new Image();
     img.onload = () => {
-      const sx = Math.round(sel.x * img.naturalWidth);
-      const sy = Math.round(sel.y * img.naturalHeight);
-      const sw = Math.max(1, Math.round(sel.w * img.naturalWidth));
-      const sh = Math.max(1, Math.round(sel.h * img.naturalHeight));
+      const full = document.createElement('canvas');
+      full.width = img.naturalWidth; full.height = img.naturalHeight;
+      const fctx = full.getContext('2d');
+      if (!fctx) { resolve(Shot.dataUrl); return; }
+      fctx.drawImage(img, 0, 0);
+      drawAnns(fctx);
+      if (!Shot.sel) { resolve(full.toDataURL('image/png')); return; }
+      const sel = Shot.sel;
+      const sx = Math.round(sel.x * full.width);
+      const sy = Math.round(sel.y * full.height);
+      const sw = Math.max(1, Math.round(sel.w * full.width));
+      const sh = Math.max(1, Math.round(sel.h * full.height));
       const cv = document.createElement('canvas');
       cv.width = sw; cv.height = sh;
       const ctx = cv.getContext('2d');
-      if (ctx) ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      if (ctx) ctx.drawImage(full, sx, sy, sw, sh, 0, 0, sw, sh);
       resolve(cv.toDataURL('image/png'));
     };
     img.onerror = () => resolve(Shot.dataUrl);
@@ -3495,8 +3658,8 @@ function dataUrlToFile(dataUrl, name) {
 
 async function confirmShot() {
   if (!Shot.dataUrl) return;
-  const cropped = await cropShot();
-  const file = dataUrlToFile(cropped, 'screenshot-' + Date.now() + '.png');
+  const out = await renderShot();
+  const file = dataUrlToFile(out, 'screenshot-' + Date.now() + '.png');
   closeShot();
   await uploadFiles([file]);
 }
@@ -5457,6 +5620,8 @@ function bind() {
   $('shotBtn').addEventListener('click', captureScreenshot);
   $('shotCancel').addEventListener('click', closeShot);
   $('shotConfirm').addEventListener('click', confirmShot);
+  $('shotUndo').addEventListener('click', undoShot);
+  $('shotClear').addEventListener('click', clearShot);
   const stage = $('shotStage');
   stage.addEventListener('pointerdown', shotDown);
   stage.addEventListener('pointermove', shotMove);
