@@ -3608,24 +3608,24 @@ function renderShotTools() {
   crop.textContent = T('shotCropApply');
   crop.hidden = !(Shot.tool === 'crop' && Shot.sel);
   $('shotEditBtn').textContent = T('shotEditText');
-  $('shotEditBtn').hidden = !sel;
+  $('shotEditBtn').hidden = !(sel && sel.type === 'text'); // 只有文字能编辑内容
   $('shotDelBtn').textContent = T('shotDelSel');
   $('shotDelBtn').hidden = !sel;
   $('shotUndo').textContent = T('shotUndo');
   $('shotClear').textContent = T('shotClear');
-  $('shotStage').style.cursor = Shot.tool === 'text' ? 'text' : 'crosshair';
+  $('shotStage').style.cursor = Shot.tool === 'text' ? 'text' : 'crosshair'; // 悬停时再由 updateShotCursor 覆盖
 }
 // 颜色/字号点击时，若正选中一条文字标注，就改它（否则只改"下一条"的默认值）
 function applyToSelected() {
   const a = selectedAnn();
   if (!a) return;
   a.color = Shot.color;
-  a.font = shotFontPx();
-  measureAnn(a);
+  if (a.type === 'text') { a.font = shotFontPx(); measureAnn(a); }
+  else a.line = shotLinePx();
   paintAnn();
 }
 function selectedAnn() {
-  return Shot.anns.find((a) => a.id === Shot.selId && a.type === 'text') || null;
+  return Shot.anns.find((a) => a.id === Shot.selId) || null;
 }
 
 // 文字尺寸测量（离屏 canvas，原图像素）
@@ -3660,70 +3660,112 @@ function shotImgPos(e) {
   const { nx, ny } = shotPos(e);
   return { x: nx * Shot.w, y: ny * Shot.h };
 }
-// 文字局部坐标（以中心为原点、未旋转）→ 图片坐标
-function localToImg(a, lx, ly) {
-  const rad = (a.rot || 0) * Math.PI / 180;
+// 选中盒的局部坐标（以盒心为原点、未旋转）↔ 图片坐标
+function boxLocalToImg(b, lx, ly) {
+  const rad = (b.rot || 0) * Math.PI / 180;
   return {
-    x: a.cx + lx * Math.cos(rad) - ly * Math.sin(rad),
-    y: a.cy + lx * Math.sin(rad) + ly * Math.cos(rad),
+    x: b.cx + lx * Math.cos(rad) - ly * Math.sin(rad),
+    y: b.cy + lx * Math.sin(rad) + ly * Math.cos(rad),
   };
 }
-function imgToLocal(a, x, y) {
-  const rad = -(a.rot || 0) * Math.PI / 180;
-  const dx = x - a.cx, dy = y - a.cy;
+function boxImgToLocal(b, x, y) {
+  const rad = -(b.rot || 0) * Math.PI / 180;
+  const dx = x - b.cx, dy = y - b.cy;
   return { lx: dx * Math.cos(rad) - dy * Math.sin(rad), ly: dx * Math.sin(rad) + dy * Math.cos(rad) };
 }
 function annPad(a) { return Math.max(a.font * 0.25, shotHandlePx()); }
-function annHandles(a) {
-  const pad = annPad(a);
-  const hw = a.w / 2 + pad, hh = a.h / 2 + pad;
+// 每条标注的"选中盒"：文字带旋转，形状就是外接框
+function annBox(a) {
+  if (a.type === 'text') {
+    const pad = annPad(a);
+    return { cx: a.cx, cy: a.cy, hw: a.w / 2 + pad, hh: a.h / 2 + pad, rot: a.rot || 0 };
+  }
+  const pad = Math.max((a.line || 2) * 2, shotHandlePx());
   return {
-    scale: localToImg(a, hw, hh),                        // 右下角：缩放
-    rotate: localToImg(a, 0, -hh - shotHandlePx() * 3),  // 正上方：旋转
-    box: { hw, hh },
+    cx: (a.x1 + a.x2) / 2, cy: (a.y1 + a.y2) / 2,
+    hw: Math.abs(a.x2 - a.x1) / 2 + pad, hh: Math.abs(a.y2 - a.y1) / 2 + pad, rot: 0,
   };
 }
+// 句柄：文字 = 上方旋转 + 右下缩放；形状 = 两个端点（箭头就是首尾，方框/圆就是对角）
+function annHandles(a) {
+  const b = annBox(a);
+  if (a.type === 'text') {
+    return {
+      rotate: boxLocalToImg(b, 0, -b.hh - shotHandlePx() * 3),
+      scale: boxLocalToImg(b, b.hw, b.hh),
+    };
+  }
+  return { pt1: { x: a.x1, y: a.y1 }, pt2: { x: a.x2, y: a.y2 } };
+}
+function distToSeg(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2)) : 0;
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+// 命中：先句柄，再本体。返回 'rotate'|'scale'|'pt1'|'pt2'|'move'|null
 function hitHandle(a, x, y) {
   const r = shotHandlePx() * 2.6;
   const hs = annHandles(a);
-  if (Math.hypot(x - hs.scale.x, y - hs.scale.y) <= r) return 'scale';
-  if (Math.hypot(x - hs.rotate.x, y - hs.rotate.y) <= r) return 'rotate';
-  const { lx, ly } = imgToLocal(a, x, y);
-  if (Math.abs(lx) <= hs.box.hw && Math.abs(ly) <= hs.box.hh) return 'move';
-  return null;
+  const keys = Object.keys(hs);
+  for (let i = 0; i < keys.length; i++) {
+    const p = hs[keys[i]];
+    if (Math.hypot(x - p.x, y - p.y) <= r) return keys[i];
+  }
+  return hitBody(a, x, y) ? 'move' : null;
 }
-function hitAnyText(x, y) {
+// 本体命中：文字按整个盒子；形状只认"描边附近"，免得大圈/大框把里面挡住没法再画
+function hitBody(a, x, y) {
+  const b = annBox(a);
+  const { lx, ly } = boxImgToLocal(b, x, y);
+  const inBox = Math.abs(lx) <= b.hw && Math.abs(ly) <= b.hh;
+  if (a.type === 'text') return inBox;
+  const tol = Math.max((a.line || 2) * 3, shotHandlePx() * 1.6);
+  if (a.type === 'arrow') return distToSeg(x, y, a.x1, a.y1, a.x2, a.y2) <= tol;
+  const rx = Math.abs(a.x2 - a.x1) / 2, ry = Math.abs(a.y2 - a.y1) / 2;
+  if (rx <= tol || ry <= tol) return inBox; // 太小就整块可点
+  if (a.type === 'circle') {
+    const t = Math.hypot(lx / rx, ly / ry);
+    return Math.abs(t - 1) * Math.min(rx, ry) <= tol;
+  }
+  return inBox && !(Math.abs(lx) <= rx - tol && Math.abs(ly) <= ry - tol); // rect：只认边框那一圈
+}
+function hitAnyAnn(x, y) {
   for (let i = Shot.anns.length - 1; i >= 0; i--) {
-    const a = Shot.anns[i];
-    if (a.type !== 'text') continue;
-    if (hitHandle(a, x, y)) return a;
+    if (hitHandle(Shot.anns[i], x, y)) return Shot.anns[i];
   }
   return null;
 }
+const SHOT_CURSOR = { move: 'move', scale: 'nwse-resize', pt1: 'nwse-resize', pt2: 'nwse-resize', rotate: 'grab' };
+// 鼠标悬停在标注/句柄上就换成"能拖"的光标——不然看不出来可以拖
+function updateShotCursor(x, y) {
+  const stage = $('shotStage');
+  const sel = selectedAnn();
+  let kind = sel ? hitHandle(sel, x, y) : null;
+  if (!kind) { const a = hitAnyAnn(x, y); if (a) kind = 'move'; }
+  stage.style.cursor = kind ? SHOT_CURSOR[kind] : (Shot.tool === 'text' ? 'text' : 'crosshair');
+}
 
-// ── 指针交互：画标注 / 框选裁剪 / 拖动·旋转·缩放文字 / 双指手势 ──
+// ── 指针交互：画标注 / 框选裁剪 / 选中后拖动·旋转·缩放·改端点 / 双指手势 ──
 function shotDown(e) {
   e.currentTarget.setPointerCapture(e.pointerId);
   Shot.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   const { x, y } = shotImgPos(e);
 
-  if (Shot.ptrs.size === 2) { startGesture(); return; } // 双指：缩放+旋转选中的文字
+  if (Shot.ptrs.size === 2) { startGesture(); return; } // 双指：缩放+旋转选中项
   const sel = selectedAnn();
   const hit = sel ? hitHandle(sel, x, y) : null;
-  if (sel && hit) { // 已选中的文字：句柄优先，任何工具下都能操作
-    Shot.drag = { kind: hit, id: sel.id, x0: x, y0: y, cx: sel.cx, cy: sel.cy, font: sel.font, rot: sel.rot || 0 };
-    if (hit === 'scale') Shot.drag.d0 = Math.hypot(x - sel.cx, y - sel.cy) || 1;
-    if (hit === 'rotate') Shot.drag.a0 = Math.atan2(y - sel.cy, x - sel.cx);
-    return;
-  }
-  if (Shot.tool === 'text') {
-    const t = hitAnyText(x, y);
-    if (t) { Shot.selId = t.id; renderShotTools(); paintAnn(); Shot.drag = { kind: 'move', id: t.id, x0: x, y0: y, cx: t.cx, cy: t.cy }; return; }
-    Shot.selId = null; renderShotTools(); paintAnn();
-    openShotText(null, x, y);
+  if (sel && hit) { startAnnDrag(sel, hit, x, y); return; } // 已选中的：句柄优先，任何工具下都能操作
+  const target = hitAnyAnn(x, y);
+  if (target) { // 点到别的标注 → 选中它并可直接拖走
+    Shot.selId = target.id;
+    renderShotTools();
+    paintAnn();
+    startAnnDrag(target, 'move', x, y);
     return;
   }
   if (Shot.selId) { Shot.selId = null; renderShotTools(); paintAnn(); }
+  if (Shot.tool === 'text') { openShotText(null, x, y); return; }
   if (Shot.tool === 'crop') {
     const { nx, ny } = shotPos(e);
     Shot.drag = { kind: 'crop', ox: nx, oy: ny };
@@ -3735,12 +3777,22 @@ function shotDown(e) {
   Shot.draft = { type: Shot.tool, x1: x, y1: y, x2: x, y2: y, color: Shot.color, line: shotLinePx() };
   paintAnn();
 }
+function startAnnDrag(a, kind, x, y) {
+  const b = annBox(a);
+  Shot.drag = {
+    kind, id: a.id, x0: x, y0: y,
+    cx: a.cx, cy: a.cy, font: a.font, rot: a.rot || 0,
+    pts: a.type === 'text' ? null : { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2 },
+  };
+  if (kind === 'scale') Shot.drag.d0 = Math.hypot(x - b.cx, y - b.cy) || 1;
+  if (kind === 'rotate') Shot.drag.a0 = Math.atan2(y - b.cy, x - b.cx);
+}
 function shotMove(e) {
   if (Shot.ptrs.has(e.pointerId)) Shot.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
   if (Shot.gesture) { moveGesture(); return; }
   const d = Shot.drag;
-  if (!d) return;
   const { x, y } = shotImgPos(e);
+  if (!d) { updateShotCursor(x, y); return; }
   if (d.kind === 'crop') {
     const { nx, ny } = shotPos(e);
     Shot.sel = { x: Math.min(d.ox, nx), y: Math.min(d.oy, ny), w: Math.abs(nx - d.ox), h: Math.abs(ny - d.oy) };
@@ -3755,7 +3807,12 @@ function shotMove(e) {
   }
   const a = Shot.anns.find((it) => it.id === d.id);
   if (!a) return;
-  if (d.kind === 'move') { a.cx = d.cx + (x - d.x0); a.cy = d.cy + (y - d.y0); }
+  const dx = x - d.x0, dy = y - d.y0;
+  if (d.kind === 'move') {
+    if (a.type === 'text') { a.cx = d.cx + dx; a.cy = d.cy + dy; }
+    else { a.x1 = d.pts.x1 + dx; a.y1 = d.pts.y1 + dy; a.x2 = d.pts.x2 + dx; a.y2 = d.pts.y2 + dy; }
+  } else if (d.kind === 'pt1') { a.x1 = d.pts.x1 + dx; a.y1 = d.pts.y1 + dy; }
+  else if (d.kind === 'pt2') { a.x2 = d.pts.x2 + dx; a.y2 = d.pts.y2 + dy; }
   else if (d.kind === 'scale') {
     const ratio = (Math.hypot(x - a.cx, y - a.cy) || 1) / d.d0;
     a.font = Math.max(8, Math.min(Math.max(Shot.w, Shot.h) / 2, d.font * ratio));
@@ -3784,7 +3841,7 @@ function shotUp(e) {
     paintAnn();
   }
 }
-// 双指：以两指中点距离/夹角变化同步缩放与旋转选中的文字
+// 双指：两指距离比 → 缩放，夹角差 → 旋转（文字改字号/角度，形状则把两个端点绕中心变换）
 function startGesture() {
   const a = selectedAnn();
   if (!a || Shot.ptrs.size !== 2) return;
@@ -3795,6 +3852,7 @@ function startGesture() {
     d0: Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1,
     a0: Math.atan2(p2.y - p1.y, p2.x - p1.x),
     font: a.font, rot: a.rot || 0,
+    pts: a.type === 'text' ? null : { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2 },
   };
 }
 function moveGesture() {
@@ -3802,20 +3860,22 @@ function moveGesture() {
   const a = Shot.anns.find((it) => it.id === g.id);
   if (!a || Shot.ptrs.size < 2) return;
   const [p1, p2] = Array.from(Shot.ptrs.values());
-  const d = Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1;
-  a.font = Math.max(8, Math.min(Math.max(Shot.w, Shot.h) / 2, g.font * (d / g.d0)));
-  a.rot = g.rot + (Math.atan2(p2.y - p1.y, p2.x - p1.x) - g.a0) * 180 / Math.PI;
-  measureAnn(a);
+  const k = (Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1) / g.d0;
+  const da = Math.atan2(p2.y - p1.y, p2.x - p1.x) - g.a0;
+  if (a.type === 'text') {
+    a.font = Math.max(8, Math.min(Math.max(Shot.w, Shot.h) / 2, g.font * k));
+    a.rot = g.rot + da * 180 / Math.PI;
+    measureAnn(a);
+  } else {
+    const cx = (g.pts.x1 + g.pts.x2) / 2, cy = (g.pts.y1 + g.pts.y2) / 2;
+    const tf = (px, py) => {
+      const rx = (px - cx) * k, ry = (py - cy) * k;
+      return { x: cx + rx * Math.cos(da) - ry * Math.sin(da), y: cy + rx * Math.sin(da) + ry * Math.cos(da) };
+    };
+    const q1 = tf(g.pts.x1, g.pts.y1), q2 = tf(g.pts.x2, g.pts.y2);
+    a.x1 = q1.x; a.y1 = q1.y; a.x2 = q2.x; a.y2 = q2.y;
+  }
   paintAnn();
-}
-// 双击文字 → 再次编辑
-function shotDblClick(e) {
-  const { x, y } = shotImgPos(e);
-  const t = hitAnyText(x, y);
-  if (!t) return;
-  Shot.selId = t.id;
-  renderShotTools();
-  openShotText(t.id, t.cx, t.cy);
 }
 
 // ── 文字输入弹窗（多行，替代原生 prompt）──
@@ -3875,7 +3935,7 @@ function deleteSelected(id) {
 }
 function editSelected() {
   const a = selectedAnn();
-  if (a) openShotText(a.id, a.cx, a.cy);
+  if (a && a.type === 'text') openShotText(a.id, a.cx, a.cy);
 }
 
 // ── 裁剪：确定后只保留框选区域（原图真的被换掉，标注坐标随之平移）──
@@ -3929,8 +3989,8 @@ function annVisible(a, w, h) {
 // 箭头头部三角形的三个点（在原图坐标系里算）
 function arrowHead(a) {
   const ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
-  const len = Math.max((a.line || 2) * 5, 8);
-  const spread = 0.42;
+  const len = Math.max((a.line || 2) * 11, 14); // 头要够大够肥，不然细线上看不出是箭头
+  const spread = 0.5;
   return [
     [a.x2, a.y2],
     [a.x2 - len * Math.cos(ang - spread), a.y2 - len * Math.sin(ang - spread)],
@@ -3944,15 +4004,23 @@ function textSvg(a) {
     + ` style="paint-order:stroke;stroke:rgba(0,0,0,.45);stroke-width:${a.font / 14}">${tsp}</text></g>`;
 }
 function selBoxSvg(a) {
-  const pad = annPad(a);
-  const hw = a.w / 2 + pad, hh = a.h / 2 + pad;
+  const b = annBox(a);
   const hs = shotHandlePx();
-  return `<g transform="translate(${a.cx} ${a.cy}) rotate(${a.rot || 0})" opacity="0.95">`
-    + `<rect x="${-hw}" y="${-hh}" width="${hw * 2}" height="${hh * 2}" fill="none" stroke="#0a84ff" stroke-width="${Math.max(1, hs / 4)}" stroke-dasharray="${hs * 1.4} ${hs}" />`
-    + `<line x1="0" y1="${-hh}" x2="0" y2="${-hh - hs * 3}" stroke="#0a84ff" stroke-width="${Math.max(1, hs / 4)}" />`
-    + `<circle cx="0" cy="${-hh - hs * 3}" r="${hs}" fill="#fff" stroke="#0a84ff" stroke-width="${Math.max(1, hs / 4)}" />`
-    + `<circle cx="${hw}" cy="${hh}" r="${hs}" fill="#0a84ff" stroke="#fff" stroke-width="${Math.max(1, hs / 4)}" />`
-    + `</g>`;
+  const sw = Math.max(1, hs / 4);
+  let g = `<g transform="translate(${b.cx} ${b.cy}) rotate(${b.rot || 0})" opacity="0.95">`
+    + `<rect x="${-b.hw}" y="${-b.hh}" width="${b.hw * 2}" height="${b.hh * 2}" fill="none" stroke="#0a84ff" stroke-width="${sw}" stroke-dasharray="${hs * 1.4} ${hs}" />`;
+  if (a.type === 'text') {
+    g += `<line x1="0" y1="${-b.hh}" x2="0" y2="${-b.hh - hs * 3}" stroke="#0a84ff" stroke-width="${sw}" />`
+      + `<circle cx="0" cy="${-b.hh - hs * 3}" r="${hs}" fill="#fff" stroke="#0a84ff" stroke-width="${sw}" />`
+      + `<circle cx="${b.hw}" cy="${b.hh}" r="${hs}" fill="#0a84ff" stroke="#fff" stroke-width="${sw}" />`;
+  }
+  g += '</g>';
+  if (a.type !== 'text') { // 形状：两个端点句柄画在原坐标上（箭头首尾可分别拖）
+    const hd = annHandles(a);
+    g += `<circle cx="${hd.pt1.x}" cy="${hd.pt1.y}" r="${hs}" fill="#0a84ff" stroke="#fff" stroke-width="${sw}" />`
+      + `<circle cx="${hd.pt2.x}" cy="${hd.pt2.y}" r="${hs}" fill="#0a84ff" stroke="#fff" stroke-width="${sw}" />`;
+  }
+  return g;
 }
 
 // SVG 预览：与导出 drawAnns 用同一份坐标
@@ -6054,7 +6122,6 @@ function bind() {
   stage.addEventListener('pointermove', shotMove);
   stage.addEventListener('pointerup', shotUp);
   stage.addEventListener('pointercancel', shotUp);
-  stage.addEventListener('dblclick', shotDblClick);
 }
 
 // 已登录后才连接 WS / 加载数据

@@ -976,7 +976,7 @@ const DICT = {
   shotSizeM: { en: 'M', zh: '中' },
   shotSizeL: { en: 'L', zh: '大' },
   shotTextPrompt: { en: 'Text to add:', zh: '要添加的文字：' },
-  shotAnnTip: { en: 'Circle / arrow / add text. With Crop, drag an area then press Apply crop. Tap a text to move, rotate, resize or edit it (pinch with two fingers).', zh: '可圈选/画箭头/加文字。选「裁剪」拖拽框选后点「确定裁剪」只保留该区域。文字点一下即可拖动、旋转、缩放（移动端两指），也可再次编辑。' },
+  shotAnnTip: { en: 'Circle / arrow / add text. With Crop, drag an area then press Apply crop. Tap any annotation to drag it; drag its handles to rotate / resize / re-aim (pinch with two fingers). Use Edit to change text.', zh: '可圈选/画箭头/加文字。选「裁剪」拖拽框选后点「确定裁剪」只保留该区域。点中文字或箭头即可拖动，选中后可拖句柄旋转/缩放/改端点（移动端两指捏合），改文字内容点工具条「编辑」。' },
   shotCropApply: { en: 'Apply crop', zh: '确定裁剪' },
   shotEditText: { en: 'Edit', zh: '编辑' },
   shotDelSel: { en: 'Delete', zh: '删除' },
