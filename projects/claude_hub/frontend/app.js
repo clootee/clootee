@@ -4978,8 +4978,12 @@ const UpdateModal = {
   SKIP_KEY: 'updateSkipVersion',
   forced: false,
 
+  // 只有版本清单读到了才弹：清单是发版的唯一开关。
+  // 清单读不到时 check() 会退回 commit 差异兜底，那时 latestVersion 只是本机版本号
+  // （会显示成没有意义的「2.1.0 → 2.1.0」），而且开发机上本地有未推送的提交就会常驻为真——
+  // 这种情况只在设置里点个红点提示，不打扰用户。
   maybeOpen(u) {
-    if (!u || !u.hasUpdate) return;
+    if (!u || !u.hasUpdate || !u.manifestOk) return;
     if (!u.mandatory && localStorage.getItem(this.SKIP_KEY) === String(u.latestVersion)) return;
     this.open(u);
   },
