@@ -759,6 +759,20 @@ const DICT = {
   },
   updateReconnecting: { en: 'Restarting… reconnecting in {s}s', zh: '重启中…{s} 秒后重新连接' },
   updateViewChanges: { en: 'View changes on GitHub', zh: '在 GitHub 上查看改动' },
+  // ── 启动时的新版本弹窗（强制 / 可选两种形态）──
+  updateModalTitle: { en: 'A new version is available', zh: '发现新版本' },
+  updateModalTitleForced: { en: 'Update required', zh: '需要更新' },
+  updateModalVersions: { en: '{from} → {to}', zh: '{from} → {to}' },
+  updateModalForcedHint: {
+    en: 'This version is required. Please update to keep using Clootee.',
+    zh: '本次为必须更新，请更新后继续使用 Clootee。',
+  },
+  updateModalOptionalHint: {
+    en: 'Updating recompiles and restarts the service; you will be briefly disconnected.',
+    zh: '更新会重新编译并重启服务，期间会短暂断开连接。',
+  },
+  updateModalNow: { en: 'Update now', zh: '立即更新' },
+  updateModalLater: { en: 'Later', zh: '稍后再说' },
   paneRuntime: { en: 'Runtime & updates', zh: '运行时与更新' },
   paneRuntimeDesc: {
     en: 'Whether to prefer the bundled engines, and update Claude Code / Codex',

@@ -7,13 +7,17 @@ import {
   UpdateCommitInfo,
   UpdateApplyResult,
   UpdateProgress,
+  UpdateManifest,
 } from '../logic_struct/UpdateCheckerStruct';
 import { GitBin } from '../helper/GitBin';
 import { HttpJson } from '../helper/HttpJson';
+import { PackageInfo } from '../helper/PackageInfo';
+import { SemVer } from '../helper/SemVer';
 import { Paths } from '../paths';
 import { Logger } from '../helper/Logger';
 
 const GITHUB_API_TIMEOUT_MS = 10000;
+const MANIFEST_FILE = 'version.json';
 
 export class UpdateChecker extends UpdateCheckerStruct {
   // 要比较/拉取的分支：本地分支名可能和它实际跟踪的远端分支名不一样
@@ -54,6 +58,67 @@ export class UpdateChecker extends UpdateCheckerStruct {
     if (res.status !== 200 || !res.json || !res.json.sha)
       throw new Error(`UpdateChecker: GitHub API 请求失败 status=${res.status} url=${url}`);
     return this._parseRemoteCommit(res.json);
+  }
+
+  protected static _localVersion(): string {
+    return PackageInfo.version();
+  }
+
+  // 版本清单走 raw.githubusercontent.com 直读仓库文件：不消耗 GitHub API 速率，
+  // 且跟随 origin 指向的仓库与当前分支，fork 出去也能各自管各自的发版。
+  // 带时间戳查询串是为了绕开 raw 的 CDN 缓存，否则刚推的 version.json 可能几分钟内读到旧的。
+  protected static async _remoteManifest(branch: string): Promise<UpdateManifest | null> {
+    const { owner, repo } = this._originRepo();
+    const url =
+      `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${MANIFEST_FILE}` +
+      `?t=${Date.now()}`;
+    try {
+      const res = await HttpJson.get(
+        url,
+        { 'User-Agent': 'claude-hub-update-checker', 'Cache-Control': 'no-cache' },
+        GITHUB_API_TIMEOUT_MS,
+      );
+      if (res.status !== 200 || !res.json) {
+        Logger.info('UpdateChecker', 'manifest unavailable', { status: res.status, url });
+        return null;
+      }
+      return this._normalizeManifest(res.json);
+    } catch (e: any) {
+      Logger.info('UpdateChecker', 'manifest fetch failed', { err: e?.message, url });
+      return null; // 清单读不到不算错误：退回 commit 兜底，不打断用户
+    }
+  }
+
+  // 汇总结论。清单可用时以版本号为准；清单缺失或版本号非法时退回 commit 对比，且一律不强制。
+  protected static _decide(
+    currentVersion: string,
+    manifest: UpdateManifest | null,
+    commitDiffers: boolean,
+    lang?: string,
+  ): { hasUpdate: boolean; mandatory: boolean; latestVersion: string; notes: string; releasedAt: string } {
+    const fallback = {
+      hasUpdate: commitDiffers,
+      mandatory: false,
+      latestVersion: currentVersion,
+      notes: '',
+      releasedAt: '',
+    };
+    if (!manifest) return fallback;
+    if (SemVer.parse(manifest.version) === null || SemVer.parse(currentVersion) === null) {
+      Logger.info('UpdateChecker', 'version not comparable, fall back to commit diff', {
+        currentVersion,
+        latestVersion: manifest.version,
+      });
+      return fallback;
+    }
+    const hasUpdate = SemVer.gt(manifest.version, currentVersion);
+    return {
+      hasUpdate,
+      mandatory: hasUpdate && this._isMandatory(currentVersion, manifest),
+      latestVersion: manifest.version,
+      notes: this._pickNotes(manifest, lang),
+      releasedAt: String(manifest.releasedAt || ''),
+    };
   }
 
   protected static _repoUrl(): string {
@@ -125,6 +190,39 @@ export class UpdateChecker extends UpdateCheckerStruct {
       short: sha.slice(0, 7),
       message: String(c.commit?.message || '').split('\n')[0],
       date: c.commit?.committer?.date || c.commit?.author?.date || '',
+    };
+  }
+
+  // 强制更新的两条来源，满足其一即强制：
+  //   force: true      —— 一刀切，所有低版本都必须更新（用于紧急修复）
+  //   minVersion: "x"  —— 本机版本低于它才强制（用于「太旧的版本不再支持」）
+  private static _isMandatory(currentVersion: string, m: UpdateManifest): boolean {
+    if (m.force === true) return true;
+    if (SemVer.parse(m.minVersion) === null) return false;
+    return SemVer.lt(currentVersion, String(m.minVersion));
+  }
+
+  // 说明文案优先按语言取 notesI18n，退回 notes，再退回英文条目
+  private static _pickNotes(m: UpdateManifest, lang?: string): string {
+    const i18n = m.notesI18n;
+    if (i18n && typeof i18n === 'object') {
+      const key = String(lang || '').toLowerCase();
+      if (key && typeof i18n[key] === 'string') return i18n[key];
+      const short = key.split('-')[0];
+      if (short && typeof i18n[short] === 'string') return i18n[short];
+      if (typeof i18n.en === 'string') return i18n.en;
+    }
+    return typeof m.notes === 'string' ? m.notes : '';
+  }
+
+  private static _normalizeManifest(raw: any): UpdateManifest {
+    return {
+      version: String(raw.version || ''),
+      minVersion: raw.minVersion === undefined ? undefined : String(raw.minVersion),
+      force: raw.force === true,
+      releasedAt: raw.releasedAt === undefined ? undefined : String(raw.releasedAt),
+      notes: raw.notes === undefined ? undefined : String(raw.notes),
+      notesI18n: raw.notesI18n && typeof raw.notesI18n === 'object' ? raw.notesI18n : undefined,
     };
   }
 

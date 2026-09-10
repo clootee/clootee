@@ -309,6 +309,28 @@
     </div>
   </div>
 
+  <!-- 新版本弹窗：启动时检测到新版本弹出。强制更新时没有「稍后」也不能点背景关闭 -->
+  <div class="login-overlay" id="updateModal" hidden>
+    <div class="picker-card upd-card">
+      <div class="picker-head">
+        <span id="updModalTitle"></span>
+        <button id="updModalX" style="flex:none;padding:2px 9px">✕</button>
+      </div>
+      <div class="upd-body">
+        <div class="upd-ver" id="updModalVer"></div>
+        <div class="upd-notes sx-pre" id="updModalNotes" hidden></div>
+        <div class="upd-hint" id="updModalHint"></div>
+        <div class="sx-note sx-pre" id="updModalLog" hidden></div>
+      </div>
+      <div class="upd-foot">
+        <a id="updModalLink" target="_blank" rel="noopener noreferrer"></a>
+        <span class="spacer"></span>
+        <button class="sx-btn" id="updModalLater"></button>
+        <button class="sx-btn sx-btn-primary" id="updModalNow"></button>
+      </div>
+    </div>
+  </div>
+
   <!-- 任务管理弹窗（整体展开：批量删除 / 修改 / 复制 / 暂定）-->
   <div class="login-overlay" id="queueModal" hidden>
     <div class="picker-card qm-card">

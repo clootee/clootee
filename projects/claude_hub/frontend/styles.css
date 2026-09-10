@@ -2973,3 +2973,21 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .attach-body img { max-width: 84vw; max-height: 62vh; border-radius: 8px; }
 .attach-info { font-size: 12px; opacity: .8; white-space: pre-wrap; word-break: break-all; align-self: stretch; }
 .attach-foot { display: flex; justify-content: flex-end; }
+
+/* ── 新版本弹窗 ── */
+.upd-card { max-width: 520px; width: min(520px, calc(100vw - 32px)); }
+.upd-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.upd-ver { font-size: 15px; font-weight: 600; letter-spacing: .3px; }
+.upd-notes {
+  max-height: 220px; overflow: auto; padding: 10px 12px; border-radius: 8px;
+  background: var(--panel-2, rgba(127,127,127,.08)); border: 1px solid var(--border);
+  font-size: 13px; line-height: 1.6; white-space: pre-wrap;
+}
+.upd-hint { font-size: 12px; opacity: .75; line-height: 1.6; }
+.upd-foot {
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px;
+}
+.upd-foot .spacer { flex: 1; }
+.upd-foot a { font-size: 12px; opacity: .8; }
+#updModalLog { max-height: 160px; overflow: auto; }

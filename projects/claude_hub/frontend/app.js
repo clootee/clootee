@@ -4869,11 +4869,12 @@ const UpdateApplyLog = {
 // 具体信息留给用户自己点进「软件更新」板块查看
 async function checkAppUpdateSilently() {
   try {
-    State.updateInfo = await api('/api/update/check');
+    State.updateInfo = await api(`/api/update/check?lang=${encodeURIComponent(LANG)}`);
   } catch {
     State.updateInfo = null; // 静默失败；手动点「检查更新」时会看到具体错误
   }
   renderUpdateDot();
+  UpdateModal.maybeOpen(State.updateInfo);
 }
 
 function renderUpdateDot() {
@@ -4900,13 +4901,21 @@ function renderUpdateInfo(u) {
   const info = $('appUpdInfo');
   info.hidden = false;
   info.className = `sx-note sx-pre${u.hasUpdate ? '' : ' ok'}`;
-  info.textContent = [
+  // 清单可用时版本号是权威结论，commit 只作为「差了哪些提交」的补充信息
+  const lines = [];
+  if (u.manifestOk) {
+    lines.push(`${T('updateCurrentLabel')}: ${u.currentVersion}`,
+               `${T('updateLatestLabel')}: ${u.latestVersion}`, '');
+  }
+  lines.push(
     `${T('updateBranchLabel')}: ${u.branch}`,
     `${T('updateCurrentLabel')}: ${formatUpdateCommit(u.current)}`,
     `${T('updateLatestLabel')}: ${formatUpdateCommit(u.latest)}`,
     '',
     u.hasUpdate ? T('updateAvailableHint') : T('updateUpToDateHint'),
-  ].join('\n');
+  );
+  if (u.hasUpdate && u.notes) lines.push('', u.notes);
+  info.textContent = lines.join('\n');
   $('appUpdApplyRow').hidden = !u.hasUpdate;
 }
 
@@ -4917,7 +4926,7 @@ async function checkAppUpdate() {
   info.textContent = T('updateCheckingNow');
   $('appUpdApplyRow').hidden = true;
   try {
-    State.updateInfo = await api('/api/update/check');
+    State.updateInfo = await api(`/api/update/check?lang=${encodeURIComponent(LANG)}`);
     renderUpdateInfo(State.updateInfo);
     renderUpdateDot();
     renderSettingsNav(); // 板块列表里的摘要文字（有新版本/已是最新）跟着刷新
@@ -4927,12 +4936,11 @@ async function checkAppUpdate() {
   }
 }
 
-async function applyAppUpdate() {
-  if (!confirm(T('updateConfirm'))) return;
-  const box = $('appUpdStatus');
+// 拉取 + 重启的实际流程。设置面板和启动弹窗共用一套，只是把日志写进各自的框。
+// onFail 用于失败后解禁发起按钮——两处的按钮不是同一个，交给调用方处理。
+async function runAppUpdate(box, onFail) {
   box.hidden = false;
   box.className = 'sx-note sx-pre';
-  $('appUpdApplyBtn').disabled = true;
   const lines = [T('updateApplying')];
   const render = () => { box.textContent = lines.join('\n'); box.scrollTop = box.scrollHeight; };
   UpdateApplyLog.watch((line) => {
@@ -4947,19 +4955,84 @@ async function applyAppUpdate() {
     box.className = 'sx-note sx-pre ok';
     lines.push(T('updateApplyDone'));
     render();
-    waitForAppRestart();
+    waitForAppRestart(box);
   } catch (e) {
     UpdateApplyLog.stop();
-    $('appUpdApplyBtn').disabled = false;
+    if (onFail) onFail();
     box.className = 'sx-note sx-pre err';
     lines.push(T('updateApplyFail').replace('{err}', e.message));
     render();
   }
 }
 
+async function applyAppUpdate() {
+  if (!confirm(T('updateConfirm'))) return;
+  $('appUpdApplyBtn').disabled = true;
+  await runAppUpdate($('appUpdStatus'), () => { $('appUpdApplyBtn').disabled = false; });
+}
+
+// ── 启动时的新版本弹窗 ──
+// 强制更新（后端 mandatory=true）：没有 ✕、没有「稍后」，Escape 和点背景都关不掉，只能更新。
+// 可选更新：可以「稍后再说」，同一版本号本机不再打扰；清单里版本号一变会重新弹。
+const UpdateModal = {
+  SKIP_KEY: 'updateSkipVersion',
+  forced: false,
+
+  maybeOpen(u) {
+    if (!u || !u.hasUpdate) return;
+    if (!u.mandatory && localStorage.getItem(this.SKIP_KEY) === String(u.latestVersion)) return;
+    this.open(u);
+  },
+
+  open(u) {
+    this.forced = !!u.mandatory;
+    $('updModalTitle').textContent = this.forced ? T('updateModalTitleForced') : T('updateModalTitle');
+    $('updModalVer').textContent = T('updateModalVersions')
+      .replace('{from}', u.currentVersion || '?')
+      .replace('{to}', u.latestVersion || '?');
+    const notes = $('updModalNotes');
+    notes.hidden = !u.notes;
+    notes.textContent = u.notes || '';
+    $('updModalHint').textContent = this.forced ? T('updateModalForcedHint') : T('updateModalOptionalHint');
+    const link = $('updModalLink');
+    link.href = u.repoUrl || '#';
+    link.textContent = T('updateViewChanges');
+    link.hidden = !u.repoUrl;
+    $('updModalLog').hidden = true;
+    $('updModalNow').textContent = T('updateModalNow');
+    $('updModalNow').disabled = false;
+    $('updModalLater').textContent = T('updateModalLater');
+    $('updModalLater').hidden = this.forced;
+    $('updModalX').hidden = this.forced;
+    $('updateModal').hidden = false;
+  },
+
+  // 「关不掉」的唯一实现点：强制更新时这里直接返回，其余关闭入口都走这个方法
+  close() {
+    if (this.forced) return;
+    $('updateModal').hidden = true;
+  },
+
+  later() {
+    if (this.forced) return;
+    if (State.updateInfo && State.updateInfo.latestVersion) {
+      localStorage.setItem(this.SKIP_KEY, String(State.updateInfo.latestVersion));
+    }
+    this.close();
+  },
+
+  async now() {
+    $('updModalNow').disabled = true;
+    $('updModalLater').hidden = true;
+    await runAppUpdate($('updModalLog'), () => {
+      $('updModalNow').disabled = false;
+      $('updModalLater').hidden = this.forced;
+    });
+  },
+};
+
 // 重启期间服务会短暂下线：每 3 秒探一次登录态，探通即说明新版本已跑起来，刷新页面拿新前端资源
-function waitForAppRestart() {
-  const box = $('appUpdStatus');
+function waitForAppRestart(box) {
   const MAX_TRIES = 40; // 最多等 2 分钟，之后提示用户自己刷新
   let secs = 0;
   let tries = 0;
@@ -5927,6 +6000,13 @@ function bind() {
   // 软件本身的版本更新
   $('appUpdCheckBtn').addEventListener('click', checkAppUpdate);
   $('appUpdApplyBtn').addEventListener('click', applyAppUpdate);
+  // 新版本弹窗：强制更新时 close()/later() 内部直接返回，所以这三个入口天然失效
+  $('updModalNow').addEventListener('click', () => UpdateModal.now());
+  $('updModalLater').addEventListener('click', () => UpdateModal.later());
+  $('updModalX').addEventListener('click', () => UpdateModal.close());
+  $('updateModal').addEventListener('click', (e) => {
+    if (e.target.id === 'updateModal') UpdateModal.close();
+  });
   // 模型选择：选定 + 两种检测（当前实际模型 / 可用模型），claude 与 codex 各一套；
   // 同一个下拉（claudeModelSelect/codexModelSelect）与「服务商」区共用，服务商变了会被清空重选
   $('claudeModelSelect').addEventListener('change', () => onModelSelect('claude'));
@@ -6017,6 +6097,7 @@ function bind() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if (!$('updateModal').hidden) { UpdateModal.close(); return; } // 强制更新时 close() 是空操作，关不掉
     if (!$('queueModal').hidden) closeQueueModal();
     else if (!$('shotTextOverlay').hidden) closeShotText();
     else if (!$('shotOverlay').hidden) closeShot();
