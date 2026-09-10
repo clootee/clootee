@@ -1588,9 +1588,9 @@ body.show-process .process-panel { display: flex; }
 .shot-modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; gap: 10px; }
 .shot-head { font-weight: 600; }
 .shot-tip { font-size: 12px; color: var(--muted); }
-.shot-stage { position: relative; display: inline-block; overflow: hidden; touch-action: none; cursor: crosshair; max-width: 84vw; max-height: 64vh; }
-.shot-img { display: block; max-width: 84vw; max-height: 64vh; user-select: none; }
-.shot-sel { position: absolute; border: 2px dashed var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
+.shot-stage { position: relative; display: inline-block; align-self: center; overflow: hidden; touch-action: none; cursor: crosshair; max-width: 84vw; max-height: 64vh; }
+.shot-img { display: block; max-width: 84vw; max-height: 64vh; user-select: none; } /* 实际显示尺寸由 fitShotImage() 按容器算好写在 style.width 上（裁剪后小图要自然放大） */
+.shot-sel { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
 .shot-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .shot-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .shot-tool-group { display: flex; align-items: center; gap: 4px; }
@@ -1600,6 +1600,9 @@ body.show-process .process-panel { display: flex; }
 .shot-swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
 .shot-swatch.on { border-color: var(--fg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
 .shot-ann { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.shot-text-overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 95; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.shot-text-modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; width: min(480px, 92vw); display: flex; flex-direction: column; gap: 10px; }
+.shot-text-modal textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 90px; font: inherit; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
 .queue-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .queue-toggle {
   flex: none;

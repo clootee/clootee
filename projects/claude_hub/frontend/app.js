@@ -3389,22 +3389,24 @@ async function onPasteImage(e) {
   if (files.length) await uploadFiles(files);
 }
 
-// ── 截屏：屏幕共享抓一帧 → 预览（框选裁剪 + 圈/框/箭头/文字标注）→ 确定后上传 ──
+// ── 截屏：屏幕共享抓一帧 → 预览（裁剪 + 圈/框/箭头/文字标注）→ 确定后上传 ──
 // 标注坐标统一存"原图像素"，SVG 预览用 viewBox=原图尺寸，导出时同一套坐标直接画到 canvas，预览与结果一致
 const SHOT_TOOLS = ['crop', 'circle', 'rect', 'arrow', 'text'];
 const SHOT_COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff', '#000000'];
 const SHOT_SIZES = [{ id: 'S', k: 2.2 }, { id: 'M', k: 3.4 }, { id: 'L', k: 5.2 }];
 const Shot = {
   dataUrl: null, w: 0, h: 0, sel: null, drag: null,
-  tool: 'circle', color: SHOT_COLORS[0], sizeId: 'M', anns: [], draft: null,
+  tool: 'crop', color: SHOT_COLORS[0], sizeId: 'S', anns: [], draft: null,
+  selId: null, gesture: null, ptrs: new Map(), seq: 0, editId: null, textAt: null,
 };
 
 // 当前字号/线宽（按原图尺寸自适应，保证在 4K 截图上也看得见）
 function shotFontPx() {
-  const k = (SHOT_SIZES.find((x) => x.id === Shot.sizeId) || SHOT_SIZES[1]).k;
+  const k = (SHOT_SIZES.find((x) => x.id === Shot.sizeId) || SHOT_SIZES[0]).k;
   return Math.max(10, (Math.max(Shot.w, Shot.h) / 100) * k);
 }
-function shotLinePx() { return Math.max(2, shotFontPx() / 4); }
+function shotLinePx() { return Math.max(1, shotFontPx() / 8); }
+function shotHandlePx() { return Math.max(5, Math.max(Shot.w, Shot.h) / 130); }
 
 async function captureScreenshot() {
   if (!State.sessionId) { alert(T('selectRootFirst')); return; }
@@ -3429,25 +3431,43 @@ async function captureScreenshot() {
 }
 
 function openShot(dataUrl, w, h) {
-  Shot.dataUrl = dataUrl;
   Shot.sel = null; Shot.drag = null; Shot.draft = null; Shot.anns = [];
-  Shot.w = w || 0; Shot.h = h || 0;
-  const img = $('shotImg');
-  img.onload = () => { Shot.w = img.naturalWidth; Shot.h = img.naturalHeight; paintAnn(); };
-  img.src = dataUrl;
+  Shot.selId = null; Shot.gesture = null; Shot.ptrs.clear(); Shot.tool = 'crop';
+  setShotImage(dataUrl, w, h);
   $('shotSel').hidden = true;
   $('shotOverlay').hidden = false;
   renderShotTools();
+}
+function setShotImage(dataUrl, w, h) {
+  Shot.dataUrl = dataUrl;
+  Shot.w = w || 0; Shot.h = h || 0;
+  const img = $('shotImg');
+  img.onload = () => { Shot.w = img.naturalWidth; Shot.h = img.naturalHeight; fitShotImage(); paintAnn(); };
+  img.src = dataUrl;
+  fitShotImage();
   paintAnn();
+}
+// 显示尺寸=按可用区域等比缩放（小于容器的图——比如刚裁完的一小块——也会放大居中，最多 3 倍免得糊得没法看）
+function fitShotImage() {
+  const img = $('shotImg');
+  if (!Shot.w || !Shot.h) { img.style.width = ''; return; }
+  const maxW = window.innerWidth * 0.84, maxH = window.innerHeight * 0.64;
+  const k = Math.min(maxW / Shot.w, maxH / Shot.h, 3);
+  img.style.width = Math.round(Shot.w * k) + 'px';
+  img.style.height = 'auto';
+  img.style.maxWidth = 'none';
+  img.style.maxHeight = 'none';
 }
 function closeShot() {
   Shot.dataUrl = null; Shot.sel = null; Shot.drag = null; Shot.draft = null; Shot.anns = [];
+  Shot.selId = null; Shot.gesture = null; Shot.ptrs.clear();
   $('shotOverlay').hidden = true;
+  closeShotText();
   $('shotImg').src = '';
   paintAnn();
 }
 
-// 工具条（工具 / 颜色 / 字号）
+// 工具条（工具 / 颜色 / 字号 / 确定裁剪 / 选中文字的编辑与删除）
 function renderShotTools() {
   const tools = $('shotToolBtns');
   tools.innerHTML = '';
@@ -3455,7 +3475,7 @@ function renderShotTools() {
     const b = document.createElement('button');
     b.className = 'shot-tool' + (Shot.tool === id ? ' on' : '');
     b.textContent = T('shotTool' + id.charAt(0).toUpperCase() + id.slice(1));
-    b.addEventListener('click', () => { Shot.tool = id; renderShotTools(); });
+    b.addEventListener('click', () => { Shot.tool = id; if (id !== 'text') Shot.selId = null; renderShotTools(); paintAnn(); });
     tools.appendChild(b);
   });
   const colors = $('shotColors');
@@ -3464,7 +3484,7 @@ function renderShotTools() {
     const b = document.createElement('button');
     b.className = 'shot-swatch' + (Shot.color === c ? ' on' : '');
     b.style.background = c;
-    b.addEventListener('click', () => { Shot.color = c; renderShotTools(); });
+    b.addEventListener('click', () => { Shot.color = c; applyToSelected(); renderShotTools(); });
     colors.appendChild(b);
   });
   const sizes = $('shotSizes');
@@ -3473,15 +3493,55 @@ function renderShotTools() {
     const b = document.createElement('button');
     b.className = 'shot-tool' + (Shot.sizeId === sz.id ? ' on' : '');
     b.textContent = T('shotSize' + sz.id);
-    b.addEventListener('click', () => { Shot.sizeId = sz.id; renderShotTools(); });
+    b.addEventListener('click', () => { Shot.sizeId = sz.id; applyToSelected(); renderShotTools(); });
     sizes.appendChild(b);
   });
+  const sel = selectedAnn();
+  const crop = $('shotCropBtn');
+  crop.textContent = T('shotCropApply');
+  crop.hidden = !(Shot.tool === 'crop' && Shot.sel);
+  $('shotEditBtn').textContent = T('shotEditText');
+  $('shotEditBtn').hidden = !sel;
+  $('shotDelBtn').textContent = T('shotDelSel');
+  $('shotDelBtn').hidden = !sel;
   $('shotUndo').textContent = T('shotUndo');
   $('shotClear').textContent = T('shotClear');
   $('shotStage').style.cursor = Shot.tool === 'text' ? 'text' : 'crosshair';
 }
+// 颜色/字号点击时，若正选中一条文字标注，就改它（否则只改"下一条"的默认值）
+function applyToSelected() {
+  const a = selectedAnn();
+  if (!a) return;
+  a.color = Shot.color;
+  a.font = shotFontPx();
+  measureAnn(a);
+  paintAnn();
+}
+function selectedAnn() {
+  return Shot.anns.find((a) => a.id === Shot.selId && a.type === 'text') || null;
+}
 
-// 框选（坐标按图片显示区归一到 0~1），确定时按原图分辨率裁剪
+// 文字尺寸测量（离屏 canvas，原图像素）
+let ShotMeasureCtx = null;
+function measureAnn(a) {
+  if (!ShotMeasureCtx) ShotMeasureCtx = document.createElement('canvas').getContext('2d');
+  const ctx = ShotMeasureCtx;
+  const lines = String(a.text || '').split('\n');
+  let w = 1;
+  if (ctx) {
+    ctx.font = a.font + 'px sans-serif';
+    lines.forEach((ln) => { w = Math.max(w, ctx.measureText(ln || ' ').width); });
+  } else {
+    lines.forEach((ln) => { w = Math.max(w, (ln.length || 1) * a.font * 0.6); });
+  }
+  a.lines = lines;
+  a.lineH = a.font * 1.25;
+  a.w = w;
+  a.h = lines.length * a.lineH;
+  return a;
+}
+
+// ── 坐标与命中判定（都在原图像素坐标系里算）──
 function shotPos(e) {
   const r = $('shotStage').getBoundingClientRect();
   return {
@@ -3489,6 +3549,229 @@ function shotPos(e) {
     ny: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
   };
 }
+function shotImgPos(e) {
+  const { nx, ny } = shotPos(e);
+  return { x: nx * Shot.w, y: ny * Shot.h };
+}
+// 文字局部坐标（以中心为原点、未旋转）→ 图片坐标
+function localToImg(a, lx, ly) {
+  const rad = (a.rot || 0) * Math.PI / 180;
+  return {
+    x: a.cx + lx * Math.cos(rad) - ly * Math.sin(rad),
+    y: a.cy + lx * Math.sin(rad) + ly * Math.cos(rad),
+  };
+}
+function imgToLocal(a, x, y) {
+  const rad = -(a.rot || 0) * Math.PI / 180;
+  const dx = x - a.cx, dy = y - a.cy;
+  return { lx: dx * Math.cos(rad) - dy * Math.sin(rad), ly: dx * Math.sin(rad) + dy * Math.cos(rad) };
+}
+function annPad(a) { return Math.max(a.font * 0.25, shotHandlePx()); }
+function annHandles(a) {
+  const pad = annPad(a);
+  const hw = a.w / 2 + pad, hh = a.h / 2 + pad;
+  return {
+    scale: localToImg(a, hw, hh),                        // 右下角：缩放
+    rotate: localToImg(a, 0, -hh - shotHandlePx() * 3),  // 正上方：旋转
+    box: { hw, hh },
+  };
+}
+function hitHandle(a, x, y) {
+  const r = shotHandlePx() * 2.6;
+  const hs = annHandles(a);
+  if (Math.hypot(x - hs.scale.x, y - hs.scale.y) <= r) return 'scale';
+  if (Math.hypot(x - hs.rotate.x, y - hs.rotate.y) <= r) return 'rotate';
+  const { lx, ly } = imgToLocal(a, x, y);
+  if (Math.abs(lx) <= hs.box.hw && Math.abs(ly) <= hs.box.hh) return 'move';
+  return null;
+}
+function hitAnyText(x, y) {
+  for (let i = Shot.anns.length - 1; i >= 0; i--) {
+    const a = Shot.anns[i];
+    if (a.type !== 'text') continue;
+    if (hitHandle(a, x, y)) return a;
+  }
+  return null;
+}
+
+// ── 指针交互：画标注 / 框选裁剪 / 拖动·旋转·缩放文字 / 双指手势 ──
+function shotDown(e) {
+  e.currentTarget.setPointerCapture(e.pointerId);
+  Shot.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const { x, y } = shotImgPos(e);
+
+  if (Shot.ptrs.size === 2) { startGesture(); return; } // 双指：缩放+旋转选中的文字
+  const sel = selectedAnn();
+  const hit = sel ? hitHandle(sel, x, y) : null;
+  if (sel && hit) { // 已选中的文字：句柄优先，任何工具下都能操作
+    Shot.drag = { kind: hit, id: sel.id, x0: x, y0: y, cx: sel.cx, cy: sel.cy, font: sel.font, rot: sel.rot || 0 };
+    if (hit === 'scale') Shot.drag.d0 = Math.hypot(x - sel.cx, y - sel.cy) || 1;
+    if (hit === 'rotate') Shot.drag.a0 = Math.atan2(y - sel.cy, x - sel.cx);
+    return;
+  }
+  if (Shot.tool === 'text') {
+    const t = hitAnyText(x, y);
+    if (t) { Shot.selId = t.id; renderShotTools(); paintAnn(); Shot.drag = { kind: 'move', id: t.id, x0: x, y0: y, cx: t.cx, cy: t.cy }; return; }
+    Shot.selId = null; renderShotTools(); paintAnn();
+    openShotText(null, x, y);
+    return;
+  }
+  if (Shot.selId) { Shot.selId = null; renderShotTools(); paintAnn(); }
+  if (Shot.tool === 'crop') {
+    const { nx, ny } = shotPos(e);
+    Shot.drag = { kind: 'crop', ox: nx, oy: ny };
+    Shot.sel = { x: nx, y: ny, w: 0, h: 0 };
+    paintSel();
+    return;
+  }
+  Shot.drag = { kind: 'draw' };
+  Shot.draft = { type: Shot.tool, x1: x, y1: y, x2: x, y2: y, color: Shot.color, line: shotLinePx() };
+  paintAnn();
+}
+function shotMove(e) {
+  if (Shot.ptrs.has(e.pointerId)) Shot.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (Shot.gesture) { moveGesture(); return; }
+  const d = Shot.drag;
+  if (!d) return;
+  const { x, y } = shotImgPos(e);
+  if (d.kind === 'crop') {
+    const { nx, ny } = shotPos(e);
+    Shot.sel = { x: Math.min(d.ox, nx), y: Math.min(d.oy, ny), w: Math.abs(nx - d.ox), h: Math.abs(ny - d.oy) };
+    paintSel();
+    return;
+  }
+  if (d.kind === 'draw') {
+    if (!Shot.draft) return;
+    Shot.draft.x2 = x; Shot.draft.y2 = y;
+    paintAnn();
+    return;
+  }
+  const a = Shot.anns.find((it) => it.id === d.id);
+  if (!a) return;
+  if (d.kind === 'move') { a.cx = d.cx + (x - d.x0); a.cy = d.cy + (y - d.y0); }
+  else if (d.kind === 'scale') {
+    const ratio = (Math.hypot(x - a.cx, y - a.cy) || 1) / d.d0;
+    a.font = Math.max(8, Math.min(Math.max(Shot.w, Shot.h) / 2, d.font * ratio));
+    measureAnn(a);
+  } else if (d.kind === 'rotate') {
+    a.rot = d.rot + (Math.atan2(y - a.cy, x - a.cx) - d.a0) * 180 / Math.PI;
+  }
+  paintAnn();
+}
+function shotUp(e) {
+  if (e && e.pointerId != null) Shot.ptrs.delete(e.pointerId);
+  if (Shot.gesture && Shot.ptrs.size < 2) Shot.gesture = null;
+  const d = Shot.drag;
+  Shot.drag = null;
+  if (!d) return;
+  if (d.kind === 'crop') {
+    if (Shot.sel && (Shot.sel.w < 0.01 || Shot.sel.h < 0.01)) Shot.sel = null; // 误点/过小 → 不裁
+    paintSel();
+    renderShotTools();
+    return;
+  }
+  if (d.kind === 'draw') {
+    const df = Shot.draft;
+    Shot.draft = null;
+    if (df && Math.abs(df.x2 - df.x1) + Math.abs(df.y2 - df.y1) > shotLinePx() * 2) Shot.anns.push(df); // 误点忽略
+    paintAnn();
+  }
+}
+// 双指：以两指中点距离/夹角变化同步缩放与旋转选中的文字
+function startGesture() {
+  const a = selectedAnn();
+  if (!a || Shot.ptrs.size !== 2) return;
+  const [p1, p2] = Array.from(Shot.ptrs.values());
+  Shot.drag = null;
+  Shot.gesture = {
+    id: a.id,
+    d0: Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1,
+    a0: Math.atan2(p2.y - p1.y, p2.x - p1.x),
+    font: a.font, rot: a.rot || 0,
+  };
+}
+function moveGesture() {
+  const g = Shot.gesture;
+  const a = Shot.anns.find((it) => it.id === g.id);
+  if (!a || Shot.ptrs.size < 2) return;
+  const [p1, p2] = Array.from(Shot.ptrs.values());
+  const d = Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1;
+  a.font = Math.max(8, Math.min(Math.max(Shot.w, Shot.h) / 2, g.font * (d / g.d0)));
+  a.rot = g.rot + (Math.atan2(p2.y - p1.y, p2.x - p1.x) - g.a0) * 180 / Math.PI;
+  measureAnn(a);
+  paintAnn();
+}
+// 双击文字 → 再次编辑
+function shotDblClick(e) {
+  const { x, y } = shotImgPos(e);
+  const t = hitAnyText(x, y);
+  if (!t) return;
+  Shot.selId = t.id;
+  renderShotTools();
+  openShotText(t.id, t.cx, t.cy);
+}
+
+// ── 文字输入弹窗（多行，替代原生 prompt）──
+function openShotText(id, x, y) {
+  Shot.editId = id;
+  Shot.textAt = { x, y };
+  const a = id ? Shot.anns.find((it) => it.id === id) : null;
+  $('shotTextTitle').textContent = T('shotTextTitle');
+  const ta = $('shotTextArea');
+  ta.placeholder = T('shotTextPh');
+  ta.value = a ? a.text : '';
+  $('shotTextCancel').textContent = T('cancel');
+  $('shotTextOk').textContent = T('confirm');
+  $('shotTextOverlay').hidden = false;
+  setTimeout(() => { ta.focus(); ta.select(); }, 0);
+}
+function closeShotText() {
+  $('shotTextOverlay').hidden = true;
+  Shot.editId = null; Shot.textAt = null;
+}
+function confirmShotText() {
+  const txt = $('shotTextArea').value.replace(/\s+$/, '');
+  const id = Shot.editId;
+  const at = Shot.textAt || { x: Shot.w / 2, y: Shot.h / 2 };
+  closeShotText();
+  if (!txt) { if (id) deleteSelected(id); return; } // 清空内容 = 删掉这条
+  if (id) {
+    const a = Shot.anns.find((it) => it.id === id);
+    if (a) { a.text = txt; measureAnn(a); }
+  } else {
+    const a = measureAnn({ id: ++Shot.seq, type: 'text', cx: at.x, cy: at.y, text: txt, color: Shot.color, font: shotFontPx(), rot: 0 });
+    // 落点当左上角更符合直觉：把中心挪到落点右下
+    a.cx = at.x + a.w / 2; a.cy = at.y + a.h / 2;
+    Shot.anns.push(a);
+    Shot.selId = a.id;
+  }
+  renderShotTools();
+  paintAnn();
+}
+
+function undoShot() {
+  const a = Shot.anns.pop();
+  if (a && a.id === Shot.selId) Shot.selId = null;
+  renderShotTools();
+  paintAnn();
+}
+function clearShot() {
+  Shot.anns = []; Shot.draft = null; Shot.sel = null; Shot.selId = null;
+  paintSel(); renderShotTools(); paintAnn();
+}
+function deleteSelected(id) {
+  const target = id || Shot.selId;
+  Shot.anns = Shot.anns.filter((a) => a.id !== target);
+  Shot.selId = null;
+  renderShotTools();
+  paintAnn();
+}
+function editSelected() {
+  const a = selectedAnn();
+  if (a) openShotText(a.id, a.cx, a.cy);
+}
+
+// ── 裁剪：确定后只保留框选区域（原图真的被换掉，标注坐标随之平移）──
 function paintSel() {
   const box = $('shotSel');
   if (!Shot.sel) { box.hidden = true; return; }
@@ -3499,64 +3782,70 @@ function paintSel() {
   box.style.width = (s.w * 100) + '%';
   box.style.height = (s.h * 100) + '%';
 }
-function shotDown(e) {
-  e.currentTarget.setPointerCapture(e.pointerId);
-  const { nx, ny } = shotPos(e);
-  if (Shot.tool === 'text') { addShotText(nx * Shot.w, ny * Shot.h); return; }
-  if (Shot.tool === 'crop') {
-    Shot.drag = { ox: nx, oy: ny };
-    Shot.sel = { x: nx, y: ny, w: 0, h: 0 };
-    paintSel();
-    return;
-  }
-  Shot.drag = { ox: nx, oy: ny };
-  Shot.draft = { type: Shot.tool, x1: nx * Shot.w, y1: ny * Shot.h, x2: nx * Shot.w, y2: ny * Shot.h, color: Shot.color, line: shotLinePx() };
-  paintAnn();
+function applyCrop() {
+  const sel = Shot.sel;
+  if (!sel || !Shot.dataUrl) return;
+  const img = new Image();
+  img.onload = () => {
+    const sx = Math.round(sel.x * img.naturalWidth);
+    const sy = Math.round(sel.y * img.naturalHeight);
+    const sw = Math.max(1, Math.round(sel.w * img.naturalWidth));
+    const sh = Math.max(1, Math.round(sel.h * img.naturalHeight));
+    const cv = document.createElement('canvas');
+    cv.width = sw; cv.height = sh;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    Shot.anns.forEach((a) => { // 已有标注跟着平移，别裁歪
+      if (a.type === 'text') { a.cx -= sx; a.cy -= sy; return; }
+      a.x1 -= sx; a.x2 -= sx; a.y1 -= sy; a.y2 -= sy;
+    });
+    Shot.anns = Shot.anns.filter((a) => annVisible(a, sw, sh)); // 完全落在裁掉区域的标注就地丢弃，免得留下摸不到的选中框
+    if (!Shot.anns.some((a) => a.id === Shot.selId)) Shot.selId = null;
+    Shot.sel = null;
+    $('shotSel').hidden = true;
+    setShotImage(cv.toDataURL('image/png'), sw, sh);
+    renderShotTools();
+  };
+  img.src = Shot.dataUrl;
 }
-function shotMove(e) {
-  if (!Shot.drag) return;
-  const { nx, ny } = shotPos(e);
-  const { ox, oy } = Shot.drag;
-  if (Shot.tool === 'crop') {
-    Shot.sel = { x: Math.min(ox, nx), y: Math.min(oy, ny), w: Math.abs(nx - ox), h: Math.abs(ny - oy) };
-    paintSel();
-    return;
-  }
-  if (!Shot.draft) return;
-  Shot.draft.x2 = nx * Shot.w;
-  Shot.draft.y2 = ny * Shot.h;
-  paintAnn();
+
+// 标注是否还与图片有交集（裁剪后用）
+function annVisible(a, w, h) {
+  const box = a.type === 'text'
+    ? { x1: a.cx - a.w / 2, y1: a.cy - a.h / 2, x2: a.cx + a.w / 2, y2: a.cy + a.h / 2 }
+    : a;
+  return Math.min(box.x1, box.x2) < w && Math.max(box.x1, box.x2) > 0
+    && Math.min(box.y1, box.y2) < h && Math.max(box.y1, box.y2) > 0;
 }
-function shotUp() {
-  Shot.drag = null;
-  if (Shot.tool === 'crop') {
-    if (Shot.sel && (Shot.sel.w < 0.01 || Shot.sel.h < 0.01)) { Shot.sel = null; paintSel(); } // 误点/过小 → 整图
-    return;
-  }
-  const d = Shot.draft;
-  Shot.draft = null;
-  if (d && Math.abs(d.x2 - d.x1) + Math.abs(d.y2 - d.y1) > shotLinePx()) Shot.anns.push(d); // 误点忽略
-  paintAnn();
-}
-function addShotText(x, y) {
-  const txt = prompt(T('shotTextPrompt'), '');
-  if (!txt) return;
-  Shot.anns.push({ type: 'text', x, y, text: txt, color: Shot.color, font: shotFontPx() });
-  paintAnn();
-}
-function undoShot() { Shot.anns.pop(); paintAnn(); }
-function clearShot() { Shot.anns = []; Shot.draft = null; Shot.sel = null; paintSel(); paintAnn(); }
 
 // 箭头头部三角形的三个点（在原图坐标系里算）
 function arrowHead(a) {
   const ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
-  const len = Math.max((a.line || 2) * 3.2, 8);
+  const len = Math.max((a.line || 2) * 5, 8);
   const spread = 0.42;
   return [
     [a.x2, a.y2],
     [a.x2 - len * Math.cos(ang - spread), a.y2 - len * Math.sin(ang - spread)],
     [a.x2 - len * Math.cos(ang + spread), a.y2 - len * Math.sin(ang + spread)],
   ];
+}
+function textSvg(a) {
+  const tsp = a.lines.map((ln, i) => `<tspan x="0" y="${-a.h / 2 + i * a.lineH + a.lineH * 0.8}">${escapeHtml(ln) || ' '}</tspan>`).join('');
+  return `<g transform="translate(${a.cx} ${a.cy}) rotate(${a.rot || 0})">`
+    + `<text text-anchor="middle" fill="${a.color}" font-size="${a.font}" font-family="sans-serif"`
+    + ` style="paint-order:stroke;stroke:rgba(0,0,0,.45);stroke-width:${a.font / 14}">${tsp}</text></g>`;
+}
+function selBoxSvg(a) {
+  const pad = annPad(a);
+  const hw = a.w / 2 + pad, hh = a.h / 2 + pad;
+  const hs = shotHandlePx();
+  return `<g transform="translate(${a.cx} ${a.cy}) rotate(${a.rot || 0})" opacity="0.95">`
+    + `<rect x="${-hw}" y="${-hh}" width="${hw * 2}" height="${hh * 2}" fill="none" stroke="#0a84ff" stroke-width="${Math.max(1, hs / 4)}" stroke-dasharray="${hs * 1.4} ${hs}" />`
+    + `<line x1="0" y1="${-hh}" x2="0" y2="${-hh - hs * 3}" stroke="#0a84ff" stroke-width="${Math.max(1, hs / 4)}" />`
+    + `<circle cx="0" cy="${-hh - hs * 3}" r="${hs}" fill="#fff" stroke="#0a84ff" stroke-width="${Math.max(1, hs / 4)}" />`
+    + `<circle cx="${hw}" cy="${hh}" r="${hs}" fill="#0a84ff" stroke="#fff" stroke-width="${Math.max(1, hs / 4)}" />`
+    + `</g>`;
 }
 
 // SVG 预览：与导出 drawAnns 用同一份坐标
@@ -3565,10 +3854,8 @@ function paintAnn() {
   if (!svg) return;
   svg.setAttribute('viewBox', '0 0 ' + (Shot.w || 1) + ' ' + (Shot.h || 1));
   const list = Shot.anns.concat(Shot.draft ? [Shot.draft] : []);
-  svg.innerHTML = list.map((a) => {
-    if (a.type === 'text') {
-      return `<text x="${a.x}" y="${a.y}" fill="${a.color}" font-size="${a.font}" font-family="sans-serif" dominant-baseline="hanging" style="paint-order:stroke;stroke:rgba(0,0,0,.45);stroke-width:${a.font / 12}">${escapeHtml(a.text)}</text>`;
-    }
+  let html = list.map((a) => {
+    if (a.type === 'text') return textSvg(a);
     if (a.type === 'rect') {
       const x = Math.min(a.x1, a.x2), y = Math.min(a.y1, a.y2);
       return `<rect x="${x}" y="${y}" width="${Math.abs(a.x2 - a.x1)}" height="${Math.abs(a.y2 - a.y1)}" fill="none" stroke="${a.color}" stroke-width="${a.line}" />`;
@@ -3579,9 +3866,12 @@ function paintAnn() {
     const pts = arrowHead(a).map((pt) => pt.join(',')).join(' ');
     return `<line x1="${a.x1}" y1="${a.y1}" x2="${a.x2}" y2="${a.y2}" stroke="${a.color}" stroke-width="${a.line}" stroke-linecap="round" /><polygon points="${pts}" fill="${a.color}" />`;
   }).join('');
+  const sel = selectedAnn();
+  if (sel) html += selBoxSvg(sel); // 选中框只在预览里画，不进导出
+  svg.innerHTML = html;
 }
 
-// 导出：把标注按原图坐标画到 canvas
+// 导出：把标注按原图坐标画到 canvas（选中框不画）
 function drawAnns(ctx) {
   Shot.anns.forEach((a) => {
     ctx.save();
@@ -3589,12 +3879,20 @@ function drawAnns(ctx) {
     ctx.fillStyle = a.color;
     ctx.lineWidth = a.line || 2;
     if (a.type === 'text') {
+      ctx.translate(a.cx, a.cy);
+      ctx.rotate((a.rot || 0) * Math.PI / 180);
       ctx.font = a.font + 'px sans-serif';
-      ctx.textBaseline = 'top';
-      ctx.lineWidth = a.font / 12;
-      ctx.strokeStyle = 'rgba(0,0,0,.45)';
-      ctx.strokeText(a.text, a.x, a.y);
-      ctx.fillText(a.text, a.x, a.y);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.lineWidth = a.font / 14;
+      ctx.lineJoin = 'round';
+      a.lines.forEach((ln, i) => {
+        const y = -a.h / 2 + i * a.lineH + a.lineH * 0.8;
+        ctx.strokeStyle = 'rgba(0,0,0,.45)';
+        ctx.strokeText(ln, 0, y);
+        ctx.fillStyle = a.color;
+        ctx.fillText(ln, 0, y);
+      });
     } else if (a.type === 'rect') {
       ctx.strokeRect(Math.min(a.x1, a.x2), Math.min(a.y1, a.y2), Math.abs(a.x2 - a.x1), Math.abs(a.y2 - a.y1));
     } else if (a.type === 'circle') {
@@ -3618,7 +3916,7 @@ function drawAnns(ctx) {
   });
 }
 
-// 先画原图 + 标注，再按框选裁剪
+// 先画原图 + 标注，再按（尚未确定的）框选裁剪
 function renderShot() {
   return new Promise((resolve) => {
     if (!Shot.dataUrl) { resolve(''); return; }
@@ -3658,6 +3956,7 @@ function dataUrlToFile(dataUrl, name) {
 
 async function confirmShot() {
   if (!Shot.dataUrl) return;
+  Shot.selId = null; // 选中框不该进图
   const out = await renderShot();
   const file = dataUrlToFile(out, 'screenshot-' + Date.now() + '.png');
   closeShot();
@@ -5535,6 +5834,7 @@ function bind() {
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (!$('queueModal').hidden) closeQueueModal();
+    else if (!$('shotTextOverlay').hidden) closeShotText();
     else if (!$('shotOverlay').hidden) closeShot();
     else if (!$('trOverlay').hidden) closeTrace();
     else if (!$('edOverlay').hidden) closeEditor();
@@ -5622,10 +5922,21 @@ function bind() {
   $('shotConfirm').addEventListener('click', confirmShot);
   $('shotUndo').addEventListener('click', undoShot);
   $('shotClear').addEventListener('click', clearShot);
+  $('shotCropBtn').addEventListener('click', applyCrop);
+  $('shotEditBtn').addEventListener('click', editSelected);
+  $('shotDelBtn').addEventListener('click', () => deleteSelected());
+  $('shotTextCancel').addEventListener('click', closeShotText);
+  $('shotTextOk').addEventListener('click', confirmShotText);
+  $('shotTextOverlay').addEventListener('click', (e) => { if (e.target.id === 'shotTextOverlay') closeShotText(); });
+  $('shotTextArea').addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); confirmShotText(); }
+  });
   const stage = $('shotStage');
   stage.addEventListener('pointerdown', shotDown);
   stage.addEventListener('pointermove', shotMove);
   stage.addEventListener('pointerup', shotUp);
+  stage.addEventListener('pointercancel', shotUp);
+  stage.addEventListener('dblclick', shotDblClick);
 }
 
 // 已登录后才连接 WS / 加载数据
