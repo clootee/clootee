@@ -1,6 +1,6 @@
 {
   "name": "claude-hub-backend",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Local Claude multi-session task-queue hub",
   "main": "src/index.ts",
   "scripts": {

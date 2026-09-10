@@ -1,10 +1,10 @@
 {
-  "version": "2.1.1",
+  "version": "2.1.2",
   "minVersion": "2.0.0",
-  "force": false,
+  "force": true,
   "releasedAt": "2026-09-10",
   "notesI18n": {
-    "zh": "· 新增版本更新弹窗：启动时检测到新版本会主动提示，一键即可拉取、编译并重启\n· 发版改由仓库根目录的 version.json 管理，可按版本号控制是否强制更新\n· README 精简，Windows 上手步骤前置",
-    "en": "· New update prompt on startup: one click pulls, rebuilds and restarts\n· Releases are now driven by version.json at the repo root, with an optional force-update switch\n· Simplified README with Windows quick start up front"
+    "zh": "· 有无新版本改为只看 version.json，已是最新时不再出现「拉取更新并重启」\n· 本次为强制更新演示版本",
+    "en": "· Update detection now relies solely on version.json; no stale \"pull & restart\" when already current\n· This release is marked mandatory as a demonstration"
   }
 }
