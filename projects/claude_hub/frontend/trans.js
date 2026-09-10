@@ -939,6 +939,11 @@ const DICT = {
   justFinishedTag: { en: 'just ran', zh: '刚执行完' },
   uploadFile: { en: 'Upload file to tmp/', zh: '上传文件到 tmp/' },
   uploadFailed: { en: 'Upload failed', zh: '上传失败' },
+  attachRemove: { en: 'Remove', zh: '删除' },
+  attachPath: { en: 'Path', zh: '路径' },
+  attachSize: { en: 'Size', zh: '大小' },
+  attachType: { en: 'Type', zh: '类型' },
+  attachClose: { en: 'Close', zh: '关闭' },
   // ── 会话工具命令（/usage /compact …）──
   cmdMenuBtn: { en: 'Quick commands', zh: '快捷命令' },
   cmdRunning: { en: 'Running…', zh: '执行中…' },

@@ -212,6 +212,8 @@ function applyText() {
   $('pauseHint').textContent = T('pauseHint');
   refreshComposerControls();
   $('uploadBtn').title = T('uploadFile');
+  $('attachPvClose').textContent = T('attachClose');
+  renderAttachBar();
   $('shotBtn').title = T('screenshot');
   $('cmdMenuBtn').title = T('cmdMenuBtn');
   if (!$('cmdMenu').hidden) renderCmdMenu();
@@ -3322,15 +3324,120 @@ async function uploadFiles(files) {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'upload failed');
       names.push(json.data.rel);
+      attachAdd(json.data.rel, file);
     } catch (e) {
       alert(T('uploadFailed') + ': ' + (e && e.message ? e.message : file.name));
     }
   }
   if (names.length) {
-    // 把上传后的相对路径插入输入框，方便在 prompt 里直接引用
-    ta.value = (ta.value ? ta.value.replace(/\s*$/, ' ') : '') + names.join(' ') + ' ';
+    // 不再把路径塞进输入框：挂到输入框上方的附件区，发送时才拼进正文
+    renderAttachBar();
     ta.focus();
   }
+}
+
+// ── 附件区：上传成功的文件先停在输入框上方，可预览/删除，发送时才把相对路径拼进正文 ──
+const Attach = { items: [], seq: 0 };
+function attachAdd(rel, file) {
+  const isImg = !!(file && file.type && file.type.indexOf('image/') === 0);
+  Attach.items.push({
+    id: ++Attach.seq,
+    rel,
+    name: rel.split('/').pop(),
+    size: file ? file.size : 0,
+    type: (file && file.type) || '',
+    isImg,
+    url: isImg ? URL.createObjectURL(file) : '',
+  });
+}
+function attachRemove(id) {
+  const i = Attach.items.findIndex((a) => a.id === id);
+  if (i < 0) return;
+  if (Attach.items[i].url) URL.revokeObjectURL(Attach.items[i].url);
+  Attach.items.splice(i, 1);
+  renderAttachBar();
+}
+function clearAttachments() {
+  for (const a of Attach.items) if (a.url) URL.revokeObjectURL(a.url);
+  Attach.items = [];
+  renderAttachBar();
+}
+function attachPaths() {
+  return Attach.items.map((a) => a.rel);
+}
+function fmtBytes(n) {
+  if (!n) return '';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i ? v.toFixed(1) : String(v)) + ' ' + u[i];
+}
+function renderAttachBar() {
+  const bar = $('attachBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  bar.hidden = Attach.items.length === 0;
+  for (const a of Attach.items) {
+    const chip = document.createElement('div');
+    chip.className = 'attach-chip';
+    chip.title = a.rel;
+    const thumb = document.createElement('div');
+    thumb.className = 'attach-thumb';
+    if (a.isImg) {
+      const img = document.createElement('img');
+      img.src = a.url;
+      thumb.appendChild(img);
+    } else {
+      thumb.textContent = '📄';
+    }
+    const meta = document.createElement('div');
+    meta.className = 'attach-meta';
+    const nm = document.createElement('div');
+    nm.className = 'attach-name';
+    nm.textContent = a.name;
+    const sz = document.createElement('div');
+    sz.className = 'attach-size';
+    sz.textContent = fmtBytes(a.size);
+    meta.appendChild(nm);
+    meta.appendChild(sz);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'attach-del';
+    del.textContent = '✕';
+    del.title = T('attachRemove');
+    del.addEventListener('click', (e) => { e.stopPropagation(); attachRemove(a.id); });
+    chip.appendChild(thumb);
+    chip.appendChild(meta);
+    chip.appendChild(del);
+    chip.addEventListener('click', () => openAttachPreview(a.id));
+    bar.appendChild(chip);
+  }
+}
+function openAttachPreview(id) {
+  const a = Attach.items.find((x) => x.id === id);
+  if (!a) return;
+  $('attachPvName').textContent = a.name;
+  const body = $('attachPvBody');
+  body.innerHTML = '';
+  if (a.isImg) {
+    const img = document.createElement('img');
+    img.src = a.url;
+    body.appendChild(img);
+  }
+  const info = document.createElement('div');
+  info.className = 'attach-info';
+  info.textContent = [
+    T('attachPath') + ': ' + a.rel,
+    T('attachSize') + ': ' + (fmtBytes(a.size) || '-'),
+    T('attachType') + ': ' + (a.type || '-'),
+  ].join(String.fromCharCode(10));
+  body.appendChild(info);
+  $('attachOverlay').hidden = false;
+}
+function closeAttachPreview() {
+  $('attachOverlay').hidden = true;
+  $('attachPvBody').innerHTML = '';
 }
 
 // ── 拖拽上传：把文件/图片拖到 composer 释放即上传 ──
@@ -4514,7 +4621,10 @@ async function ensureSession() {
 // 所有会话一视同仁（都是真实 claude 会话），直接对当前会话发任务即可。
 async function addTask() {
   const ta = $('taskInput');
-  const raw = ta.value.trim();
+  const files = attachPaths();
+  const text = ta.value.trim();
+  // 附件路径在发送这一刻才拼进正文（输入体验上它只是输入框上方的卡片）
+  const raw = [text, files.join(' ')].filter(Boolean).join(text ? ' ' : '');
   if (!raw) return;
   if (!State.sessionId && !(await ensureSession())) return;
   if (State.session && !State.session.rootId) {
@@ -4529,12 +4639,18 @@ async function addTask() {
     }
   }
   ta.value = '';
+  const keepAttach = Attach.items.slice();
+  Attach.items = [];
+  renderAttachBar();
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
   try {
     await api('/api/task/add', { sessionId: State.sessionId, prompts: [applyQuickPrefix(applySlashPrefix(raw))] });
     clearSlashPrefix(); // 单次使用：发送成功后自动摘掉标记
+    for (const a of keepAttach) if (a.url) URL.revokeObjectURL(a.url);
   } catch (e) {
-    ta.value = raw;
+    ta.value = text;
+    Attach.items = keepAttach;
+    renderAttachBar();
     alert(e.message || 'Submit failed');
   }
 }
@@ -5917,6 +6033,8 @@ function bind() {
   // 拖拽 / 粘贴 / 截屏
   initDragUpload();
   $('taskInput').addEventListener('paste', onPasteImage);
+  $('attachPvClose').addEventListener('click', closeAttachPreview);
+  $('attachOverlay').addEventListener('click', (e) => { if (e.target === $('attachOverlay')) closeAttachPreview(); });
   $('shotBtn').addEventListener('click', captureScreenshot);
   $('shotCancel').addEventListener('click', closeShot);
   $('shotConfirm').addEventListener('click', confirmShot);
