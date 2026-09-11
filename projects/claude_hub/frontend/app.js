@@ -5,7 +5,7 @@ const State = {
   sessions: [],
   sessionId: '',
   session: null,
-  settings: { defaultEngine: 'claude', platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0, version: '', runAsUserEnabled: false, runAsUserName: 'claudeuser' }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址 + 软件版本号 + 以系统用户运行（从后端 /api/settings 加载）
+  settings: { defaultEngine: 'claude', engineAvail: null, platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0, version: '', runAsUserEnabled: false, runAsUserName: 'claudeuser' }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址 + 软件版本号 + 以系统用户运行（从后端 /api/settings 加载）
   running: new Set(),                     // 正在执行任务的会话 id 集合（驱动侧栏"执行中"标识）
   runningTasks: new Map(),                // 会话 id → 该会话正在跑的任务 id 集合；running 即它的非空键集（排队新消息不会误清执行中）
   justFinished: new Set(),                // 刚从执行中变为停止、且用户尚未点开查看的会话 id（驱动侧栏"刚执行"醒目标识，区别于状态"已完成"）
@@ -6237,6 +6237,7 @@ async function loadSettings() {
       State.settings.defaultEngine = s.defaultEngine;
     }
     if (s && s.platform) State.settings.platform = s.platform;
+    if (s && s.engineAvail) State.settings.engineAvail = s.engineAvail;
     if (s) {
       State.settings.allowLan = !!s.allowLan;
       State.settings.preferBundled = !!s.preferBundled;
@@ -6552,6 +6553,7 @@ async function patchSettings(patch) {
   try {
     const s = await api('/api/settings', patch);
     State.settings.defaultEngine = s.defaultEngine;
+    if (s.engineAvail) State.settings.engineAvail = s.engineAvail;
     State.settings.allowLan = !!s.allowLan;
     State.settings.preferBundled = !!s.preferBundled;
     State.settings.systemPrompt = typeof s.systemPrompt === 'string' ? s.systemPrompt : '';
@@ -6613,7 +6615,7 @@ function providerOptionText(engine, id) {
 
 function fillEnginePane() {
   $('defaultEngineSelect').value = State.settings.defaultEngine;
-  $('defaultEngineNote').textContent = T('defaultEngineNote');
+  $('defaultEngineNote').textContent = defaultEngineNoteText();
   setAdvOpen('claude', false);
   setAdvOpen('codex', false);
   // 默认展开当前默认引擎那一块，另一块收起
@@ -6623,6 +6625,16 @@ function fillEnginePane() {
   loadClaudeProvider();
   loadEngineProvider('codex');
   loadModelState();
+}
+// 「默认引擎」下面那行说明：只装了一个引擎时，额外说清默认引擎已自动跟着它走
+function defaultEngineNoteText() {
+  const av = State.settings.engineAvail;
+  let note = T('defaultEngineNote');
+  if (av && av.claude !== av.codex) {
+    const only = av.codex ? T('engineCodex') : T('engineClaude');
+    note += ' ' + T('defaultEngineOnlyInstalled').replace(/\{engine\}/g, only);
+  }
+  return note;
 }
 async function saveEnginePane() {
   const eng = $('defaultEngineSelect').value === 'codex' ? 'codex' : 'claude';

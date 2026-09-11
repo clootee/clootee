@@ -685,6 +685,11 @@ const DICT = {
     en: 'Which engine a brand-new session uses. You can still switch it per session before it starts.',
     zh: '新建会话默认用哪个引擎。会话开始前仍可在会话标题旁单独切换。',
   },
+  // 只装了一个引擎时的提示：默认引擎自动跟着那个装了的走
+  defaultEngineOnlyInstalled: {
+    en: 'Only {engine} is installed, so new sessions default to {engine}. Install the other engine to switch.',
+    zh: '当前只装了 {engine}，新建会话默认就用 {engine}；装上另一个引擎后才能切换。',
+  },
   back: { en: 'Back', zh: '返回' },
   advOptions: { en: 'Advanced', zh: '高级选项' },
   // ── 设置板块（每个板块点进去单独设置）──

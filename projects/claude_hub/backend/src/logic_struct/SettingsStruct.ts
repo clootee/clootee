@@ -6,6 +6,7 @@ import { OutEnd } from '../helper/OutEnd';
 import { NetHelper } from '../helper/NetHelper';
 import { PackageInfo } from '../helper/PackageInfo';
 import { RunAsUser } from '../helper/RunAsUser';
+import { EngineStatus } from '../logic_realize/EngineStatus';
 
 // 快捷按钮：一个组内互斥（单选，可取消），组与组之间互不影响（可各选一个）
 export interface QuickTag {
@@ -66,11 +67,37 @@ export interface AppSettings {
   // 其余情况（本来就是普通用户、或 Windows）→ 默认关闭。用户可在设置里覆盖，覆盖后按落盘值为准。
   runAsUserEnabled: boolean;
   runAsUserName: string;
+  // 只读输出：两个引擎各自装没装（前端据此在「默认引擎」处提示）
+  engineAvail?: { claude: boolean; codex: boolean };
+  // 只读输出：true = 落盘/出厂的默认引擎那个没装，实际已自动改用另一个可用引擎
+  defaultEngineFallback?: boolean;
 }
 
 // 未落盘过 runAsUser* 时的动态默认值：Linux/macOS 下用 root 起的服务 → 默认启用、默认用户 claudeuser；
 // 其余情况（Windows，或本来就是普通用户在跑）→ 默认关闭。
 const DEFAULT_RUN_AS_USER_NAME = 'claudeuser';
+// 引擎可用性探测走 execSync，SettingsStruct.get() 调用频繁，这里做个短缓存
+let _availCache: { at: number; claude: boolean; codex: boolean } | null = null;
+const AVAIL_TTL_MS = 3000;
+function engineAvail(): { claude: boolean; codex: boolean } {
+  const now = Date.now();
+  if (_availCache && now - _availCache.at < AVAIL_TTL_MS)
+    return { claude: _availCache.claude, codex: _availCache.codex };
+  let claude = true;
+  let codex = true;
+  try {
+    const st = EngineStatus.get();
+    claude = !!st.claude.ready;
+    codex = !!st.codex.ready;
+  } catch {
+    // 探测失败就当都可用，避免把用户锁死在错误的引擎上
+    claude = true;
+    codex = true;
+  }
+  _availCache = { at: now, claude, codex };
+  return { claude, codex };
+}
+
 function isRoot(): boolean {
   return process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() === 0;
 }
@@ -78,10 +105,16 @@ function isRoot(): boolean {
 export class SettingsStruct {
   static get(): AppSettings {
     const raw = this._read();
-    const eng =
+    const wanted: Engine =
       raw && (raw.defaultEngine === 'codex' || raw.defaultEngine === 'claude')
         ? raw.defaultEngine
         : AppConfig.DEFAULT_ENGINE;
+    // 只装了其中一个引擎时，默认引擎自动落到那个装了的上面：
+    // 用户只装 codex 的话，新建会话默认就该是 codex，而不是一个根本跑不起来的 claude。
+    const avail = engineAvail();
+    const other: Engine = wanted === 'claude' ? 'codex' : 'claude';
+    const fallback = !avail[wanted] && avail[other];
+    const eng: Engine = fallback ? other : wanted;
     const hasRunAsUserEnabled = !!raw && typeof raw.runAsUserEnabled === 'boolean';
     const runAsUserEnabled = hasRunAsUserEnabled ? !!raw!.runAsUserEnabled : isRoot();
     const runAsUserName =
@@ -109,6 +142,8 @@ export class SettingsStruct {
       version: PackageInfo.version(),
       runAsUserEnabled,
       runAsUserName,
+      engineAvail: avail,
+      defaultEngineFallback: fallback,
     };
   }
 
@@ -164,8 +199,15 @@ export class SettingsStruct {
 
   private static _patch(patch: Partial<AppSettings>): AppSettings {
     const cur = this.get();
+    // 落盘时保留用户原本选的引擎：get() 返回的可能是「那个没装、临时换成另一个」的结果，
+    // 不能把这种临时回退写成用户的正式选择
+    const raw = this._read();
+    const savedEngine: Engine =
+      raw && (raw.defaultEngine === 'claude' || raw.defaultEngine === 'codex')
+        ? raw.defaultEngine
+        : cur.defaultEngine;
     const merged: AppSettings = {
-      defaultEngine: patch.defaultEngine ?? cur.defaultEngine,
+      defaultEngine: patch.defaultEngine ?? savedEngine,
       allowLan: patch.allowLan ?? cur.allowLan,
       preferBundled: patch.preferBundled ?? cur.preferBundled,
       toolPrefs: patch.toolPrefs ?? cur.toolPrefs,
