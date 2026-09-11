@@ -2455,7 +2455,7 @@ function renderElapsedNotes() {
     if (!node) continue;
     const el = document.createElement('div');
     el.className = 'msg-elapsed';
-    el.textContent = `${T('elapsed')}：${fmtElapsed(m.createdAt - lastUserTime)}`;
+    el.textContent = `${T('elapsed')}${T('colon')}${fmtElapsed(m.createdAt - lastUserTime)}`;
     node.appendChild(el); // 放进气泡内部（末尾），而非气泡外部
     lastUserTime = 0; // 本轮已消费
   }
@@ -4205,20 +4205,18 @@ async function toggleMsgTrace(msgEl, win, btn) {
   btn.classList.add('on');
   const box = document.createElement('div');
   box.className = 'tr-inline';
-  box.innerHTML = '<div class="tr-inline-empty">加载中…</div>';
+  box.innerHTML = '<div class="tr-inline-empty">' + T('trLoading') + '</div>';
   msgEl.appendChild(box);
   try {
     await ensureTrace();
   } catch (e) {
-    box.innerHTML = '<div class="tr-inline-empty">读取失败：' + escapeHtml(String(e.message || e)) + '</div>';
+    box.innerHTML = '<div class="tr-inline-empty">' + T('trLoadFail') + escapeHtml(String(e.message || e)) + '</div>';
     return;
   }
   const evs = traceEventsIn(win);
   box.innerHTML = '';
   if (!evs.length) {
-    box.innerHTML =
-      '<div class="tr-inline-empty">这一轮没有留存过程数据' +
-      '（该回复可能是本系统接管前、在终端里跑的）</div>';
+    box.innerHTML = '<div class="tr-inline-empty">' + T('trNoData') + '</div>';
     return;
   }
   // 小结条：工具次数 / 工具耗时 / 模型耗时
@@ -4227,9 +4225,12 @@ async function toggleMsgTrace(msgEl, win, btn) {
   const calls = evs.filter((e) => e.kind === 'tool_use').length;
   const sum = document.createElement('div');
   sum.className = 'tr-inline-sum';
-  sum.innerHTML =
-    `本轮 <b>${fmtMs(span)}</b> · 工具 ${calls} 次 <b>${fmtMs(toolMs)}</b> · ` +
-    `模型思考/生成 <b>${fmtMs(Math.max(0, span - toolMs))}</b> · 事件 ${evs.length} 条`;
+  sum.innerHTML = T('trSum')
+    .replace('{span}', fmtMs(span))
+    .replace('{calls}', calls)
+    .replace('{tool}', fmtMs(toolMs))
+    .replace('{model}', fmtMs(Math.max(0, span - toolMs)))
+    .replace('{events}', evs.length);
   box.appendChild(sum);
   const slowLine = Math.max(0, ...evs.map((e) => e.durationMs || 0));
   evs.forEach((e) => box.appendChild(traceEl(e, slowLine)));
@@ -4244,7 +4245,7 @@ function attachTraceBtn(div, m) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'trace-btn';
-  btn.title = '展开这一轮的全过程（工具调用/入参/输出/耗时）';
+  btn.title = T('trBtnTitle');
   btn.textContent = '⤢';
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -4257,7 +4258,7 @@ function attachTraceBtn(div, m) {
 async function openTrace() {
   if (!State.sessionId) return;
   $('trOverlay').hidden = false;
-  $('trList').innerHTML = '<div class="tr-empty">加载中…</div>';
+  $('trList').innerHTML = '<div class="tr-empty">' + T('trLoading') + '</div>';
   await loadTrace();
 }
 
@@ -4364,7 +4365,7 @@ function renderSessionStats(s) {
         const ms = t.phases[p.key] || 0;
         return `<td>${ms ? fmtMs(ms) : '·'}</td>`;
       }).join('');
-      const label = t.taskId === 'native' ? '终端/native' : (T('statsTaskCol') + ' ' + (i + 1));
+      const label = t.taskId === 'native' ? T('trNative') : (T('statsTaskCol') + ' ' + (i + 1));
       return `<tr><td class="st-tk">${escapeHtml(label)}</td><td><b>${fmtMs(t.totalMs)}</b></td>${cells}</tr>`;
     })
     .join('');
@@ -4449,7 +4450,7 @@ async function loadTrace() {
   try {
     await ensureTrace(true);
   } catch (e) {
-    $('trList').innerHTML = '<div class="tr-empty">读取失败：' + escapeHtml(String(e.message || e)) + '</div>';
+    $('trList').innerHTML = '<div class="tr-empty">' + T('trLoadFail') + escapeHtml(String(e.message || e)) + '</div>';
     return;
   }
   renderTrace();
@@ -4485,19 +4486,23 @@ function renderTrace() {
   const s = d.stats;
   const pctTool = s.spanMs ? Math.round((s.toolMs / s.spanMs) * 100) : 0;
   const tools = s.byTool
-    .map((t) => `${escapeHtml(t.name)} ×${t.count} <b>${fmtMs(t.totalMs)}</b>(均 ${fmtMs(t.avgMs)})`)
+    .map((t) => T('trToolLine')
+      .replace('{name}', escapeHtml(t.name))
+      .replace('{count}', t.count)
+      .replace('{total}', fmtMs(t.totalMs))
+      .replace('{avg}', fmtMs(t.avgMs)))
     .join(' · ');
   $('trStats').innerHTML =
     `<div class="tr-row">
-       <span>事件 <b>${s.events}</b>（实时 ${d.liveCount} / jsonl ${d.jsonlCount}）</span>
-       <span>总跨度 <b>${fmtMs(s.spanMs)}</b></span>
-       <span>工具 <b>${fmtMs(s.toolMs)}</b>（${pctTool}%，${s.toolCalls} 次）</span>
-       <span>模型思考/生成 <b>${fmtMs(s.modelMs)}</b>（${100 - pctTool}%）</span>
-       <span>token in/out <b>${s.usage.inputTokens}/${s.usage.outputTokens}</b>，缓存读 ${s.usage.cacheReadTokens}</span>
-       ${s.usage.costUsd ? `<span>费用 <b>$${s.usage.costUsd.toFixed(4)}</b></span>` : ''}
+       <span>${T('trStatEvents').replace('{n}', s.events).replace('{live}', d.liveCount).replace('{jsonl}', d.jsonlCount)}</span>
+       <span>${T('trStatSpan').replace('{v}', fmtMs(s.spanMs))}</span>
+       <span>${T('trStatTool').replace('{v}', fmtMs(s.toolMs)).replace('{pct}', pctTool).replace('{calls}', s.toolCalls)}</span>
+       <span>${T('trStatModel').replace('{v}', fmtMs(s.modelMs)).replace('{pct}', 100 - pctTool)}</span>
+       <span>${T('trStatTokens').replace('{in}', s.usage.inputTokens).replace('{out}', s.usage.outputTokens).replace('{cache}', s.usage.cacheReadTokens)}</span>
+       ${s.usage.costUsd ? `<span>${T('trStatCost').replace('{v}', s.usage.costUsd.toFixed(4))}</span>` : ''}
      </div>
      <div class="tr-bar"><i class="tool" style="width:${pctTool}%"></i><i class="model" style="width:${100 - pctTool}%"></i></div>
-     <div class="tr-tools">${tools || '（无工具调用）'}</div>`;
+     <div class="tr-tools">${tools || T('trNoTools')}</div>`;
 
   // 种类过滤 chips
   const counts = {};
@@ -4522,7 +4527,7 @@ function renderTrace() {
   list.innerHTML = '';
   const shown = d.events.filter((e) => Trace.kinds.size === 0 || Trace.kinds.has(e.kind));
   if (!shown.length) {
-    list.innerHTML = '<div class="tr-empty">没有事件（该会话可能尚未运行过任务）</div>';
+    list.innerHTML = '<div class="tr-empty">' + T('trNoEvents') + '</div>';
     return;
   }
   for (const e of shown) list.appendChild(traceEl(e, slowLine));
@@ -4550,11 +4555,11 @@ function traceEl(e, slowLine) {
   const pre = document.createElement('pre');
   const parts = [];
   if (e.text) parts.push(e.text);
-  if (e.input !== undefined) parts.push('入参:\n' + JSON.stringify(e.input, null, 2));
-  if (e.output) parts.push('输出:\n' + e.output);
+  if (e.input !== undefined) parts.push(T('trInput') + '\n' + JSON.stringify(e.input, null, 2));
+  if (e.output) parts.push(T('trOutput') + '\n' + e.output);
   if (e.usage) parts.push('usage: ' + JSON.stringify(e.usage));
   if (e.raw !== undefined) parts.push('raw:\n' + JSON.stringify(e.raw, null, 2));
-  pre.textContent = parts.join('\n\n') || '(无附加内容)';
+  pre.textContent = parts.join('\n\n') || T('trNoDetail');
   el.appendChild(pre);
   return el;
 }
@@ -5151,10 +5156,10 @@ function fmtDateTime(ms) {
 // 人性化耗时：<60s → X.X秒，否则 X分Y秒
 function fmtElapsed(ms) {
   const s = Math.max(0, ms) / 1000;
-  if (s < 60) return `${s.toFixed(1)}秒`;
+  if (s < 60) return T('elapsedSec').replace('{s}', s.toFixed(1));
   const m = Math.floor(s / 60);
   const r = Math.round(s % 60);
-  return `${m}分${r}秒`;
+  return T('elapsedMin').replace('{m}', m).replace('{s}', r);
 }
 
 function escapeHtml(s) {
@@ -7048,6 +7053,7 @@ const PROVIDER_LABEL_KEY = {
   kimi: 'pvKimi', kimicode: 'pvKimicode', custom: 'pvCustom',
 };
 const PROVIDER_NOTE_KEY = {
+  official: 'pvNoteOfficial', custom: 'pvNoteCustom',
   minimax: 'pvNoteMinimax', xiaomi: 'pvNoteXiaomi', kimi: 'pvNoteKimi', kimicode: 'pvNoteKimicode',
 };
 const EFFORT_LABEL_KEY = {

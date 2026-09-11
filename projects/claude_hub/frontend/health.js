@@ -58,6 +58,25 @@ function showNetCheck(el, report, opts) {
   bindNetCheck(el, o);
 }
 
+// 逐项名称：后端只给稳定的 key，文案按当前语言取；字典里没有才退回后端的中文 label
+function netItemLabel(i) {
+  const t = T('hcT_' + i.key);
+  return t === 'hcT_' + i.key ? i.label || i.key : t;
+}
+
+// 一句话结论：同上，按 verdict + 代理 + 实测可用的国产服务商在前端拼，后端 hint 仅兜底
+function netHint(r) {
+  const proxied = !!(r.proxy && r.proxy.enabled);
+  const url = proxied ? r.proxy.url : '';
+  if (r.verdict === 'ok') return proxied ? T('hcHintOkProxy').replace('{url}', url) : T('hcHintOk');
+  if (r.verdict === 'noInternet') return T('hcHintNoNet');
+  if (r.verdict === 'unknown') return r.hint || '';
+  const names = (r.domestic || []).map((id) => DOMESTIC_LABEL[id] || id);
+  const way = names.length ? T('hcWayCn').replace('{list}', names.join('、')) : T('hcWayCnNone');
+  const base = proxied ? T('hcHintNoClaudeProxy').replace('{url}', url) : T('hcHintNoClaude');
+  return base.replace('{way}', way);
+}
+
 function netCheckHtml(r, o) {
   const tone = r.verdict === 'ok' ? 'ok' : r.verdict === 'noInternet' ? 'bad' : 'warn';
   const badge =
@@ -67,7 +86,7 @@ function netCheckHtml(r, o) {
       (i) =>
         `<div class="hc-row${i.ok ? '' : ' off'}">` +
         `<span class="hc-dot">${i.ok ? '●' : '○'}</span>` +
-        `<span class="hc-name">${escapeHtml(i.label)}</span>` +
+        `<span class="hc-name">${escapeHtml(netItemLabel(i))}</span>` +
         `<span class="hc-ms">${i.ok ? i.ms + ' ms' : escapeHtml(i.error || T('hcUnreachable'))}</span>` +
         `</div>`,
     )
@@ -89,7 +108,7 @@ function netCheckHtml(r, o) {
   return (
     `<div class="hc ${tone}">` +
     `<div class="hc-h"><b>${T('hcTitle')}</b><span class="hc-badge ${tone}">${badge}</span></div>` +
-    `<div class="hc-hint">${escapeHtml(r.hint)}</div>` +
+    `<div class="hc-hint">${escapeHtml(netHint(r))}</div>` +
     proxy +
     (r.verdict !== 'ok' ? `<div class="hc-guide">${T('hcGuide')}</div>` : '') +
     `<div class="hc-acts">${acts}</div>` +
@@ -99,7 +118,11 @@ function netCheckHtml(r, o) {
 }
 
 // 国产服务商在体检卡片里的展示名（与后端 provider id 对应）
-const DOMESTIC_LABEL = { minimax: 'MiniMax', kimi: 'Kimi 开放平台', kimicode: 'Kimi Code 订阅', xiaomi: '小米 MiMo' };
+// 服务商短名：走 trans（app.js 的 providerLabel 同源），拿不到才退回这里的中文兜底
+const DOMESTIC_FALLBACK = { minimax: 'MiniMax', kimi: 'Kimi 开放平台', kimicode: 'Kimi Code 订阅', xiaomi: '小米 MiMo' };
+const DOMESTIC_LABEL = new Proxy({}, {
+  get: (_t, id) => (typeof providerLabel === 'function' ? providerLabel(id, DOMESTIC_FALLBACK[id]) : DOMESTIC_FALLBACK[id]),
+});
 
 function bindNetCheck(el, o) {
   const retry = el.querySelector('[data-hc-retry]');

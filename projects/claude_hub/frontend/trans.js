@@ -242,6 +242,37 @@ const DICT = {
   noticeClearAll: { en: 'Dismiss all', zh: '全部关闭' },
   serverErrorTitle: { en: 'Backend error', zh: '后端异常' },
   elapsed: { en: 'Elapsed', zh: '耗时' },
+  // ── 过程面板（trace）：逐轮的工具调用 / 入参 / 输出 / 耗时 ──
+  trLoading: { en: 'Loading…', zh: '加载中…' },
+  trLoadFail: { en: 'Could not load: ', zh: '读取失败：' },
+  trNoData: {
+    en: 'No process data was kept for this turn (the reply may have been produced in a terminal, before this tool took over).',
+    zh: '这一轮没有留存过程数据（该回复可能是本系统接管前、在终端里跑的）',
+  },
+  trSum: {
+    en: 'This turn <b>{span}</b> · {calls} tool calls <b>{tool}</b> · model thinking/writing <b>{model}</b> · {events} events',
+    zh: '本轮 <b>{span}</b> · 工具 {calls} 次 <b>{tool}</b> · 模型思考/生成 <b>{model}</b> · 事件 {events} 条',
+  },
+  trBtnTitle: {
+    en: 'Expand the whole turn (tool calls / inputs / outputs / timings)',
+    zh: '展开这一轮的全过程（工具调用/入参/输出/耗时）',
+  },
+  trNoEvents: { en: 'No events (this session ran no tools).', zh: '没有事件（该会话可能未运行过工具）' },
+  trNative: { en: 'terminal / native', zh: '终端/native' },
+  trInput: { en: 'Input:', zh: '入参:' },
+  trOutput: { en: 'Output:', zh: '输出:' },
+  trNoDetail: { en: '(no further detail)', zh: '(无更多详情)' },
+  trStatEvents: { en: 'Events <b>{n}</b> (live {live} / jsonl {jsonl})', zh: '事件 <b>{n}</b>（实时 {live} / jsonl {jsonl}）' },
+  trStatSpan: { en: 'Total span <b>{v}</b>', zh: '总跨度 <b>{v}</b>' },
+  trStatTool: { en: 'Tools <b>{v}</b> ({pct}%, {calls} calls)', zh: '工具 <b>{v}</b>（{pct}%，{calls} 次）' },
+  trStatModel: { en: 'Model thinking/writing <b>{v}</b> ({pct}%)', zh: '模型思考/生成 <b>{v}</b>（{pct}%）' },
+  trStatTokens: { en: 'token in/out <b>{in}/{out}</b>, cache reads {cache}', zh: 'token in/out <b>{in}/{out}</b>，缓存读 {cache}' },
+  trStatCost: { en: 'Cost <b>${v}</b>', zh: '费用 <b>${v}</b>' },
+  trToolLine: { en: '{name} ×{count} <b>{total}</b> (avg {avg})', zh: '{name} ×{count} <b>{total}</b>（均 {avg}）' },
+  trNoTools: { en: '(no tool calls)', zh: '（无工具调用）' },
+  colon: { en: ': ', zh: '：' },
+  elapsedSec: { en: '{s}s', zh: '{s}秒' },
+  elapsedMin: { en: '{m}m {s}s', zh: '{m}分{s}秒' },
   aiCollapseAll: { en: 'Collapse AI messages', zh: '收拢 AI 消息' },
   aiExpandAll: { en: 'Expand all AI messages', zh: '展开全部 AI 消息' },
   aiExpandGroup: { en: 'Click to expand this AI message group', zh: '点击展开这组 AI 消息' },
@@ -458,6 +489,40 @@ const DICT = {
   hcUnreachable: { en: 'unreachable', zh: '不通' },
   hcDetail: { en: 'Show each check', zh: '查看逐项检测结果' },
   hcProxyFound: { en: 'Proxy detected: {url} (from {from})', zh: '已检测到代理：{url}（来自环境变量 {from}）' },
+  // 逐项检测目标名 & 一句话结论：后端只给 key/verdict，文案在前端按语言渲染（后端字符串仅作兜底）
+  hcT_npmmirror: { en: 'China network (npmmirror)', zh: '国内网络（npmmirror）' },
+  hcT_npmjs: { en: 'Global network (npmjs)', zh: '国际网络（npmjs）' },
+  'hcT_anthropic-api': { en: 'Claude API (api.anthropic.com)', zh: 'Claude API（api.anthropic.com）' },
+  'hcT_claude-com': { en: 'Claude sign-in site (claude.com)', zh: 'Claude 登录站（claude.com）' },
+  hcT_minimax: { en: 'MiniMax (China)', zh: 'MiniMax（国产）' },
+  hcT_kimi: { en: 'Kimi Open Platform (China)', zh: 'Kimi 开放平台（国产）' },
+  hcT_kimicode: { en: 'Kimi Code subscription (China)', zh: 'Kimi Code 订阅（国产）' },
+  hcT_xiaomi: { en: 'Xiaomi MiMo (China)', zh: '小米 MiMo（国产）' },
+  hcHintOk: { en: 'Network is fine — Claude is reachable.', zh: '网络正常，Claude 可用' },
+  hcHintOkProxy: {
+    en: 'Network is fine — Claude is reachable (via proxy {url}).',
+    zh: '网络正常，Claude 可用（经代理 {url}）',
+  },
+  hcHintNoNet: {
+    en: 'This computer has no network at all: neither China-based nor international sites respond. Check the cable / Wi-Fi / company firewall first.',
+    zh: '这台电脑当前没有网络：国内外站点都连不上。请先检查网线 / Wi-Fi / 公司防火墙。',
+  },
+  hcHintNoClaude: {
+    en: 'You are online, but Claude is unreachable (direct connections from mainland China are usually blocked). Turn on a VPN and check again; {way}.',
+    zh: '有网，但连不上 Claude（国内直连通常会被拦截）。请开启科学上网后重新检测；{way}。',
+  },
+  hcHintNoClaudeProxy: {
+    en: 'You are online, but Claude is unreachable. Proxy {url} was detected, yet it could not reach Claude — check whether the proxy actually works; {way}.',
+    zh: '有网，但连不上 Claude。已检测到代理 {url}，但它没能连通 Claude：请检查代理是否正常工作；{way}。',
+  },
+  hcWayCn: {
+    en: 'or just switch to a China-based model (reachable right now: {list}), which needs no VPN',
+    zh: '或者直接改用国产模型（当前实测可用：{list}），无需科学上网',
+  },
+  hcWayCnNone: {
+    en: 'or switch to a China-based model (none of them responded either — please check the network as well)',
+    zh: '或者改用国产模型（当前国产服务商也未探通，请一并检查网络）',
+  },
   hcGuide: {
     en: 'Two ways out: ① turn on a VPN / proxy on this machine, then check again; ② keep using this tool with a China-based model — no VPN needed. Pick one below.',
     zh: '两条出路，任选其一：① 在这台电脑上开启科学上网（VPN / 代理），然后点「重新检测」；② 直接改用国产大模型，完全不需要翻墙。下面点一下就行。',
@@ -843,6 +908,14 @@ const DICT = {
   pvKimicode: { en: 'Kimi Code (monthly subscription)', zh: 'Kimi Code（包月订阅）' },
   pvCustom: { en: 'Custom provider', zh: '自定义服务商' },
   // 服务商一句话说明（新手引导的卡片；后端只给 id，文案在这里）
+  pvNoteOfficial: {
+    en: 'Sign in with the Claude / ChatGPT account you already have — no API key needed.',
+    zh: '用已有的 Claude / ChatGPT 账号登录，不需要 API Key',
+  },
+  pvNoteCustom: {
+    en: 'Fill in an OpenAI-compatible base URL, a model-list URL and an API key.',
+    zh: '填写兼容 Base URL、模型列表 URL 与 API Key',
+  },
   pvNoteMinimax: {
     en: 'MiniMax latest models (list fetched live). Strong at code and supports image input — the pick we recommend.',
     zh: 'MiniMax 最新模型（列表实时拉取），代码能力强且支持图片识别，国产模型首推',
