@@ -120,7 +120,8 @@ export class CodexSession extends CodexSessionStruct {
   }
 
   private static _isInjectedUserText(text: string): boolean {
-    return /^\s*<(environment_context|permissions|user_instructions)\b/i.test(text)
+    // recommended_plugins：codex 新版在首轮注入的"可安装插件清单"，会伪装成第一条 user 消息 → 污染标题与正文
+    return /^\s*<(environment_context|permissions|user_instructions|recommended_plugins)\b/i.test(text)
       || /^\s*#\s*AGENTS\.md instructions for\b[\s\S]*<INSTRUCTIONS>/i.test(text)
       || /^\s*<INSTRUCTIONS\b[\s\S]*<\/INSTRUCTIONS>\s*$/i.test(text);
   }

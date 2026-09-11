@@ -78,7 +78,7 @@ export class Toolchain extends ToolchainStruct {
     const args = process.platform === 'win32' ? [name] : ['-a', name];
     let out = '';
     try {
-      out = String(execFileSync(cmd, args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }));
+      out = String(execFileSync(cmd, args, { encoding: 'utf-8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }));
     } catch {
       return null;
     }
@@ -106,7 +106,7 @@ export class Toolchain extends ToolchainStruct {
     const args = isBatch ? ['/c', exe, arg] : [arg];
     try {
       const out = String(
-        execFileSync(cmd, args, { encoding: 'utf-8', timeout: 20000, stdio: ['ignore', 'pipe', 'ignore'] }),
+        execFileSync(cmd, args, { encoding: 'utf-8', timeout: 20000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }),
       );
       const version = out.split(/\r?\n/)[0].trim().slice(0, 60);
       return version ? { version } : { version: '', error: `执行 ${arg} 没有任何输出` };

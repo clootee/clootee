@@ -29,7 +29,7 @@ export class UpdateChecker extends UpdateCheckerStruct {
       const upstream = execFileSync(
         git,
         ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
-        { cwd: Paths.PROJECT_ROOT, encoding: 'utf-8' },
+        { cwd: Paths.PROJECT_ROOT, encoding: 'utf-8', windowsHide: true },
       ).trim();
       const slash = upstream.indexOf('/');
       if (slash > 0) return upstream.slice(slash + 1);
@@ -39,6 +39,7 @@ export class UpdateChecker extends UpdateCheckerStruct {
     return execFileSync(git, ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: Paths.PROJECT_ROOT,
       encoding: 'utf-8',
+      windowsHide: true,
     }).trim();
   }
 
@@ -47,6 +48,7 @@ export class UpdateChecker extends UpdateCheckerStruct {
     const raw = execFileSync(git, ['log', '-1', '--format=%H%n%h%n%cI%n%s'], {
       cwd: Paths.PROJECT_ROOT,
       encoding: 'utf-8',
+      windowsHide: true,
     });
     return this._parseLocalLog(raw);
   }
@@ -231,6 +233,7 @@ export class UpdateChecker extends UpdateCheckerStruct {
     const url = execFileSync(git, ['remote', 'get-url', 'origin'], {
       cwd: Paths.PROJECT_ROOT,
       encoding: 'utf-8',
+      windowsHide: true,
     }).trim();
     const m = url.match(/github\.com[:/]([^/]+)\/([^/.]+?)(?:\.git)?$/i);
     if (!m) throw new Error(`UpdateChecker: 无法从 origin 解析 GitHub 仓库: ${url}`);

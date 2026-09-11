@@ -84,7 +84,7 @@ export class ClaudeBin {
   private static _existsOnPath(bin: string): boolean {
     if (path.isAbsolute(bin)) return fs.existsSync(bin);
     try {
-      execSync(`command -v ${bin}`, { encoding: 'utf8' });
+      execSync(`command -v ${bin}`, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
       return true;
     } catch {
       return false;
@@ -93,7 +93,7 @@ export class ClaudeBin {
 
   private static _whereFirst(name: string): string | null {
     try {
-      const out = execSync(`where ${name}`, { encoding: 'utf8' });
+      const out = execSync(`where ${name}`, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
       const p = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
       return p && fs.existsSync(p) ? p : null;
     } catch {

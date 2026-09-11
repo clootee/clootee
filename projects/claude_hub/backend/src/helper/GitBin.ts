@@ -42,7 +42,7 @@ export class GitBin {
   private static _runs(bin: string): boolean {
     if (path.isAbsolute(bin)) return fs.existsSync(bin);
     try {
-      execFileSync(bin, ['--version'], { stdio: 'ignore' });
+      execFileSync(bin, ['--version'], { stdio: 'ignore', windowsHide: true });
       return true;
     } catch {
       return false;

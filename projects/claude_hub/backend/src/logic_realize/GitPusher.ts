@@ -23,7 +23,7 @@ export class GitPusher extends GitPusherStruct {
     }
     for (const [label, args] of steps) {
       try {
-        const out = execFileSync(git, args, { cwd: dirPath, encoding: 'utf-8' });
+        const out = execFileSync(git, args, { cwd: dirPath, encoding: 'utf-8', windowsHide: true });
         lines.push(`[${label}] ${out.trim() || 'ok'}`);
       } catch (e: unknown) {
         const err = e as { stdout?: string; stderr?: string; message?: string };
