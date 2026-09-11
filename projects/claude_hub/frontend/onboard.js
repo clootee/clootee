@@ -40,7 +40,7 @@ async function showOnboard() {
   try {
     const [pv, st] = await Promise.all([
       api('/api/engine/providers'),
-      api('/api/engine/status'),
+      api('/api/engine/status?refresh=1'),
     ]);
     Onboard.providers = (pv && pv.providers) || [];
     Onboard.status = st || null;

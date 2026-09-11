@@ -129,7 +129,11 @@ export class Server {
       this._ok(res, { providers: EngineConfig.providerList() }),
     );
     // 引擎是否已安装（系统 / out_end 内置），供引导提示「一键安装内置引擎」
-    app.get('/api/engine/status', (_req, res) => this._ok(res, EngineStatus.get()));
+    // 默认读进程级缓存（探测要起子进程，Windows 上还会闪窗）；
+    // ?refresh=1 才真正重探——用户在软件外面自己装了引擎时由前端显式触发
+    app.get('/api/engine/status', (req, res) =>
+      this._ok(res, EngineStatus.get(req.query.refresh === '1')),
+    );
     app.get('/api/engine/config', (_req, res) => this._ok(res, EngineConfig.get()));
     app.post('/api/engine/config', (req, res) =>
       this._wrap(res, 'engine.config', () =>

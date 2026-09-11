@@ -76,26 +76,16 @@ export interface AppSettings {
 // 未落盘过 runAsUser* 时的动态默认值：Linux/macOS 下用 root 起的服务 → 默认启用、默认用户 claudeuser；
 // 其余情况（Windows，或本来就是普通用户在跑）→ 默认关闭。
 const DEFAULT_RUN_AS_USER_NAME = 'claudeuser';
-// 引擎可用性探测走 execSync，SettingsStruct.get() 调用频繁，这里做个短缓存
-let _availCache: { at: number; claude: boolean; codex: boolean } | null = null;
-const AVAIL_TTL_MS = 3000;
+// 引擎可用性由 EngineStatus 自己做进程级缓存（只在首次/装完引擎后真探测），
+// 所以 SettingsStruct.get() 再频繁也不会反复起子进程。
 function engineAvail(): { claude: boolean; codex: boolean } {
-  const now = Date.now();
-  if (_availCache && now - _availCache.at < AVAIL_TTL_MS)
-    return { claude: _availCache.claude, codex: _availCache.codex };
-  let claude = true;
-  let codex = true;
   try {
     const st = EngineStatus.get();
-    claude = !!st.claude.ready;
-    codex = !!st.codex.ready;
+    return { claude: !!st.claude.ready, codex: !!st.codex.ready };
   } catch {
     // 探测失败就当都可用，避免把用户锁死在错误的引擎上
-    claude = true;
-    codex = true;
+    return { claude: true, codex: true };
   }
-  _availCache = { at: now, claude, codex };
-  return { claude, codex };
 }
 
 function isRoot(): boolean {

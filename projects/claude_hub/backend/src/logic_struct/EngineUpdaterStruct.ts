@@ -5,6 +5,7 @@
 // 具体 npm 调用（子进程）由 Realize 实现。
 import { ClaudeBin } from '../helper/ClaudeBin';
 import { CodexBin } from '../helper/CodexBin';
+import { EngineStatus } from '../logic_realize/EngineStatus';
 
 export interface UpdateResult {
   ok: boolean;
@@ -33,6 +34,8 @@ export class EngineUpdaterStruct {
     // 安装后清缓存，让下次解析拿到新版本
     ClaudeBin.clearCache();
     CodexBin.clearCache();
+    // 「装没装」的探测结果是进程级缓存的，装完必须作废，否则界面还显示未安装
+    EngineStatus.invalidate();
     return { ok: true, engine, pkg, log, registry };
   }
 

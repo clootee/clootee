@@ -18,23 +18,37 @@ export interface EngineStatusReport {
   anyReady: boolean;    // 至少一个引擎可用
 }
 
+// 探测要跑 where/command -v 子进程（Windows 上还会闪控制台窗口），
+// 而「装没装」在一次运行里几乎不会变 → 全进程只探一次，之后一律走缓存。
+// 真正会改变结果的只有两件事：装/更新引擎（EngineUpdater 完成后 invalidate）、
+// 用户在软件外面自己装了引擎（由前端显式带 refresh 重新探测）。
+let _report: EngineStatusReport | null = null;
+
 export class EngineStatusStruct {
-  static get(): EngineStatusReport {
+  // force=true 才重新探测；默认吃缓存（发消息、读设置等高频路径必须走默认）
+  static get(force = false): EngineStatusReport {
+    if (!force && _report) return _report;
     const claude = this._probe('claude');
     const codex = this._probe('codex');
-    return {
+    _report = {
       claude,
       codex,
       outEndReady: this._outEndReady(),
       anyReady: claude.ready || codex.ready,
     };
+    return _report;
+  }
+
+  // 丢弃缓存：装完/更新完引擎后调用，下次 get() 会重新探测
+  static invalidate(): void {
+    _report = null;
   }
 
   // 单个引擎的可用性（不抛错：探测失败一律按不可用）
   static one(engine: Engine): EngineAvail {
     if (engine !== 'claude' && engine !== 'codex')
       throw new Error(`EngineStatusStruct.one: invalid engine=${engine}`);
-    return this._probe(engine);
+    return this.get()[engine];
   }
 
   // ── 探测钩子（Realize 实现）──
