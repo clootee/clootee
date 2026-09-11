@@ -2,9 +2,9 @@
 
 # Clootee
 
-### 在浏览器里用 Claude Code 和 Codex —— 解压、双击、就能用。
+### 一键安装 Claude Code 和 Codex，并且更易用
 
-**不用装 Node，不用 npm，不用开终端，什么前置都不用。**
+**不用装 Node，不用 npm，不用开终端，什么前置都不用。解压、双击、就能用。**
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()

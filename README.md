@@ -2,9 +2,9 @@
 
 # Clootee
 
-### Claude Code & Codex, in your browser — unzip, double-click, done.
+### One-click install for Claude Code & Codex — and easier to use
 
-**No Node. No npm. No terminal. Nothing to install first.**
+**No Node. No npm. No terminal. Nothing to install first. Unzip, double-click, done.**
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)]()
