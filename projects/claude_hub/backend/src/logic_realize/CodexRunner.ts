@@ -75,7 +75,9 @@ export class CodexRunner extends CodexRunnerStruct {
     // 顶层错误 / 回合失败：归入过程视图（不致命的模型元信息告警等）
     if (evt.type === 'error' && evt.message) cb.onOutput(`[error] ${evt.message}`);
     else if (evt.type === 'turn.failed') cb.onOutput(`[turn.failed] ${this._short(evt.error)}`);
-    else if (evt.type === 'turn.completed') cb.onDone(true);
+    // 注意：turn.completed 不在这里 onDone。codex 进程在 turn.completed 之后还要 1~2 秒才退出，
+    // 提前收尾会让队列以为会话空闲并立刻起下一个 resume，撞上 codex 的 thread 写锁。
+    // 完成信号统一由 CodexRunnerStruct 的 onExit 给出。
   }
 
   private static _dispatchItem(item: any, cb: RunCallbacks): void {

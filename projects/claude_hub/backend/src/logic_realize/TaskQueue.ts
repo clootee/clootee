@@ -77,8 +77,13 @@ export class TaskQueue extends TaskQueueStruct {
       this._killed.delete(key);
       return true;
     }
-    // 正常结束：清理运行句柄
-    this._running.delete(sessionId);
+    // 正常结束：清理运行句柄。必须确认句柄就是本任务的——
+    // 上一个任务的进程可能在下一个任务已经启动之后才真正退出（codex 在 turn.completed
+    // 之后还要 1~2 秒才退进程），那条迟到的退出回调若无脑 delete，会把新任务的句柄一起抹掉，
+    // 会话随即被当成空闲，下一条消息就会对同一个 codex thread 并发 resume →
+    // 「thread ... already has an active writer」。
+    const state = this._running.get(sessionId);
+    if (state && state.taskId === taskId) this._running.delete(sessionId);
     return false;
   }
 
