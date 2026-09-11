@@ -39,9 +39,16 @@ To stop, double-click **`Windows_Stop.bat`**.
 ### macOS
 
 ```bash
-chmod +x Mac_*.command      # once
+cd /path/to/Clootee
+xattr -dr com.apple.quarantine .   # once, if you downloaded the zip with a browser
+chmod +x Mac_*.command             # once
 ```
 Then double-click `Mac_Start.command` (stop: `Mac_Stop.command`).
+
+> If Gatekeeper still says the file "cannot be opened because it is from an unidentified developer",
+> right-click `Mac_Start.command` → *Open* → *Open* once; macOS remembers your choice afterwards.
+> `git` is needed only for the "push to cloud" feature — if it is missing, run `xcode-select --install`
+> (or `brew install git`).
 
 ### Linux
 

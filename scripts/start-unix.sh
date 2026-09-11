@@ -81,11 +81,23 @@ echo
 echo "==> Starting claude-hub on http://localhost:$PORT"
 echo "==> 服务启动中，浏览器将自动打开 http://localhost:$PORT"
 echo "==> 首次打开会有引导：设置访问密码 -> 选引擎 -> 选模型服务商"
-if command -v open >/dev/null 2>&1; then
-  open "http://localhost:$PORT" >/dev/null 2>&1 || true
-elif command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "http://localhost:$PORT" >/dev/null 2>&1 || true
-fi
+# 浏览器要等服务真的监听上再开，否则（尤其 macOS 双击启动时）一打开就是「无法连接」，
+# 用户还得自己刷新。后台等最多 30 秒，端口一通就开；一直不通就不开，让终端里的报错说话。
+(
+  # 没有 lsof 就查不到监听状态，退化成「等 3 秒再开」，总比不开好
+  command -v lsof >/dev/null 2>&1 || { sleep 3; }
+  for _ in $(seq 1 60); do
+    if ! command -v lsof >/dev/null 2>&1 || [ -n "$(port_pid)" ]; then
+      if command -v open >/dev/null 2>&1; then
+        open "http://localhost:$PORT" >/dev/null 2>&1 || true
+      elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "http://localhost:$PORT" >/dev/null 2>&1 || true
+      fi
+      break
+    fi
+    sleep 0.5
+  done
+) &
 
 if [ "$SETUP" -eq 2 ]; then
   echo "[warn] 编译产物不可用，降级用 ts-node 直跑源码 / running from source via ts-node"

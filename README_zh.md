@@ -38,9 +38,15 @@ Claude Code 和 Codex 很强，但想发出第一条消息，你得先装 Node�
 ### macOS
 
 ```bash
-chmod +x Mac_*.command      # 只需一次
+cd /path/to/Clootee
+xattr -dr com.apple.quarantine .   # 只需一次；用浏览器下载的压缩包会被打上隔离标记
+chmod +x Mac_*.command             # 只需一次
 ```
 然后双击 `Mac_Start.command`（停止：`Mac_Stop.command`）。
+
+> 如果仍提示「无法打开，因为来自身份不明的开发者」，右键 `Mac_Start.command` → *打开* → *打开*，
+> 确认一次之后系统就记住了。
+> `git` 只有「推送到云端」功能需要，缺了就执行 `xcode-select --install`（或 `brew install git`）。
 
 ### Linux
 

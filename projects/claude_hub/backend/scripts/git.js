@@ -269,12 +269,19 @@ function pickPkgManager() {
 function installUnix(log) {
   const m = pickPkgManager();
   if (!m) {
-    return {
-      ok: false,
-      error:
-        '未找到可用的包管理器 / no package manager found —— ' +
-        (process.platform === 'darwin' ? '请运行 xcode-select --install' : '请手动安装 git'),
-    };
+    // macOS 没装 Homebrew 时还有一条不需要 root 的路：Xcode Command Line Tools 自带 git。
+    // xcode-select --install 会弹出系统安装窗口，由用户点确认，这里只负责把它拉起来。
+    if (process.platform === 'darwin') {
+      log('未检测到 Homebrew，改用 xcode-select --install（会弹出系统安装窗口）...');
+      spawnSync('xcode-select', ['--install'], { stdio: 'inherit' });
+      return {
+        ok: false,
+        error:
+          '已拉起 Xcode Command Line Tools 安装窗口，请在窗口里点「安装」，装完回来点「重新检测」/ ' +
+          'installer window opened - finish it, then re-check',
+      };
+    }
+    return { ok: false, error: '未找到可用的包管理器 / no package manager found —— 请手动安装 git' };
   }
   const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
   const cmdline = `${m.bin} ${m.args.join(' ')}`;

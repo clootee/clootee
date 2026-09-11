@@ -38,11 +38,25 @@ export class RunAsUser {
     return true;
   }
 
-  // 解析某系统用户的家目录（仅类 Unix）：优先 getent passwd，取不到（非 glibc / 用户不存在）就退回约定路径 /home/<user>。
+  // 解析某系统用户的家目录（仅类 Unix）。
+  // macOS 上既没有 getent，家目录也不在 /home 而在 /Users，所以必须分平台：
+  //   macOS  → dscl . -read /Users/<user> NFSHomeDirectory，兜底 /Users/<user>
+  //   Linux  → getent passwd 取第 6 段，兜底 /home/<user>
   static homeDirFor(user: string): string {
     if (!user || typeof user !== 'string' || !user.trim())
       throw new Error(`RunAsUser.homeDirFor: invalid user=${user}`);
     const name = user.trim();
+    if (process.platform === 'darwin') {
+      try {
+        // 输出形如：NFSHomeDirectory: /Users/alice
+        const out = execSync(`dscl . -read /Users/${name} NFSHomeDirectory`, { encoding: 'utf8' });
+        const home = out.replace(/^NFSHomeDirectory:\s*/i, '').trim();
+        if (home && home.startsWith('/')) return home;
+      } catch {
+        /* 没有 dscl 或用户不存在：退回约定路径 */
+      }
+      return `/Users/${name}`;
+    }
     try {
       const out = execSync(`getent passwd ${name}`, { encoding: 'utf8' });
       const home = out.trim().split(':')[5];

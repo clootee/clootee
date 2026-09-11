@@ -383,8 +383,17 @@ async function checkEngines() {
 // ── 8. git（会话里的「推送到云端」功能依赖它）────────────────────────────────
 // 默认只报告不下载（同引擎的策略）：加 --with-git 才装。Windows 装便携版到 out_end/git，
 // 免管理员、不写注册表、下载源在国内镜像与 GitHub 之间竞速；Linux/macOS 走系统包管理器。
+// macOS 的坑：没装 Command Line Tools 时 /usr/bin/git 也一直在（它只是个会弹安装窗口的壳），
+// 光看 which 会误判成「已安装」。所以这里必须真跑一次 git --version，跑得通才算数。
+function gitUsable() {
+  const p = onPath('git');
+  if (!p) return null;
+  const r = spawnSync(p, ['--version'], { encoding: 'utf-8' });
+  return r.status === 0 ? p : null;
+}
+
 async function checkGit() {
-  const sys = onPath('git');
+  const sys = gitUsable();
   const bun = gitInstaller.bundled(GIT_DIR);
   if (sys || bun) {
     ok(`git: ${sys || `${bun}（内置 / bundled）`}`);
