@@ -29,9 +29,6 @@ Claude Code 和 Codex 很强，但想发出第一条消息，你得先装 Node�
 
 1. 下载发布包并**解压**（右键 → 全部解压缩，不要直接在压缩包里运行）。
 2. 双击 **`Windows_Start.bat`**。
-3. 浏览器自动打开 <http://localhost:8970>，按提示设置一个访问密码。
-4. 跟着向导走：Node、Git、引擎（Claude Code / Codex）都由它帮你装好。
-5. 点**登录**，打开链接授权，把码粘回来，就能开始对话了。
 
 停止：双击 **`Windows_Stop.bat`**。
 

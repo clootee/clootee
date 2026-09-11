@@ -30,9 +30,6 @@ whatever is missing — with a progress bar, not a blank screen.
 
 1. Download the release and **unzip it** (right-click → Extract All — don't run it from inside the zip).
 2. Double-click **`Windows_Start.bat`**.
-3. Your browser opens <http://localhost:8970>. Set an access password when asked.
-4. Follow the wizard: it installs Node, Git and the engine (Claude Code / Codex) for you.
-5. Click **Sign in**, open the link, authorize, paste the code back. Start chatting.
 
 To stop, double-click **`Windows_Stop.bat`**.
 
