@@ -296,9 +296,17 @@ const THEMES = [
 ];
 // 浅底主题集合（编辑器用 CodeMirror default，其余用 material-darker）
 const LIGHT_THEMES = ['light', 'pink', 'green', 'cat', 'winter', 'rabbit'];
+// 移动端只保留最简单的深/浅两套：动效主题的 canvas 动画在手机上容易卡死。
+const MOBILE_THEMES = ['dark', 'light'];
+function isMobileView() {
+  return !!(window.matchMedia && window.matchMedia('(max-width: 860px)').matches);
+}
+function availableThemes() {
+  return isMobileView() ? THEMES.filter((t) => MOBILE_THEMES.indexOf(t.id) >= 0) : THEMES;
+}
 function currentTheme() {
   const t = localStorage.getItem('theme') || 'dark';
-  return THEMES.some((x) => x.id === t) ? t : 'dark';
+  return availableThemes().some((x) => x.id === t) ? t : 'dark';
 }
 function isLightTheme(t) {
   return LIGHT_THEMES.indexOf(t || currentTheme()) >= 0;
@@ -333,7 +341,7 @@ function pickTheme(id) {
 function renderThemePanel() {
   const cur = currentTheme();
   $('themePanelTitle').textContent = T('themePick');
-  $('themeGrid').innerHTML = THEMES.map((t) =>
+  $('themeGrid').innerHTML = availableThemes().map((t) =>
     `<button type="button" class="theme-opt${t.id === cur ? ' on' : ''}" data-theme="${t.id}">
        <span class="theme-sw">${t.sw.map((c) => `<i style="background:${c}"></i>`).join('')}</span>
        <span class="theme-nm">${escapeHtml(t.name())}</span>
