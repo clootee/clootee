@@ -1,0 +1,174 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1240" viewBox="0 0 1600 1240" font-family="Microsoft YaHei, PingFang SC, Hiragino Sans GB, sans-serif">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#c2410c"/>
+    </marker>
+    <style>
+      .lay   { fill:#ffffff; stroke:#cbd5e1; stroke-width:1.5; rx:14; }
+      .ttl   { font-size:20px; font-weight:700; fill:#0f172a; }
+      .sub   { font-size:13px; fill:#64748b; }
+      .chip  { rx:9; stroke-width:1.2; }
+      .ctxt  { font-size:14px; fill:#0f172a; }
+      .ctxs  { font-size:12px; fill:#475569; }
+      .grp   { font-size:13px; font-weight:700; fill:#334155; }
+      .flow  { stroke:#64748b; stroke-width:2; fill:none; marker-end:url(#ar); }
+      .flow2 { stroke:#c2410c; stroke-width:2; fill:none; stroke-dasharray:6 4; marker-end:url(#ar2); }
+      .note  { font-size:12px; fill:#c2410c; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1240" fill="#f8fafc"/>
+
+  <!-- 标题 -->
+  <text x="48" y="52" font-size="30" font-weight="700" fill="#0f172a">claude-hub · 系统架构</text>
+  <text x="48" y="78" class="sub">浏览器里的多会话 AI 编码任务中心 —— 执行永远在本机，界面只是遥控器</text>
+
+  <!-- ============ 1 用户入口 ============ -->
+  <rect x="48" y="104" width="1504" height="96" class="lay"/>
+  <text x="68" y="130" class="ttl">① 使用者</text>
+
+  <rect x="240" y="118" width="300" height="64" class="chip" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="264" y="145" class="ctxt">本机浏览器</text>
+  <text x="264" y="167" class="ctxs">http://localhost:8970（默认只听 127.0.0.1）</text>
+
+  <rect x="570" y="118" width="300" height="64" class="chip" fill="#eff6ff" stroke="#93c5fd"/>
+  <text x="594" y="145" class="ctxt">局域网浏览器</text>
+  <text x="594" y="167" class="ctxs">设置里显式开启后绑定 0.0.0.0</text>
+
+  <rect x="900" y="118" width="330" height="64" class="chip" fill="#fef3c7" stroke="#fcd34d"/>
+  <text x="924" y="145" class="ctxt">远程浏览器（可选）</text>
+  <text x="924" y="167" class="ctxs">经 claude_relay 中继，多台机器统一入口</text>
+
+  <!-- ============ 2 远程中继 ============ -->
+  <rect x="900" y="222" width="652" height="92" class="lay" fill="#fffbeb" stroke="#fcd34d"/>
+  <text x="920" y="248" class="ttl">② claude_relay · 可选中继</text>
+  <text x="920" y="272" class="ctxs">云端 relay = 在线名册 + 双向转发；各本机 agent 主动外连建反向隧道（无需公网 IP）</text>
+  <text x="920" y="294" class="ctxs">口令门禁 + 防爆破锁定 · 零侵入：不改 hub 一行，浏览器看到的就是原版界面</text>
+
+  <!-- ============ 3 前端层 ============ -->
+  <rect x="48" y="222" width="820" height="228" class="lay"/>
+  <text x="68" y="248" class="ttl">③ 前端（静态文件，零构建）</text>
+  <text x="68" y="270" class="sub">只负责渲染与发请求，不含任何业务判断；改完刷新即生效</text>
+
+  <rect x="68" y="286" width="180" height="52" class="chip" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="84" y="308" class="ctxt">会话列表 / 搜索</text><text x="84" y="326" class="ctxs">跨目录工作台视图</text>
+
+  <rect x="262" y="286" width="180" height="52" class="chip" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="278" y="308" class="ctxt">对话与任务队列</text><text x="278" y="326" class="ctxs">排队 / 暂停 / 停止</text>
+
+  <rect x="456" y="286" width="180" height="52" class="chip" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="472" y="308" class="ctxt">全过程回看</text><text x="472" y="326" class="ctxs">思考 / 工具 / 耗时</text>
+
+  <rect x="650" y="286" width="198" height="52" class="chip" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="666" y="308" class="ctxt">文件管理器</text><text x="666" y="326" class="ctxs">浏览 / 预览 / 编辑</text>
+
+  <rect x="68" y="350" width="180" height="52" class="chip" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="84" y="372" class="ctxt">设置面板</text><text x="84" y="390" class="ctxs">引擎 / 模型 / 环境</text>
+
+  <rect x="262" y="350" width="180" height="52" class="chip" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="278" y="372" class="ctxt">新手引导</text><text x="278" y="390" class="ctxs">装引擎 → 设口令</text>
+
+  <rect x="456" y="350" width="180" height="52" class="chip" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="472" y="372" class="ctxt">失败可见卡片</text><text x="472" y="390" class="ctxs">错误 / 卡住告警</text>
+
+  <rect x="650" y="350" width="198" height="52" class="chip" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="666" y="372" class="ctxt">国际化 / 主题</text><text x="666" y="390" class="ctxs">中英双语 · 多套皮肤</text>
+
+  <text x="68" y="428" class="ctxs">CSS 全部独立成文件 · 文案集中在语言表 · 图表数据块由前端自动渲染</text>
+
+  <!-- ============ 4 传输 ============ -->
+  <rect x="48" y="472" width="1504" height="72" class="lay" fill="#f0fdfa" stroke="#5eead4"/>
+  <text x="68" y="500" class="ttl">④ 传输：HTTP REST + WebSocket（同一端口 8970）</text>
+  <text x="68" y="526" class="ctxs">请求走 REST（约定式命名 /api/&lt;模块&gt;/&lt;动作&gt;）· 引擎的实时输出、任务状态、告警走 WebSocket 单向推送</text>
+
+  <!-- ============ 5 接入层 ============ -->
+  <rect x="48" y="566" width="1504" height="76" class="lay"/>
+  <text x="68" y="594" class="ttl">⑤ 接入层 Server</text>
+  <text x="68" y="620" class="ctxs">口令鉴权中间件（未设口令时只放行引导白名单） → 路由分发 → 托管静态前端 · 只做转发，不写业务</text>
+
+  <!-- ============ 6 调度层 ============ -->
+  <rect x="48" y="664" width="1504" height="266" class="lay" fill="#f5f3ff" stroke="#c4b5fd"/>
+  <text x="68" y="692" class="ttl">⑥ 调度层 logic_struct —— 只写"做什么"（骨架 + 依赖顺序）</text>
+
+  <text x="68" y="722" class="grp">会话与任务</text>
+  <rect x="68" y="732" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="84" y="751" class="ctxt">SessionManager</text><text x="84" y="769" class="ctxs">列表 / 搜索 / 置顶 / 草稿 / 引擎归属</text>
+  <rect x="68" y="786" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="84" y="805" class="ctxt">TaskQueue</text><text x="84" y="823" class="ctxs">排队 · 顺序执行 · 暂停/补充 · 重启恢复</text>
+  <rect x="68" y="840" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="84" y="859" class="ctxt">TraceStore</text><text x="84" y="877" class="ctxs">全过程轨迹：实时流 + 原生 jsonl 合并</text>
+
+  <text x="424" y="722" class="grp">引擎与模型</text>
+  <rect x="424" y="732" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="440" y="751" class="ctxt">ClaudeRunner / CodexRunner</text><text x="440" y="769" class="ctxs">跑一个任务、流式解析、诊断收尾</text>
+  <rect x="424" y="786" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="440" y="805" class="ctxt">EngineConfig / ModelManager</text><text x="440" y="823" class="ctxs">服务商切换 · 模型实测探测与选定</text>
+  <rect x="424" y="840" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="440" y="859" class="ctxt">CommandRunner / KimiProxy</text><text x="440" y="877" class="ctxs">斜杠命令 · 协议转译代理</text>
+
+  <text x="780" y="722" class="grp">项目与文件</text>
+  <rect x="780" y="732" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="796" y="751" class="ctxt">RootManager</text><text x="796" y="769" class="ctxs">根目录登记 / 新建项目 / 备注与链接</text>
+  <rect x="780" y="786" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="796" y="805" class="ctxt">FileManager / FsBrowser / Uploader</text><text x="796" y="823" class="ctxs">越界防护下的浏览、读写、上传</text>
+  <rect x="780" y="840" width="330" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="796" y="859" class="ctxt">TemplateManager / ProjectPrompt / GitPusher</text><text x="796" y="877" class="ctxs">项目模板 · 预设提示词 · 一键推送</text>
+
+  <text x="1136" y="722" class="grp">环境与安全</text>
+  <rect x="1136" y="732" width="396" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="1152" y="751" class="ctxt">Toolchain</text><text x="1152" y="769" class="ctxs">node/git/claude/codex：有没有、用哪份、怎么装</text>
+  <rect x="1136" y="786" width="396" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="1152" y="805" class="ctxt">EngineStatus / EngineUpdater</text><text x="1152" y="823" class="ctxs">引擎体检 · npm 全局安装（源竞速）</text>
+  <rect x="1136" y="840" width="396" height="46" class="chip" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="1152" y="859" class="ctxt">AuthManager / Settings</text><text x="1152" y="877" class="ctxs">口令（盐+哈希）· 全局设置持久化</text>
+
+  <text x="68" y="912" class="ctxs">每个骨架方法 5–10 行，配一段"谁提供什么"的注释 —— 不打开任何实现文件也能读懂整个功能</text>
+
+  <!-- ============ 7 实现层 ============ -->
+  <rect x="48" y="952" width="740" height="88" class="lay" fill="#ecfdf5" stroke="#6ee7b7"/>
+  <text x="68" y="980" class="ttl">⑦ 实现层 logic_realize —— 只写"怎么做"</text>
+  <text x="68" y="1004" class="ctxs">继承同名骨架，逐个填充被标记为"未实现"的钩子：解析、循环、错误处理、内部状态、真实 IO</text>
+  <text x="68" y="1024" class="ctxs">铁律：不新增对外接口、不写调度顺序 —— 换实现不动骨架，改骨架不碰实现</text>
+
+  <rect x="812" y="952" width="740" height="88" class="lay" fill="#fff7ed" stroke="#fdba74"/>
+  <text x="832" y="980" class="ttl">⑧ 基础设施 helper / config / models</text>
+  <text x="832" y="1004" class="ctxs">helper：与业务无关的纯工具（进程、路径、存储、哈希、日志、错误、事件总线、源竞速…）</text>
+  <text x="832" y="1024" class="ctxs">config：会变的值（端口、超时、命令白名单、模板）· models：纯类型与实体，无逻辑</text>
+
+  <!-- ============ 9 外部世界 ============ -->
+  <rect x="48" y="1062" width="1504" height="150" class="lay" fill="#f1f5f9" stroke="#94a3b8"/>
+  <text x="68" y="1090" class="ttl">⑨ 外部世界（真正干活与真正存数据的地方）</text>
+
+  <rect x="68" y="1104" width="270" height="46" class="chip" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="84" y="1123" class="ctxt">claude / codex CLI 子进程</text><text x="84" y="1141" class="ctxs">在项目目录内执行，流式吐事件</text>
+
+  <rect x="352" y="1104" width="270" height="46" class="chip" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="368" y="1123" class="ctxt">~/.claude · ~/.codex</text><text x="368" y="1141" class="ctxs">会话原始记录 = 唯一数据源</text>
+
+  <rect x="636" y="1104" width="270" height="46" class="chip" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="652" y="1123" class="ctxt">data/</text><text x="652" y="1141" class="ctxs">口令、设置、密钥、轨迹、日志</text>
+
+  <rect x="920" y="1104" width="270" height="46" class="chip" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="936" y="1123" class="ctxt">out_end/</text><text x="936" y="1141" class="ctxs">内置便携 Node / Git</text>
+
+  <rect x="1204" y="1104" width="328" height="46" class="chip" fill="#ffffff" stroke="#94a3b8"/>
+  <text x="1220" y="1123" class="ctxt">npm 源 · 各模型服务商 API</text><text x="1220" y="1141" class="ctxs">安装源实测竞速，不靠地区猜</text>
+
+  <text x="68" y="1184" class="note">■ 你的代码、你的密钥、你的会话记录，全程不离开本机；服务端只有本机这一台。</text>
+
+  <!-- 连线 -->
+  <path class="flow" d="M 458 200 L 458 222"/>
+  <path class="flow" d="M 1065 200 L 1065 222"/>
+  <path class="flow" d="M 1226 314 L 1226 472"/>
+  <path class="flow" d="M 458 450 L 458 472"/>
+  <path class="flow" d="M 458 544 L 458 566"/>
+  <path class="flow" d="M 458 642 L 458 664"/>
+  <path class="flow" d="M 418 930 L 418 952"/>
+  <path class="flow" d="M 1182 930 L 1182 952"/>
+  <path class="flow" d="M 418 1040 L 418 1062"/>
+  <path class="flow2" d="M 240 1062 L 240 1040"/>
+  <text x="252" y="1056" class="note">事件回流 → WebSocket → 界面</text>
+</svg>

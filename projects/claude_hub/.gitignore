@@ -1,0 +1,8 @@
+node_modules/
+backend/dist/
+data/sessions/*.json
+data/roots.json
+data/logs/
+*.log
+*.tmp
+data/traces/

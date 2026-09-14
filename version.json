@@ -1,0 +1,10 @@
+{
+  "version": "2.1.2",
+  "minVersion": "2.0.0",
+  "force": true,
+  "releasedAt": "2026-09-10",
+  "notesI18n": {
+    "zh": "· 有无新版本改为只看 version.json，已是最新时不再出现「拉取更新并重启」\n· 本次为强制更新演示版本",
+    "en": "· Update detection now relies solely on version.json; no stale \"pull & restart\" when already current\n· This release is marked mandatory as a demonstration"
+  }
+}

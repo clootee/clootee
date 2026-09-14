@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>xfeixie-assistant · 一行代码给网页加个 AI 小助手</title>
+<link rel="icon" href="../favicon.ico?v=20260820c" sizes="any" />
+<link rel="icon" type="image/svg+xml" href="../favicon.svg?v=20260820c" />
+<link rel="apple-touch-icon" href="../apple-touch-icon.png?v=20260820c" />
+<style>
+  :root{--bg:#0f1115;--fg:#e6e8ec;--mut:#8b93a3;--ac:#5b8cff;--pan:#171a21;--bd:#2a2f3a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-size:15px;line-height:1.8;
+    font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  main{max-width:760px;margin:0 auto;padding:48px 24px 120px}
+  h1{font-size:28px;margin:0 0 8px}
+  .sub{color:var(--mut);margin:0 0 32px}
+  h2{font-size:19px;margin:36px 0 12px;padding-top:20px;border-top:1px solid var(--bd)}
+  p{margin:0 0 12px}
+  ul{padding-left:22px;margin:0 0 12px}
+  li{margin-bottom:5px}
+  b{color:var(--ac)}
+  code{background:#0b0d11;border:1px solid var(--bd);border-radius:5px;padding:1px 5px;
+    font-family:Consolas,Menlo,monospace;font-size:13px}
+  pre{background:#0b0d11;border:1px solid var(--bd);border-radius:9px;padding:14px 16px;
+    overflow-x:auto;font-family:Consolas,Menlo,monospace;font-size:13px;line-height:1.6}
+  pre code{background:none;border:none;padding:0}
+  .tip{border-left:3px solid var(--ac);background:var(--pan);border-radius:0 9px 9px 0;padding:12px 16px;margin:0 0 14px}
+  a{color:var(--ac)}
+  .foot{color:var(--mut);font-size:13px;margin-top:40px}
+</style>
+</head>
+<body>
+<main>
+  <h1>xfeixie-assistant</h1>
+  <p class="sub">一行代码，给任意网页加一个能看懂这一页的 AI 小助手。单文件 · 零依赖 · 不需要后端。</p>
+
+  <div class="tip">
+    <b>这一页自己就装着它。</b>看右上角 —— 点开就能用。
+    随便选中本页的一段文字，会浮出「问小助手」。
+  </div>
+
+  <h2>怎么用</h2>
+  <p>在你的网页 <code>&lt;/body&gt;</code> 之前加这一行，完事：</p>
+  <pre><code>&lt;script src="https://learn.xfeixie.com/assist/assistant.js"&gt;&lt;/script&gt;</code></pre>
+  <p>不需要写 HTML 容器，不需要引 CSS，不需要初始化代码。</p>
+
+  <h2>它能做什么</h2>
+  <ul>
+    <li>固定在右侧，可收起展开</li>
+    <li>使用者自己填 <b>MiniMax API Key</b>，只存在他自己的浏览器里</li>
+    <li>多轮对话，支持<b>新建会话 / 切换 / 删除</b></li>
+    <li><b>能看见整个网页</b>：提问时自动把本页正文一起发给模型</li>
+    <li><b>划词提问</b>：选中任意文字 → 浮出按钮 → 那段话作为引用一起发出</li>
+    <li>20 轮红字提醒换会话，40 轮锁定输入（每轮都要重发全部历史，越聊越贵）</li>
+  </ul>
+
+  <h2>配置（可选）</h2>
+  <pre><code>&lt;script&gt;
+  window.XFAssistant = {
+    title:   '学习小助手',
+    subject: 'GEO 搜索引擎优化',   // 本页主题，回答更贴题
+    lang:    'zh',                // zh / en，不填跟随浏览器
+    accent:  '#5b8cff'
+  };
+&lt;/script&gt;
+&lt;script src="https://learn.xfeixie.com/assist/assistant.js"&gt;&lt;/script&gt;</code></pre>
+
+  <h2>要发给别人 / 要能双击打开</h2>
+  <p>把 <a href="./assistant.js" download>assistant.js</a> 下载到教程 HTML 旁边，改成相对路径：</p>
+  <pre><code>&lt;script src="./assistant.js"&gt;&lt;/script&gt;</code></pre>
+  <p>这样整个教程就是一个能随便拷贝的文件夹，断网也打得开（只有提问那一步需要联网）。</p>
+
+  <h2>给 AI 看的文档</h2>
+  <p>如果你在用 Claude Code / Codex 这类 AI 生成教程，把这个地址给它读：</p>
+  <pre><code>https://learn.xfeixie.com/assist/docs.md</code></pre>
+  <p>它会知道怎么正确接入，不会自己再造一个聊天窗。</p>
+
+  <h2>隐私</h2>
+  <ul>
+    <li>Key 只存在使用者浏览器的 localStorage</li>
+    <li>请求由浏览器<b>直接发给 MiniMax</b>，不经过本站或任何中间服务器</li>
+    <li>会话记录也只在浏览器本地，每个页面路径各存各的</li>
+  </ul>
+
+  <p class="foot">领 MiniMax Key：<a href="https://platform.minimaxi.com/console/plan" target="_blank" rel="noreferrer">platform.minimaxi.com/console/plan</a></p>
+</main>
+
+<script>window.XFAssistant = { subject: 'xfeixie-assistant 组件本身的接入方式' };</script>
+<script src="./assistant.js"></script>
+</body>
+</html>

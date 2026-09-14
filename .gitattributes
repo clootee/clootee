@@ -1,0 +1,9 @@
+# Windows 批处理必须是 CRLF：cmd.exe 对 LF-only 的 .bat 会按字节偏移错读，
+# 表现为「执行了长行的一半」这种莫名其妙的报错（踩过一次，别再改回去）。
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# shell 脚本必须是 LF，否则 Linux/macOS 上报 `\r: command not found`
+*.sh text eol=lf
+# macOS 双击入口本质就是 bash 脚本，同样必须 LF
+*.command text eol=lf

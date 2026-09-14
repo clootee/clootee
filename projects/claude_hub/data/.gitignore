@@ -1,0 +1,12 @@
+# 本地/每机独有的密钥与状态，不入库（新安装应各自首启设定）
+auth.json
+engines.json
+codex.json
+
+# 本机会话/设置状态：含本地会话 id 与个人 systemPrompt，不入库
+session_meta.json
+settings.json
+*.xlsx
+
+# 会话/任务队列持久化：含每个会话的真实 prompt 内容（密码/业务数据），不入库
+queue_state.json
