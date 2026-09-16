@@ -213,6 +213,7 @@ function applyText() {
   refreshComposerControls();
   $('uploadBtn').title = T('uploadFile');
   $('attachPvClose').textContent = T('attachClose');
+  $('upCancelBtn').textContent = T('uploadCancel');
   renderAttachBar();
   $('shotBtn').title = T('screenshot');
   $('cmdMenuBtn').title = T('cmdMenuBtn');
@@ -3305,6 +3306,57 @@ function stopCmdProgress() {
   $('cmdProgress').hidden = true;
 }
 
+// ── 上传进度遮罩（全局挡住，可随时取消） ──
+const Upload = { xhr: null, canceled: false };
+function showUpProgress(total) {
+  Upload.canceled = false;
+  $('upTitle').textContent = T('uploading');
+  $('upCancelBtn').textContent = T('uploadCancel');
+  $('upOverlay').hidden = false;
+  setUpProgress(0, '', 0, total);
+}
+function setUpProgress(pct, name, idx, total) {
+  const v = Math.max(0, Math.min(100, Math.round(pct)));
+  $('upBarFill').style.width = v + '%';
+  $('upPct').textContent = v + '%';
+  $('upName').textContent = name || '';
+  $('upCount').textContent = total > 1 ? (idx + 1) + ' / ' + total : '';
+}
+function hideUpProgress() {
+  $('upOverlay').hidden = true;
+  Upload.xhr = null;
+}
+function cancelUpload() {
+  Upload.canceled = true;
+  if (Upload.xhr) { try { Upload.xhr.abort(); } catch (e) {} }
+  hideUpProgress();
+}
+// 单个文件上传：用 XHR 才能拿到 upload.onprogress（fetch 拿不到上传进度）
+function uploadOne(file, fname, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    Upload.xhr = xhr;
+    xhr.open(
+      'POST',
+      '/api/session/upload?id=' + encodeURIComponent(State.sessionId) +
+        '&name=' + encodeURIComponent(fname),
+    );
+    xhr.setRequestHeader('x-auth-token', TOKEN);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total * 100);
+    };
+    xhr.onload = () => {
+      let json = null;
+      try { json = JSON.parse(xhr.responseText); } catch (e) {}
+      if (!json || !json.success) reject(new Error((json && json.error) || ('HTTP ' + xhr.status)));
+      else resolve(json.data);
+    };
+    xhr.onerror = () => reject(new Error('network error'));
+    xhr.onabort = () => reject(new Error('__canceled__'));
+    xhr.send(file);
+  });
+}
+
 // ── 上传文件到 <会话根目录>/tmp/ ──
 async function uploadFiles(files) {
   if (!files || !files.length) return;
@@ -3320,23 +3372,26 @@ async function uploadFiles(files) {
   }
   const ta = $('taskInput');
   const names = [];
-  for (const file of files) {
+  const list = Array.prototype.slice.call(files);
+  showUpProgress(list.length);
+  for (let i = 0; i < list.length; i++) {
+    if (Upload.canceled) break;
+    const file = list[i];
+    // 粘贴/截屏的图片可能没有文件名，补一个带时间戳的默认名（扩展名取自 MIME）
+    const fname = file.name || ('pasted-' + Date.now() + '.' + ((file.type && file.type.split('/')[1]) || 'png'));
+    setUpProgress(0, fname, i, list.length);
     try {
-      // 粘贴/截屏的图片可能没有文件名，补一个带时间戳的默认名（扩展名取自 MIME）
-      const fname = file.name || ('pasted-' + Date.now() + '.' + ((file.type && file.type.split('/')[1]) || 'png'));
-      const res = await fetch(
-        '/api/session/upload?id=' + encodeURIComponent(State.sessionId) +
-          '&name=' + encodeURIComponent(fname),
-        { method: 'POST', headers: { 'x-auth-token': TOKEN }, body: file },
-      );
-      const json = await res.json();
-      if (!json.success) throw new Error(json.error || 'upload failed');
-      names.push(json.data.rel);
-      attachAdd(json.data.rel, file);
+      const data = await uploadOne(file, fname, (pct) => setUpProgress(pct, fname, i, list.length));
+      names.push(data.rel);
+      attachAdd(data.rel, file);
     } catch (e) {
-      alert(T('uploadFailed') + ': ' + (e && e.message ? e.message : file.name));
+      const msg = e && e.message ? e.message : fname;
+      if (msg === '__canceled__' || Upload.canceled) break;
+      hideUpProgress();
+      alert(T('uploadFailed') + ': ' + msg);
     }
   }
+  hideUpProgress();
   if (names.length) {
     // 不再把路径塞进输入框：挂到输入框上方的附件区，发送时才拼进正文
     renderAttachBar();
@@ -6202,6 +6257,7 @@ function bind() {
   // 拖拽 / 粘贴 / 截屏
   initDragUpload();
   $('taskInput').addEventListener('paste', onPasteImage);
+  $('upCancelBtn').addEventListener('click', cancelUpload);
   $('attachPvClose').addEventListener('click', closeAttachPreview);
   $('attachOverlay').addEventListener('click', (e) => { if (e.target === $('attachOverlay')) closeAttachPreview(); });
   $('shotBtn').addEventListener('click', captureScreenshot);

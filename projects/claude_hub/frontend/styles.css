@@ -2974,6 +2974,26 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .attach-info { font-size: 12px; opacity: .8; white-space: pre-wrap; word-break: break-all; align-self: stretch; }
 .attach-foot { display: flex; justify-content: flex-end; }
 
+/* ── 上传进度遮罩 ── */
+.up-overlay {
+  position: fixed; inset: 0; z-index: 120; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+  backdrop-filter: blur(2px);
+}
+.up-overlay[hidden] { display: none; }
+.up-modal {
+  width: min(420px, calc(100vw - 32px)); padding: 18px 18px 14px;
+  border-radius: 12px; background: var(--panel, #1e1e1e); color: inherit;
+  border: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 10px 40px rgba(0,0,0,.35);
+}
+.up-title { font-weight: 600; font-size: 14px; }
+.up-name { font-size: 12px; opacity: .75; word-break: break-all; min-height: 16px; }
+.up-bar { height: 8px; border-radius: 6px; overflow: hidden; background: var(--panel-2, rgba(127,127,127,.18)); }
+.up-bar-fill { height: 100%; width: 0%; border-radius: 6px; background: var(--accent, #4c8dff); transition: width .15s ease; }
+.up-meta { display: flex; justify-content: space-between; font-size: 11px; opacity: .7; }
+.up-foot { display: flex; justify-content: flex-end; }
+
 /* ── 新版本弹窗 ── */
 .upd-card { max-width: 520px; width: min(520px, calc(100vw - 32px)); }
 .upd-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
