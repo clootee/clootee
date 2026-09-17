@@ -7,7 +7,7 @@ import { Logger } from '../helper/Logger';
 import { EventBus } from '../helper/EventBus';
 import { AppConfig } from '../config/AppConfig';
 import { SessionMeta } from '../logic_realize/SessionMeta';
-import { SessionStatus } from './SessionMetaStruct';
+import { SessionStatus, SessionMetaEntry } from './SessionMetaStruct';
 import { Session, Task, Message, Engine, SessionSearchHit } from '../models/Types';
 
 export class SessionManagerStruct {
@@ -123,30 +123,51 @@ export class SessionManagerStruct {
     return this.getSession(id);
   }
 
-  // 收藏夹：遍历 meta 里被收藏的键。同一会话的草稿键与自然键可能都留有记录（历史数据），
-  // 故按规范键去重，且优先保留自然 id 那条，避免同一个会话在列表里出现两遍。
+  // 收藏夹：遍历 meta 里被收藏的键（去重与排序细节见 _listMetaSessions）。
   static listFavoriteSessions(): Session[] {
+    return this._listMetaSessions((e) => !!e.favorite, (e) => e.favoriteAt || 0);
+  }
+
+  // 「全部目录」视图：只列出带索引标记的会话（本版本起新建的会话在创建时打标）。
+  // 与收藏夹同一条路径 —— 读 meta 键即可，不必逐目录扫 jsonl，所以目录再多也不慢。
+  static listIndexedSessions(): Session[] {
+    return this._listMetaSessions((e) => !!e.indexed, (e) => e.indexedAt || 0);
+  }
+
+  // 按 meta 标记挑会话的公共路径（收藏夹 / 全部目录共用）。
+  // 同一会话的草稿键与自然键可能都留有记录（历史数据），故按规范键去重，
+  // 且优先保留自然 id 那条，避免同一个会话在列表里出现两遍。
+  private static _listMetaSessions(
+    pick: (e: SessionMetaEntry) => boolean,
+    at: (e: SessionMetaEntry) => number,
+  ): Session[] {
     const meta = SessionMeta.getAll();
     const ids = Object.keys(meta)
-      .filter((k) => meta[k].favorite)
+      .filter((k) => pick(meta[k]))
       .sort((a, b) => Number(a.includes(':draft-')) - Number(b.includes(':draft-')));
     const out: Session[] = [];
     const seen = new Set<string>();
-    const favAt = new Map<string, number>(); // 行 id → 收藏时间（行 id 可能被改写成草稿 id，不能再按 meta[s.id] 查）
+    const markAt = new Map<string, number>(); // 行 id → 打标时间（行 id 可能被改写成草稿 id，不能再按 meta[s.id] 查）
     for (const id of ids) {
-      const s = this._getSessionSafe(id); // 会话已删/根目录不可达 → 跳过这条陈旧收藏
+      const s = this._getSessionSafe(id); // 会话已删/根目录不可达 → 跳过这条陈旧标记
       if (!s) continue;
       const key = this._canonicalKey(s);
       if (seen.has(key)) continue;
       seen.add(key);
       const row = { ...s, id: this._listId(s) };
-      favAt.set(row.id, meta[id]?.favoriteAt || row.updatedAt);
+      markAt.set(row.id, at(meta[id]) || row.updatedAt);
       out.push(row);
     }
     return out.sort((a, b) => {
       if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-      return (favAt.get(b.id) || b.updatedAt) - (favAt.get(a.id) || a.updatedAt);
+      return (markAt.get(b.id) || b.updatedAt) - (markAt.get(a.id) || a.updatedAt);
     });
+  }
+
+  // 给会话打上「全部目录」索引标记（新建会话时调用；已标记的保持首次时间不变）
+  static markIndexed(id: string): void {
+    if (!id) throw new Error(`markIndexed: invalid id=${id}`);
+    SessionMeta.setIndexed(this._canonicalKey(this.getSession(id)), Date.now());
   }
 
   static setFavorite(id: string, favorite: boolean): Session {
@@ -188,6 +209,7 @@ export class SessionManagerStruct {
       source: 'empty', // 草稿尚无对话
     };
     this._put(session);
+    this.markIndexed(session.id); // 本版本起：新会话建立之初就进索引，「全部目录」视图据此取数
     // 前端会话列表靠这个事件才知道"多了一个会话"（不是改已有会话状态那种 'session' 广播场景，
     // 比如原会话已删、外部推送兜底新建的场景，用户不刷新页面也得看见）
     EventBus.broadcast({ kind: 'session', session });

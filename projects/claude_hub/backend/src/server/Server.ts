@@ -388,6 +388,10 @@ export class Server {
     app.get('/api/session/list-favorites', (_req, res) =>
       this._wrap(res, 'session.listFavorites', () => SessionManager.listFavoriteSessions()),
     );
+    // 「全部目录」视图：只取带索引标记的会话（本版本起新建即打标），不逐目录扫盘
+    app.get('/api/session/list-indexed', (_req, res) =>
+      this._wrap(res, 'session.listIndexed', () => SessionManager.listIndexedSessions()),
+    );
     app.post('/api/session/create', (req, res) =>
       this._wrap(res, 'session.create', () =>
         SessionManager.createSession(req.body.rootId, req.body.name, req.body.engine),

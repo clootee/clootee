@@ -8,6 +8,8 @@ export interface SessionMetaEntry {
   pinnedAt: number;
   favorite?: boolean;
   favoriteAt?: number;
+  indexed?: boolean;       // 「全部目录」索引标记：本版本起新建的会话在创建时打上，避免全盘扫描
+  indexedAt?: number;      // 打标时间（列表按它倒序兜底）
   status: SessionStatus;
   customTitle?: string;
 }
@@ -43,6 +45,19 @@ export class SessionMetaStruct {
     const entry = all[id] || this._blank();
     entry.favorite = favorite;
     entry.favoriteAt = favorite ? Date.now() : 0;
+    all[id] = entry;
+    this._write(all);
+  }
+
+  // 建立「全部目录」索引标记。已标记过的不覆盖时间（保留首次建立索引的时刻）。
+  static setIndexed(id: string, at: number): void {
+    if (!id) throw new Error(`setIndexed: invalid id=${id}`);
+    if (!at || at <= 0) throw new Error(`setIndexed: invalid at=${at}`);
+    const all = this._read();
+    const entry = all[id] || this._blank();
+    if (entry.indexed && entry.indexedAt) return;
+    entry.indexed = true;
+    entry.indexedAt = at;
     all[id] = entry;
     this._write(all);
   }
@@ -92,8 +107,14 @@ export class SessionMetaStruct {
     return true;
   }
 
+  // 两个时间戳取「较早的非零值」；都为空则 0（索引时间代表首次建立索引的时刻，合并时不应变晚）
+  private static _earliest(a?: number, b?: number): number {
+    const list = [a, b].filter((n): n is number => !!n && n > 0);
+    return list.length ? Math.min(...list) : 0;
+  }
+
   private static _blank(): SessionMetaEntry {
-    return { pinned: false, pinnedAt: 0, favorite: false, favoriteAt: 0, status: 'active' };
+    return { pinned: false, pinnedAt: 0, favorite: false, favoriteAt: 0, indexed: false, indexedAt: 0, status: 'active' };
   }
 
   private static _merge(
@@ -108,6 +129,8 @@ export class SessionMetaStruct {
       favoriteAt: Math.max(base.favoriteAt || 0, incoming.favoriteAt || 0),
       pinned: !!base.pinned || !!incoming.pinned,
       pinnedAt: Math.max(base.pinnedAt || 0, incoming.pinnedAt || 0),
+      indexed: !!base.indexed || !!incoming.indexed,
+      indexedAt: this._earliest(base.indexedAt, incoming.indexedAt),
       status: incoming.status || base.status || 'active',
       customTitle: incoming.customTitle || base.customTitle,
     };

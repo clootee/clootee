@@ -13,8 +13,11 @@ const State = {
   tab: 'active',                          // 会话列表筛选：active / testing / completed / all
   runFilters: new Set(),                  // 运行状态筛选（与 tab 叠加）：可同时含 running / justFinished（并集）；空集=「所有」
   mode: 'classic',                       // 模式切换已下线，固定经典模式
-  favoritesOnly: sessionStorage.getItem('favoritesOnly') === '1', // 刷新后保持收藏夹视图（与 rootId 同用 sessionStorage）
-  favoriteSessions: [],
+  // 会话列表视图：single=单目录 / favorites=收藏夹 / all=全部目录（只列已建索引的会话）。
+  // 刷新后保持（与 rootId 同用 sessionStorage）；'favoritesOnly' 是它的派生只读属性（见下方 defineProperty），
+  // 含义为「跨目录视图」——收藏夹与全部目录共用同一套列表/草稿/目录筛选逻辑，只是数据源不同。
+  listMode: readListMode(),
+  favoriteSessions: [],   // 跨目录视图的列表缓存（收藏夹或全部目录，取决于 listMode）
   favoriteCacheReady: false,
   favoriteRootBindingDraftId: '',
   rootRecent: {},
@@ -28,6 +31,18 @@ const State = {
   noticeOpen: false,                      // 右下角错误小圆圈是否已展开
   updateInfo: null,                       // 最近一次软件更新检测结果（/api/update/check 的返回值）
 };
+// 兼容旧的 sessionStorage 键：老版本只有收藏夹开关 favoritesOnly=1
+function readListMode() {
+  const m = sessionStorage.getItem('listMode');
+  if (m === 'single' || m === 'favorites' || m === 'all') return m;
+  return sessionStorage.getItem('favoritesOnly') === '1' ? 'favorites' : 'single';
+}
+// favoritesOnly = 「跨目录视图」派生值，只读。切换视图一律走 setListMode。
+Object.defineProperty(State, 'favoritesOnly', {
+  get() { return State.listMode !== 'single'; },
+  enumerable: true,
+});
+
 let NOTICE_SEQ = 0;                       // 提示卡片自增 id：数组下标会随裁剪变动，不能当 key
 
 // 工作台模式：不按左上角根目录过滤，而是跨全部目录合并会话，每个会话自带目录。
@@ -67,11 +82,27 @@ function setTabRootId(rootId) {
   else sessionStorage.removeItem('rootId');
 }
 
-// 收藏夹视图开关：持久化到 sessionStorage，刷新页面后仍停留在收藏夹
+// 列表视图切换：持久化到 sessionStorage，刷新页面后仍停留在同一视图
+function setListMode(mode) {
+  const next = mode === 'favorites' || mode === 'all' ? mode : 'single';
+  if (State.listMode !== next) State.favoriteSessions = []; // 换数据源：旧缓存（含草稿）一律作废
+  State.listMode = next;
+  sessionStorage.setItem('listMode', next);
+  sessionStorage.removeItem('favoritesOnly'); // 旧键不再使用
+  resetSessionPage();
+}
 function setFavoritesOnly(on) {
-  State.favoritesOnly = !!on;
-  if (State.favoritesOnly) sessionStorage.setItem('favoritesOnly', '1');
-  else sessionStorage.removeItem('favoritesOnly');
+  setListMode(on ? 'favorites' : 'single');
+}
+// 当前跨目录视图对应的后端接口与文案
+function listModeApi() {
+  return State.listMode === 'all' ? '/api/session/list-indexed' : '/api/session/list-favorites';
+}
+function listModeLabelKey() {
+  return State.listMode === 'all' ? 'allSessionsFolder' : State.listMode === 'favorites' ? 'favoritesFolder' : 'sessions';
+}
+function listModeIcon(mode) {
+  return mode === 'all' ? '🗂' : mode === 'favorites' ? '★' : '📁';
 }
 
 // 引擎显示名
@@ -176,7 +207,14 @@ function applyText() {
   $('wsDirCreateLabel').textContent = T('wsCreateIfMissing');
   $('wsDirUse').textContent = T('wsUseDir');
   $('searchToggleBtn').title = T('search');
-  $('favoritesToggleBtn').title = T('favoritesFolder');
+  $('favoritesToggleBtn').title = T('listModeTitle');
+  $('listModeMenuTitle').textContent = T('listModeTitle');
+  $('lmmSingle').textContent = T('listModeSingle');
+  $('lmmSingleHint').textContent = T('listModeSingleHint');
+  $('lmmFav').textContent = T('listModeFavorites');
+  $('lmmFavHint').textContent = T('listModeFavoritesHint');
+  $('lmmAll').textContent = T('listModeAll');
+  $('lmmAllHint').textContent = T('listModeAllHint');
   $('sessionSearch').placeholder = T('searchSessions');
   $('advSearchLabel').textContent = T('advancedSearch');
   $('tabActiveBtn').textContent = T('tabActive');
@@ -1299,12 +1337,29 @@ async function refreshFavoriteSessions(renderAfter = false) {
 
 async function loadFavoriteSessions() {
   const drafts = State.favoriteSessions.filter((s) => isFavoriteDraftId(s.id));
-  const sessions = await api('/api/session/list-favorites');
+  const sessions = await api(listModeApi());
   State.favoriteSessions = sortSessionsForList([...drafts, ...sessions]);
   State.favoriteCacheReady = true;
   // 恢复的目录筛选可能已无对应收藏（取消收藏/删目录）→ 自动失效，避免列表看起来空
   if (FavDir.rootId && !State.favoriteSessions.some((s) => s.rootId === FavDir.rootId)) setFavDir('');
   return State.favoriteSessions;
+}
+
+// ── 会话列表分页：默认只渲染 20 条，滚到底自动追加 20 条 ──
+// 搜索时不分页（"搜索能搜到全部"），其余视图（单目录 / 收藏夹 / 全部目录）一律分页。
+const Page = { size: 20, shown: 20 };
+function resetSessionPage() {
+  Page.shown = Page.size;
+}
+function growSessionPage() {
+  Page.shown += Page.size;
+  renderSessions();
+}
+// 滚到距底部 80px 内就追加下一页（只在还有剩余时生效，renderSessions 会记下总数）
+function onSessionListScroll() {
+  const el = $('sessionList');
+  if (!el || !Page.more) return;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) growSessionPage();
 }
 
 // hits：后端全文搜索命中集（id→片段）。前端只加载当前会话正文，其余会话的全文命中全靠后端。
@@ -1365,6 +1420,7 @@ function updateSearchClear() {
 }
 function onSearchInput() {
   Search.query = $('sessionSearch').value.trim().toLowerCase();
+  resetSessionPage();
   updateSearchClear();
   scheduleFullTextSearch();
   renderSessions();
@@ -1383,8 +1439,11 @@ function onAdvToggle() {
   renderSessions();
 }
 
-async function toggleFavorites() {
-  setFavoritesOnly(!State.favoritesOnly);
+// 三态视图切换：单目录 / 收藏夹 / 全部目录（由星标按钮的下拉菜单调用）
+async function switchListMode(mode) {
+  closeListModeMenu();
+  if (State.listMode === mode) return;
+  setListMode(mode);
   setFavDir('');
   if (State.favoritesOnly) {
     State.sessions = await loadFavoriteSessions();
@@ -1402,12 +1461,41 @@ function syncFavoritesButton() {
   const btn = $('favoritesToggleBtn');
   if (!btn) return;
   document.body.classList.toggle('favorites-only', State.favoritesOnly);
+  document.body.classList.toggle('list-mode-all', State.listMode === 'all');
   btn.classList.toggle('active', State.favoritesOnly);
-  btn.textContent = State.favoritesOnly ? '←' : '☆';
-  btn.title = State.favoritesOnly ? T('backToSessions') : T('favoritesFolder');
-  $('sessionsLabel').textContent = State.favoritesOnly ? T('favoritesFolder') : T('sessions');
+  btn.textContent = listModeIcon(State.listMode); // 图标即当前模式，一眼看出在看哪一类列表
+  btn.title = T('listModeTitle') + '：' + T(listModeLabelKey());
+  $('sessionsLabel').textContent = T(listModeLabelKey());
+  document.querySelectorAll('.lmm-item').forEach((b) => {
+    b.classList.toggle('active', b.dataset.listmode === State.listMode);
+  });
   refreshNewSessionButton();
   renderWorkdirBar();
+}
+
+// ── 星标按钮的视图下拉菜单 ──
+function openListModeMenu() {
+  const m = $('listModeMenu');
+  if (!m) return;
+  m.hidden = false;
+  setTimeout(() => document.addEventListener('click', onListModeOutside), 0);
+}
+function closeListModeMenu() {
+  const m = $('listModeMenu');
+  if (!m || m.hidden) return;
+  m.hidden = true;
+  document.removeEventListener('click', onListModeOutside);
+}
+function onListModeOutside(e) {
+  if (e.target.closest && e.target.closest('.list-mode-wrap')) return;
+  closeListModeMenu();
+}
+function toggleListModeMenu(e) {
+  if (e) e.stopPropagation();
+  const m = $('listModeMenu');
+  if (!m) return;
+  if (m.hidden) openListModeMenu();
+  else closeListModeMenu();
 }
 
 function refreshNewSessionButton() {
@@ -1421,6 +1509,7 @@ const FavDir = { rootId: sessionStorage.getItem('favDirRootId') || '' };
 
 // 目录筛选同样持久化：刷新后仍停在原来那个目录下
 function setFavDir(rootId) {
+  resetSessionPage();
   FavDir.rootId = rootId || '';
   if (FavDir.rootId) sessionStorage.setItem('favDirRootId', FavDir.rootId);
   else sessionStorage.removeItem('favDirRootId');
@@ -1514,6 +1603,7 @@ function renderFavDirFilter() {
 // tab 切换：active(未完成) / completed(已完成) / all(全部)
 function switchTab(tab) {
   State.tab = tab;
+  resetSessionPage();
   document.querySelectorAll('.s-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   renderSessions();
 }
@@ -1538,6 +1628,7 @@ function runFilterEmptyKey() {
 
 // 运行状态筛选：running(执行中) / justFinished(刚执行) 可同时勾选（并集），点「所有」清空互斥
 function toggleRunFilter(key) {
+  resetSessionPage();
   if (key === 'all') State.runFilters.clear();
   else if (State.runFilters.has(key)) State.runFilters.delete(key);
   else State.runFilters.add(key);
@@ -1562,7 +1653,8 @@ function renderSessions() {
   syncFavoritesButton();
   renderFavDirFilter();
   if (State.sessions.length === 0) {
-    list.innerHTML = `<div class="empty">${T(State.favoritesOnly ? 'noFavoriteSessions' : 'noSessions')}</div>`;
+    list.innerHTML = `<div class="empty">${T(emptyListKey())}</div>`;
+    Page.more = 0;
     return;
   }
   const q = Search.query;
@@ -1586,10 +1678,15 @@ function renderSessions() {
   if (sessions.length === 0) {
     const emptyKeyByTab = { active: 'noActiveSessions', testing: 'noTestingSessions', completed: 'noCompletedSessions' };
     const emptyKey = q ? 'noSearchResults'
-      : (runFilterEmptyKey() || emptyKeyByTab[State.tab] || 'noSessions');
+      : (runFilterEmptyKey() || emptyKeyByTab[State.tab] || emptyListKey());
     list.innerHTML = `<div class="empty">${T(emptyKey)}</div>`;
+    Page.more = 0;
     return;
   }
+  // 分页：搜索时展示全部命中，否则只渲染前 Page.shown 条，剩下的滚到底再追加
+  const total = sessions.length;
+  if (!q && total > Page.shown) sessions = sessions.slice(0, Page.shown);
+  Page.more = total - sessions.length;
   list.innerHTML = '';
   sessions.forEach((s) => {
     const div = document.createElement('div');
@@ -1621,7 +1718,7 @@ function renderSessions() {
     const doneTag = status === 'completed' ? `<span class="done-tag">✓ ${escapeHtml(T('tabCompleted'))}</span>` : '';
     const testingTag = status === 'testing' ? `<span class="testing-tag">🧪 ${escapeHtml(T('testingTag'))}</span>` : '';
     // 引擎徽章（claude / codex）
-    const favoriteTag = s.favorite && !State.favoritesOnly ? `<span class="favorite-tag">★ ${escapeHtml(T('favoriteTag'))}</span>` : '';
+    const favoriteTag = s.favorite && State.listMode !== 'favorites' ? `<span class="favorite-tag">★ ${escapeHtml(T('favoriteTag'))}</span>` : '';
     const engBadge = `<span class="eng-badge eng-${s.engine === 'codex' ? 'codex' : 'claude'}" title="${escapeHtml(engineLabel(s.engine))}">${escapeHtml(engineShortLabel(s.engine))}</span>`;
     // 工作台模式：显示会话所属目录（根目录末段名）
     const dirNm = (isWorkspace() || State.favoritesOnly) ? rootName(s.rootId) : '';
@@ -1687,7 +1784,21 @@ function renderSessions() {
     });
     list.appendChild(div);
   });
+  if (Page.more > 0) {
+    const more = document.createElement('div');
+    more.className = 'session-more';
+    more.innerHTML = `<button type="button" class="sm">${escapeHtml(T('loadMoreSessions'))}</button>`
+      + `<span>${escapeHtml(T('sessionsShownOf').replace('{shown}', String(sessions.length)).replace('{total}', String(total)))}</span>`;
+    more.querySelector('button').addEventListener('click', growSessionPage);
+    list.appendChild(more);
+  }
   if (State.batchMode) refreshBatchBar();
+}
+
+// 列表整体为空时的文案：按当前视图区分（单目录 / 收藏夹 / 全部目录）
+function emptyListKey() {
+  return State.listMode === 'all' ? 'noAllSessions'
+    : State.listMode === 'favorites' ? 'noFavoriteSessions' : 'noSessions';
 }
 
 // 长按识别（触屏）：按住 500ms 且移动距离 < 10px 视为长按
@@ -1811,7 +1922,10 @@ async function ctxToggleFavorite() {
   const favorite = !s.favorite;
   closeSessionCtxMenu();
   State.sessions = State.sessions.map((x) => (x.id === s.id ? { ...x, favorite } : x));
-  if (favorite) {
+  // 只有收藏夹视图的成员集才随收藏与否增删；全部目录视图的成员集由索引决定，只改标记不动成员
+  if (State.listMode === 'all') {
+    State.favoriteSessions = State.favoriteSessions.map((x) => (x.id === s.id ? { ...x, favorite } : x));
+  } else if (favorite) {
     const next = { ...s, favorite };
     State.favoriteSessions = sortSessionsForList([
       ...State.favoriteSessions.filter((x) => x.id !== s.id),
@@ -1910,7 +2024,7 @@ function createFavoriteDraftSession(preferredRootId = '') {
     tasks: [],
     messages: [],
     source: 'empty',
-    favorite: true,
+    favorite: State.listMode === 'favorites', // 全部目录视图下新建的会话靠索引进列表，不该被自动收藏
   };
   State.favoriteSessions = sortSessionsForList([
     draft,
@@ -2279,8 +2393,10 @@ async function bindFavoriteDraftRoot(rootId, controls = null) {
       name: '',
       engine: State.session.engine || State.settings.defaultEngine,
     });
-    const favorited = await api('/api/session/favorite', { id: s.id, favorite: true });
-    const real = favorited || { ...s, favorite: true };
+    // 收藏夹视图下的草稿绑定目录后需要真收藏才留得住；全部目录视图靠后端建索引，不动收藏标记
+    const wantFav = State.listMode === 'favorites';
+    const favorited = wantFav ? await api('/api/session/favorite', { id: s.id, favorite: true }) : s;
+    const real = favorited || { ...s, favorite: wantFav };
     State.favoriteSessions = sortSessionsForList([
       real,
       ...State.favoriteSessions.filter((x) => x.id !== draftId && x.id !== real.id),
@@ -5153,6 +5269,14 @@ function connectWs() {
       }
       // 全新会话（如外部推送兜底新建）：当前正看着它所在的根目录时，直接插进列表最前面，
       // 不需要用户手动刷新页面才能看见——bumpSessionUpdatedAt 只会更新已存在的条目，覆盖不到这种情况。
+      // 全部目录视图：新会话必定已建索引，直接插进列表（不受当前根目录限制）
+      if (State.listMode === 'all' && Array.isArray(State.sessions)
+        && !State.sessions.some((s) => s.id === e.session.id)) {
+        State.favoriteSessions = sortSessionsForList([e.session, ...State.favoriteSessions]);
+        State.sessions = State.favoriteSessions;
+        renderSessions();
+        return;
+      }
       if (
         !State.favoritesOnly && !isWorkspace() &&
         e.session.rootId === State.rootId &&
@@ -6100,7 +6224,10 @@ function bind() {
   $('mdlCodexListBtn').addEventListener('click', () => detectAvailableModels('codex'));
   $('pwChangeBtn').addEventListener('click', changePassword);
   $('searchToggleBtn').addEventListener('click', toggleSearch);
-  $('favoritesToggleBtn').addEventListener('click', toggleFavorites);
+  $('favoritesToggleBtn').addEventListener('click', toggleListModeMenu);
+  document.querySelectorAll('.lmm-item').forEach((b) =>
+    b.addEventListener('click', () => switchListMode(b.dataset.listmode)));
+  $('sessionList').addEventListener('scroll', onSessionListScroll);
   $('sessionSearch').addEventListener('input', onSearchInput);
   $('sessionSearchClear').addEventListener('click', clearSessionSearch);
   $('advSearch').addEventListener('change', onAdvToggle);

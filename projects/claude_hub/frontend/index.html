@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="styles.css?v=20260916a" />
+  <link rel="stylesheet" href="styles.css?v=20260917a" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -742,7 +742,15 @@
       <div class="section">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <div class="sessions-title-wrap">
-            <button id="favoritesToggleBtn" class="icon-square" title="favorites" style="width:30px;height:30px;font-size:14px">★</button>
+            <div class="list-mode-wrap">
+              <button id="favoritesToggleBtn" class="icon-square" title="favorites" style="width:30px;height:30px;font-size:14px">★</button>
+              <div class="list-mode-menu" id="listModeMenu" hidden>
+                <div class="lmm-title" id="listModeMenuTitle"></div>
+                <button class="lmm-item" data-listmode="single"><span class="lmm-ico">📁</span><span class="lmm-txt"><b id="lmmSingle"></b><i id="lmmSingleHint"></i></span><span class="lmm-chk">✓</span></button>
+                <button class="lmm-item" data-listmode="favorites"><span class="lmm-ico">★</span><span class="lmm-txt"><b id="lmmFav"></b><i id="lmmFavHint"></i></span><span class="lmm-chk">✓</span></button>
+                <button class="lmm-item" data-listmode="all"><span class="lmm-ico">🗂</span><span class="lmm-txt"><b id="lmmAll"></b><i id="lmmAllHint"></i></span><span class="lmm-chk">✓</span></button>
+              </div>
+            </div>
             <h2 id="sessionsLabel" style="margin:0"></h2>
           </div>
           <div style="display:flex;gap:6px">
@@ -789,7 +797,6 @@
         <button id="batchCancelBtn" class="sm"></button>
       </div>
       <div class="session-list" id="sessionList"></div>
-      <div class="session-pager" id="sessionPager" hidden></div>
     </aside>
 
     <!-- 会话项右键菜单 / 长按菜单：标记状态（活跃/待测试/已完成，任意互切）/ 置顶 -->
@@ -1056,7 +1063,7 @@
   <script src="vendor/cm/mode/sass/sass.min.js"></script>
   <script src="vendor/cm/mode/dart/dart.min.js"></script>
   <script src="vendor/cm/mode/swift/swift.min.js"></script>
-  <script src="trans.js?v=20260916a"></script>
+  <script src="trans.js?v=20260917a"></script>
   <script src="workspace.js?v=20260825a"></script>
   <script src="rootwizard.js?v=20260804a"></script>
   <script src="health.js?v=20260911a"></script>
@@ -1072,6 +1079,6 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="app.js?v=20260916a"></script>
+  <script src="app.js?v=20260917a"></script>
 </body>
 </html>
