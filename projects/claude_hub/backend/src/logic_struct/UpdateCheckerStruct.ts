@@ -75,7 +75,10 @@ export class UpdateCheckerStruct {
   // 拉取最新代码并触发重新编译 + 重启；重启脚本会杀掉当前进程，因此这里不等重启跑完
   static async apply(onProgress?: UpdateProgress): Promise<UpdateApplyResult> {
     const pull = await this._pull(onProgress);
-    if (!pull.ok) return pull;
+    // 拉取失败必须抛出：接口层只把抛错映射成 success=false，返回 ok=false 的话前端会
+    // 当成「更新成功」→ 等重启 → 首个探测就通（进程根本没重启过）→ 刷新后又弹更新，
+    // 表现就是「点了更新永远在更新」。
+    if (!pull.ok) throw new Error(`UpdateCheckerStruct.apply: git pull 失败 -> ${pull.output}`);
     this._triggerRestart();
     return { ok: true, output: `${pull.output}\n[restart] 已触发重新编译与重启，请稍候刷新页面` };
   }

@@ -128,6 +128,28 @@ export class UpdateChecker extends UpdateCheckerStruct {
     return `https://github.com/${owner}/${repo}`;
   }
 
+  // 快进失败时的兜底：检出历史与远端对不上（仓库被重建 / 历史被改写过）时，
+  // git pull --ff-only 只会 fatal 退 128，部署机就此永远停在旧版本、每次点更新都白点。
+  // 工作区干净时（用户数据都在 .gitignore 里，不受影响）直接对齐远端；有本地改动则不动。
+  private static _hardResetIfClean(branch: string, onProgress?: UpdateProgress): UpdateApplyResult {
+    const git = GitBin.resolve();
+    const run = (args: string[]) =>
+      execFileSync(git, args, { cwd: Paths.PROJECT_ROOT, encoding: 'utf-8', windowsHide: true }).trim();
+    try {
+      if (run(['status', '--porcelain'])) {
+        return { ok: false, output: '[git pull] 无法快进，且工作区有本地改动：请先提交或丢弃改动再更新' };
+      }
+      onProgress?.('[git] 检出历史与远端不一致，工作区干净，改为直接对齐远端');
+      run(['fetch', 'origin', branch]);
+      const out = run(['reset', '--hard', `origin/${branch}`]);
+      onProgress?.(out);
+      Logger.info('UpdateChecker', 'hard reset to origin', { branch, out });
+      return { ok: true, output: out };
+    } catch (e: any) {
+      return { ok: false, output: `[git pull] 无法快进，对齐远端也失败: ${e?.message || e}` };
+    }
+  }
+
   protected static _pull(onProgress?: UpdateProgress): Promise<UpdateApplyResult> {
     return new Promise((resolve) => {
       const git = GitBin.find();
@@ -152,7 +174,15 @@ export class UpdateChecker extends UpdateCheckerStruct {
       child.on('error', (e) => resolve({ ok: false, output: `[git pull] FAILED: ${e.message}` }));
       child.on('close', (code) => {
         Logger.info('UpdateChecker', 'git pull done', { code });
-        resolve({ ok: code === 0, output: out.trim() || (code === 0 ? 'ok' : `git pull 退出码 ${code}`) });
+        if (code === 0) {
+          resolve({ ok: true, output: out.trim() || 'ok' });
+          return;
+        }
+        const fallback = this._hardResetIfClean(this._currentBranch(), onProgress);
+        resolve({
+          ok: fallback.ok,
+          output: [out.trim() || `git pull 退出码 ${code}`, fallback.output].filter(Boolean).join('\n'),
+        });
       });
     });
   }
