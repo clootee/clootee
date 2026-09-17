@@ -1,10 +1,10 @@
 {
-  "version": "2.1.2",
+  "version": "3.0.0",
   "minVersion": "2.0.0",
-  "force": true,
-  "releasedAt": "2026-09-10",
+  "force": false,
+  "releasedAt": "2026-09-17",
   "notesI18n": {
-    "zh": "· 有无新版本改为只看 version.json，已是最新时不再出现「拉取更新并重启」\n· 本次为强制更新演示版本",
-    "en": "· Update detection now relies solely on version.json; no stale \"pull & restart\" when already current\n· This release is marked mandatory as a demonstration"
+    "zh": "· 会话列表新增三种视图：单目录 / 收藏夹 / 全部目录，点左上角按钮切换\n· 「全部目录」跨所有工作目录展示会话（本版本起新建的会话自动建索引）\n· 会话列表支持分页：默认 20 条，滚到底自动加载更多；搜索仍搜全部\n· 顶栏图标全部换成手绘单色 SVG，风格统一",
+    "en": "· Session list now has three views: current directory / favorites / all directories\n· \"All directories\" spans every workspace (sessions created from this version on are auto-indexed)\n· Session list is paginated: 20 by default, auto-loads more on scroll; search still covers everything\n· Sidebar icons redrawn as a consistent set of monochrome SVGs"
   }
 }
