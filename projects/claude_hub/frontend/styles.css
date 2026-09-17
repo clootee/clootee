@@ -3045,12 +3045,12 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .list-mode-menu .lmm-item.active .lmm-chk { opacity: 1; }
 .list-mode-menu .lmm-item.active b { color: var(--accent); }
 
-/* 视图按钮本身：SVG 图标居中，尺寸与其它 icon-square 一致 */
-.list-mode-wrap .lm-btn {
+/* 会话区顶栏的三个方形按钮（视图 / 搜索 / 批量）：统一 30px，SVG 图标居中 */
+.lm-btn {
   width: 30px; height: 30px;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.list-mode-wrap .lm-btn .ico { display: block; }
+.icon-square .ico { display: block; }
 
 /* 首次使用引导：指向视图按钮的小箭头，轻微来回推移；点过按钮后从 DOM 隐藏 */
 .lm-hint {

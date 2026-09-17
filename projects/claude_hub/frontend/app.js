@@ -104,6 +104,10 @@ const ICONS = {
   favorites: '<path d="M12 3.5l2.62 5.32 5.88.86-4.25 4.14 1 5.85L12 16.92l-5.25 2.75 1-5.85L3.5 9.68l5.88-.86L12 3.5Z"/>',
   // 全部目录：两只叠起来的文件夹
   all: '<path d="M7.2 8V5.4a1.9 1.9 0 0 1 1.9-1.9h2.7a1.9 1.9 0 0 1 1.42.64l.86.98a1.9 1.9 0 0 0 1.43.64h4.1a1.9 1.9 0 0 1 1.9 1.9v1.9"/><path d="M2.6 10.6a1.9 1.9 0 0 1 1.9-1.9h3a1.9 1.9 0 0 1 1.42.64l.86.98a1.9 1.9 0 0 0 1.43.64h5.39a1.9 1.9 0 0 1 1.9 1.9v5.64a1.9 1.9 0 0 1-1.9 1.9H4.5a1.9 1.9 0 0 1-1.9-1.9V10.6Z"/>',
+  // 搜索：放大镜
+  search: '<circle cx="10.9" cy="10.9" r="6.4"/><path d="M15.55 15.55 20.4 20.4"/>',
+  // 批量选择：打了勾的方框
+  batch: '<rect x="3.6" y="3.6" width="16.8" height="16.8" rx="4.2"/><path d="M8 12.15l2.85 2.85L16.3 9.6"/>',
   // 选中勾
   check: '<path d="M4.8 12.4l4.7 4.7L19.2 7.3"/>',
   // 首次引导箭头：一支指向左边（按钮方向）的细箭头
@@ -219,6 +223,7 @@ function applyText() {
   $('removeRootBtn').title = T('removeRoot');
   $('manageRootsBtn').title = T('manageRoots');
   $('batchToggleBtn').title = T('batchSelect');
+  $('batchToggleBtn').innerHTML = svgIcon('batch', 17);
   $('rootManageTitle').textContent = T('manageRootsTitle');
   $('rootManageClose').textContent = T('close');
   $('rmAllLabel').textContent = T('selectAll');
@@ -262,6 +267,7 @@ function applyText() {
   $('wsDirCreateLabel').textContent = T('wsCreateIfMissing');
   $('wsDirUse').textContent = T('wsUseDir');
   $('searchToggleBtn').title = T('search');
+  $('searchToggleBtn').innerHTML = svgIcon('search', 17);
   $('favoritesToggleBtn').title = T('listModeTitle');
   $('listModeMenuTitle').textContent = T('listModeTitle');
   $('lmmSingle').textContent = T('listModeSingle');
