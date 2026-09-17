@@ -2,11 +2,22 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { JsonStore } from '../helper/JsonStore';
+import { FsHelper } from '../helper/FsHelper';
 import { Ids } from '../helper/Ids';
 import { Paths } from '../paths';
 import { Root, RootLink } from '../models/Types';
 import { EngineAccess } from '../helper/EngineAccess';
 import { Settings } from '../logic_realize/Settings';
+
+// 根目录概览（前端目录标签右键菜单展示用）
+export interface RootInfo {
+  id: string;
+  name: string;
+  path: string;
+  exists: boolean;
+  dirs: number; // 顶层子目录数
+  files: number; // 顶层文件数
+}
 
 export class RootManagerStruct {
   // 列出全部根目录
@@ -87,6 +98,15 @@ export class RootManagerStruct {
     const root = this.listRoots().find((r) => r.id === id);
     if (!root) throw new Error(`getRoot: not found, id=${id}`);
     return root;
+  }
+
+  // 根目录概览（目录标签右键菜单用）：完整路径 + 是否还存在 + 顶层目录/文件数量
+  static rootInfo(id: string): RootInfo {
+    if (!id) throw new Error(`rootInfo: invalid id=${id}`);
+    const root = this.getRoot(id);
+    const exists = FsHelper.exists(root.path);
+    const counts = exists ? FsHelper.countChildren(root.path) : { dirs: 0, files: 0 };
+    return { id: root.id, name: root.name, path: root.path, exists, dirs: counts.dirs, files: counts.files };
   }
 
   // 更新根目录的备注 / 链接 / 重点文件夹（均可选）

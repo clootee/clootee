@@ -81,6 +81,31 @@ export class FsHelper {
     return dirs.sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  // 统计某目录下的直接子项数量（非递归，含隐藏项，跳过无权限项）：目录数 / 文件数
+  static countChildren(dir: string): { dirs: number; files: number } {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return { dirs: 0, files: 0 };
+    }
+    let dirs = 0;
+    let files = 0;
+    for (const e of entries) {
+      let isDir = e.isDirectory();
+      if (e.isSymbolicLink()) {
+        try {
+          isDir = fs.statSync(path.join(dir, e.name)).isDirectory();
+        } catch {
+          isDir = false;
+        }
+      }
+      if (isDir) dirs += 1;
+      else files += 1;
+    }
+    return { dirs, files };
+  }
+
   // 在 base 下递归列出文件（限制深度/数量，跳过噪声目录），按修改时间倒序
   static listFilesRecursive(base: string, maxDepth = 4, limit = 800): FileEntry[] {
     const out: FileEntry[] = [];

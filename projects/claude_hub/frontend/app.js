@@ -1565,7 +1565,11 @@ function refreshNewSessionButton() {
 }
 
 // ── 收藏夹目录筛选（纯前端，不走后端） ──
-const FavDir = { rootId: sessionStorage.getItem('favDirRootId') || '' };
+const FavDir = {
+  rootId: sessionStorage.getItem('favDirRootId') || '',
+  // 标签行默认只显示 3 行；展开状态也持久化，免得每次重绘又收回去
+  expanded: sessionStorage.getItem('favDirExpanded') === '1',
+};
 
 // 目录筛选同样持久化：刷新后仍停在原来那个目录下
 function setFavDir(rootId) {
@@ -1618,6 +1622,9 @@ function clearFavDir() {
   renderSessions();
 }
 
+const FDF_NAME_MAX = 20; // 标签上目录名最多 20 字符，超出截断
+const FDF_ROWS_COLLAPSED = 3; // 折叠时显示的标签行数
+const FDF_GAP = 4; // 与 .fav-dir-filter 的 gap 保持一致（用于算 3 行的高度）
 const FDF_DOT_MAX = 6; // 单个目录最多画几个点：再多画不下，真实数量在 title 里给
 
 // 目录标签右上角的小圆点：执行中=闪烁，刚执行完=蓝色静态；其余会话不画点
@@ -1647,17 +1654,147 @@ function renderFavDirFilter() {
   box.hidden = opts.length === 0; // 不在收藏夹 / 收藏里没有带目录的会话时整行收掉
   if (opts.length === 0) {
     box.innerHTML = '';
+    if ($('favDirMoreRow')) $('favDirMoreRow').hidden = true;
     return;
   }
   box.innerHTML = opts
-    .map((o) => `<button class="fdf-tag${o.rootId === FavDir.rootId ? ' active' : ''}" data-fdf="${escapeHtml(o.rootId)}" title="${escapeHtml(favDirTitle(o))}"><span class="fdf-nm">${escapeHtml(o.name)}</span><i>${o.count}</i>${favDirDots(o)}</button>`)
+    .map((o) => `<button class="fdf-tag${o.rootId === FavDir.rootId ? ' active' : ''}" data-fdf="${escapeHtml(o.rootId)}" title="${escapeHtml(favDirTitle(o))}"><span class="fdf-nm">${escapeHtml(favDirLabel(o.name))}</span><i>${o.count}</i>${favDirDots(o)}</button>`)
     .join('')
     + (FavDir.rootId ? `<button class="fdf-clear" id="fdfClear" title="${escapeHtml(T('clearFilter'))}">✕</button>` : '');
   box.querySelectorAll('.fdf-tag').forEach((el) => {
+    const opt = opts.find((o) => o.rootId === el.dataset.fdf);
     el.addEventListener('click', () => pickFavDir(el.dataset.fdf));
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openDirCtxMenu(opt, e.clientX, e.clientY);
+    });
+    // 触屏没有右键：长按同一个菜单
+    bindLongPress(el, (e) => {
+      const t = e.touches && e.touches[0];
+      openDirCtxMenu(opt, t ? t.clientX : 40, t ? t.clientY : 120);
+    });
   });
   const clr = box.querySelector('#fdfClear');
   if (clr) clr.addEventListener('click', clearFavDir);
+  applyFavDirCollapse();
+}
+
+// 目录名过长会把标签撑满整行，硬截断到 20 字符（完整名在 title 与右键菜单里给）
+function favDirLabel(name) {
+  const nm = String(name || '');
+  return nm.length > FDF_NAME_MAX ? nm.slice(0, FDF_NAME_MAX - 1) + '…' : nm;
+}
+
+// 折叠到 3 行：按实测单行高度算出 max-height，超高才露出「更多 / 收起」开关
+function applyFavDirCollapse() {
+  const box = $('favDirFilter');
+  const row = $('favDirMoreRow');
+  const btn = $('favDirMoreBtn');
+  if (!box || !row || !btn) return;
+  const tags = box.querySelectorAll('.fdf-tag');
+  if (!tags.length) {
+    row.hidden = true;
+    box.classList.remove('collapsed');
+    box.style.maxHeight = '';
+    return;
+  }
+  const lineH = tags[0].offsetHeight || 22;
+  const padTop = parseFloat(getComputedStyle(box).paddingTop) || 0;
+  const maxH = Math.round(lineH * FDF_ROWS_COLLAPSED + FDF_GAP * (FDF_ROWS_COLLAPSED - 1) + padTop);
+  // 先按未折叠量一次完整高度，再决定要不要裁
+  box.classList.remove('collapsed');
+  box.style.maxHeight = '';
+  const overflowing = box.scrollHeight > maxH + 1;
+  row.hidden = !overflowing;
+  if (!overflowing) return;
+  if (FavDir.expanded) {
+    btn.textContent = T('dirFilterLess');
+    return;
+  }
+  // 「更多(n)」里的 n = 会被裁掉的标签数（按标签相对本行容器的位置判断，比按行数估算准；
+  // 不能用 offsetTop —— 容器没定位，offsetTop 是相对更外层祖先的，会把所有标签都算成溢出）
+  const boxTop = box.getBoundingClientRect().top;
+  const cut = [...tags].filter((el) => el.getBoundingClientRect().bottom - boxTop > maxH + 1).length;
+  btn.textContent = Tn('dirFilterMore', cut);
+  box.classList.add('collapsed');
+  box.style.maxHeight = maxH + 'px';
+}
+
+function toggleFavDirExpanded() {
+  FavDir.expanded = !FavDir.expanded;
+  sessionStorage.setItem('favDirExpanded', FavDir.expanded ? '1' : '0');
+  applyFavDirCollapse();
+}
+
+// ── 目录标签右键/长按菜单：完整路径 + 目录内容概况 + 打开该目录 ──
+let dirCtxOpt = null;
+function openDirCtxMenu(opt, x, y) {
+  if (!opt) return;
+  dirCtxOpt = { ...opt };
+  const root = State.roots.find((r) => r.id === opt.rootId);
+  $('dirCtxName').textContent = opt.name;
+  $('dirCtxPath').textContent = (root && root.path) || T('dirCtxLoading');
+  $('dirCtxInfo').className = 'dir-ctx-info';
+  $('dirCtxInfo').textContent = T('dirCtxLoading');
+  $('dirCtxCopy').textContent = T('dirCtxCopyPath');
+  $('dirCtxOpen').textContent = T('dirCtxOpen');
+  // 「打开该目录」是服务器本机行为：只有 hub 跑在有桌面的 Windows / macOS 上才给
+  $('dirCtxOpen').hidden = !['win32', 'darwin'].includes(State.settings.platform);
+  const menu = $('dirCtxMenu');
+  menu.hidden = false;
+  menu.style.left = Math.min(x, Math.max(8, window.innerWidth - 330)) + 'px';
+  menu.style.top = Math.min(y, Math.max(8, window.innerHeight - 220)) + 'px';
+  loadDirCtxInfo(opt);
+}
+
+// 目录详情（路径 / 文件夹数 / 文件数）现取现用：目录随时可能被外部删改，不缓存
+async function loadDirCtxInfo(opt) {
+  let info = null;
+  try {
+    info = await api(`/api/root/info?id=${encodeURIComponent(opt.rootId)}`);
+  } catch (e) {
+    if (dirCtxOpt && dirCtxOpt.rootId === opt.rootId) $('dirCtxInfo').textContent = e.message || 'failed';
+    return;
+  }
+  if (!dirCtxOpt || dirCtxOpt.rootId !== opt.rootId) return; // 菜单已关 / 已换目录
+  dirCtxOpt.path = info.path;
+  $('dirCtxPath').textContent = info.path;
+  const box = $('dirCtxInfo');
+  if (!info.exists) {
+    box.className = 'dir-ctx-info missing';
+    box.textContent = T('dirCtxMissing');
+    return;
+  }
+  box.className = 'dir-ctx-info';
+  box.textContent = [
+    Tn('dirCtxDirs', info.dirs),
+    Tn('dirCtxFiles', info.files),
+    Tn('dirCtxSessions', opt.count),
+  ].join(' · ');
+}
+
+function closeDirCtxMenu() {
+  $('dirCtxMenu').hidden = true;
+  dirCtxOpt = null;
+}
+
+// 复制完整路径：菜单不关，在按钮上给一次「✓」反馈（路径通常是用户接着要粘去别处的）
+async function dirCtxCopyPath() {
+  const dirPath = dirCtxOpt
+    && (dirCtxOpt.path || (State.roots.find((r) => r.id === dirCtxOpt.rootId) || {}).path);
+  if (!dirPath) return;
+  await copyText(dirPath, $('dirCtxCopy'), T('dirCtxCopyPath'));
+}
+
+async function dirCtxOpenFolder() {
+  const rootId = dirCtxOpt && dirCtxOpt.rootId;
+  closeDirCtxMenu();
+  if (!rootId) return;
+  try {
+    await api('/api/root/open', { rootId });
+  } catch (e) {
+    alert(e.message || 'Open folder failed');
+  }
 }
 
 // tab 切换：active(未完成) / completed(已完成) / all(全部)
@@ -6299,12 +6436,19 @@ function bind() {
   $('ctxTogglePinned').addEventListener('click', ctxTogglePinned);
   $('ctxTraceStats').addEventListener('click', ctxOpenStats);
   $('ctxOpenWorkdir').addEventListener('click', ctxOpenWorkdir);
+  $('favDirMoreBtn').addEventListener('click', toggleFavDirExpanded);
+  $('dirCtxCopy').addEventListener('click', dirCtxCopyPath);
+  $('dirCtxOpen').addEventListener('click', dirCtxOpenFolder);
   $('statsClose').addEventListener('click', closeSessionStats);
   $('statsRefreshBtn').addEventListener('click', loadSessionStats);
   document.addEventListener('click', (e) => {
     if (!$('sessionCtxMenu').hidden && !$('sessionCtxMenu').contains(e.target)) closeSessionCtxMenu();
+    if (!$('dirCtxMenu').hidden && !$('dirCtxMenu').contains(e.target)) closeDirCtxMenu();
   });
   document.addEventListener('scroll', closeSessionCtxMenu, true);
+  document.addEventListener('scroll', closeDirCtxMenu, true);
+  // 侧栏宽度变化会改变标签换行位置，3 行的裁切点要跟着重算
+  window.addEventListener('resize', applyFavDirCollapse);
   $('addTaskBtn').addEventListener('click', addTask);
   $('stopBtn').addEventListener('click', stopTask);
   $('pauseBtn').addEventListener('click', togglePause);

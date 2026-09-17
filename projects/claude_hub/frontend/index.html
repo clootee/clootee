@@ -769,6 +769,10 @@
           <label class="adv-toggle"><input type="checkbox" id="advSearch" /> <span id="advSearchLabel"></span></label>
         </div>
         <div class="fav-dir-filter" id="favDirFilter" hidden></div>
+        <!-- 目录标签超过 3 行时的展开/收起开关（默认只显示 3 行，避免占满侧栏） -->
+        <div class="fdf-more-row" id="favDirMoreRow" hidden>
+          <button type="button" class="fdf-more" id="favDirMoreBtn"></button>
+        </div>
         <div class="session-tabs" id="sessionTabs">
           <button class="s-tab active" data-tab="active" id="tabActiveBtn"></button>
           <button class="s-tab" data-tab="testing" id="tabTestingBtn"></button>
@@ -800,6 +804,16 @@
       </div>
       <div class="session-list" id="sessionList"></div>
     </aside>
+
+    <!-- 目录筛选标签的右键/长按菜单：完整路径 + 目录内容概况 + 打开该目录 -->
+    <div id="dirCtxMenu" class="ctx-menu dir-ctx" hidden>
+      <div class="dir-ctx-head" id="dirCtxName"></div>
+      <div class="dir-ctx-path" id="dirCtxPath"></div>
+      <div class="dir-ctx-info" id="dirCtxInfo"></div>
+      <div class="ctx-sep"></div>
+      <button id="dirCtxCopy" class="ctx-item"></button>
+      <button id="dirCtxOpen" class="ctx-item" hidden></button>
+    </div>
 
     <!-- 会话项右键菜单 / 长按菜单：标记状态（活跃/待测试/已完成，任意互切）/ 置顶 -->
     <div id="sessionCtxMenu" class="ctx-menu" hidden>

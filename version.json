@@ -1,10 +1,10 @@
 {
-  "version": "3.0.0",
+  "version": "3.1.0",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-09-17",
   "notesI18n": {
-    "zh": "· 会话列表新增三种视图：单目录 / 收藏夹 / 全部目录，点左上角按钮切换\n· 「全部目录」跨所有工作目录展示会话（本版本起新建的会话自动建索引）\n· 会话列表支持分页：默认 20 条，滚到底自动加载更多；搜索仍搜全部\n· 顶栏图标全部换成手绘单色 SVG，风格统一",
-    "en": "· Session list now has three views: current directory / favorites / all directories\n· \"All directories\" spans every workspace (sessions created from this version on are auto-indexed)\n· Session list is paginated: 20 by default, auto-loads more on scroll; search still covers everything\n· Sidebar icons redrawn as a consistent set of monochrome SVGs"
+    "zh": "· 目录筛选标签右键（手机长按）可看完整路径、文件夹/文件数量，并能直接打开该目录（Windows / macOS）\n· 目录名过长自动截断到 20 字符，完整名在悬浮提示和右键菜单里\n· 目录标签默认只显示 3 行，多出来的点「更多」展开、点「收起」收回",
+    "en": "· Right-click (long-press on mobile) a directory filter tag to see its full path, folder/file counts, and open it in the file manager (Windows / macOS)\n· Long directory names are truncated to 20 chars; the full name stays in the tooltip and the context menu\n· Directory tags show only 3 rows by default — expand with \"More\" and fold back with \"Collapse\""
   }
 }

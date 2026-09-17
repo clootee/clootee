@@ -893,6 +893,28 @@ button:disabled { opacity: .4; cursor: not-allowed; }
   line-height: 1.5;
 }
 .fav-dir-filter .fdf-clear:hover { color: var(--red); border-color: var(--red); }
+/* 默认只显示 3 行标签：超高部分裁掉（max-height 由 JS 按实测行高设置），点「更多」展开 */
+.fav-dir-filter.collapsed { overflow: hidden; }
+.fdf-more-row { display: flex; margin: -2px 0 6px; }
+.fdf-more {
+  padding: 1px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.fdf-more:hover { color: var(--accent); border-color: var(--accent); background: transparent; }
+/* 目录标签右键菜单：上半是只读信息，下半是操作项 */
+.ctx-menu.dir-ctx { max-width: 320px; }
+.dir-ctx-head { padding: 6px 10px 2px; font-size: 13px; color: var(--text); font-weight: 600; word-break: break-all; }
+.dir-ctx-path {
+  padding: 0 10px 4px; font-size: 11px; color: var(--muted);
+  font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-all;
+}
+.dir-ctx-info { padding: 0 10px 6px; font-size: 11px; color: var(--muted); }
+.dir-ctx-info.missing { color: var(--red); }
 /* 目录名过长时省略号（原来靠按钮自身 overflow，现在挪到内层，避免裁掉圆点） */
 .fav-dir-filter .fdf-nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* 右上角状态点：执行中=accent 闪烁，刚执行完=蓝色静态；一个会话一个点 */

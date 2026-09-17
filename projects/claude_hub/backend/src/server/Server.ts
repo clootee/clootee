@@ -329,6 +329,9 @@ export class Server {
     app.post('/api/root/gitpush', (req, res) =>
       this._wrap(res, 'root.gitpush', () => GitPusher.push(req.body.rootId)),
     );
+    app.get('/api/root/info', (req, res) =>
+      this._wrap(res, 'root.info', () => RootManager.rootInfo(String(req.query.id || ''))),
+    );
     app.post('/api/root/open', (req, res) =>
       this._wrap(res, 'root.open', () => FolderOpener.open(req.body.rootId)),
     );
