@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="styles.css?v=20260917a" />
+  <link rel="stylesheet" href="styles.css?v=20260917c" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -743,14 +743,16 @@
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <div class="sessions-title-wrap">
             <div class="list-mode-wrap">
-              <button id="favoritesToggleBtn" class="icon-square" title="favorites" style="width:30px;height:30px;font-size:14px">★</button>
+              <button id="favoritesToggleBtn" class="icon-square lm-btn" title="favorites"></button>
               <div class="list-mode-menu" id="listModeMenu" hidden>
                 <div class="lmm-title" id="listModeMenuTitle"></div>
-                <button class="lmm-item" data-listmode="single"><span class="lmm-ico">📁</span><span class="lmm-txt"><b id="lmmSingle"></b><i id="lmmSingleHint"></i></span><span class="lmm-chk">✓</span></button>
-                <button class="lmm-item" data-listmode="favorites"><span class="lmm-ico">★</span><span class="lmm-txt"><b id="lmmFav"></b><i id="lmmFavHint"></i></span><span class="lmm-chk">✓</span></button>
-                <button class="lmm-item" data-listmode="all"><span class="lmm-ico">🗂</span><span class="lmm-txt"><b id="lmmAll"></b><i id="lmmAllHint"></i></span><span class="lmm-chk">✓</span></button>
+                <button class="lmm-item" data-listmode="single"><span class="lmm-ico"></span><span class="lmm-txt"><b id="lmmSingle"></b><i id="lmmSingleHint"></i></span><span class="lmm-chk"></span></button>
+                <button class="lmm-item" data-listmode="favorites"><span class="lmm-ico"></span><span class="lmm-txt"><b id="lmmFav"></b><i id="lmmFavHint"></i></span><span class="lmm-chk"></span></button>
+                <button class="lmm-item" data-listmode="all"><span class="lmm-ico"></span><span class="lmm-txt"><b id="lmmAll"></b><i id="lmmAllHint"></i></span><span class="lmm-chk"></span></button>
               </div>
             </div>
+            <!-- 首次使用引导：一支指向视图按钮的小箭头，点过按钮后永久消失 -->
+            <span class="lm-hint" id="listModeHint" hidden aria-hidden="true"></span>
             <h2 id="sessionsLabel" style="margin:0"></h2>
           </div>
           <div style="display:flex;gap:6px">
@@ -1079,6 +1081,6 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="app.js?v=20260917a"></script>
+  <script src="app.js?v=20260917d"></script>
 </body>
 </html>

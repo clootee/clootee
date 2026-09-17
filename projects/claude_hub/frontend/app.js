@@ -94,6 +94,47 @@ function setListMode(mode) {
 function setFavoritesOnly(on) {
   setListMode(on ? 'favorites' : 'single');
 }
+// ── 图标（统一手绘 SVG）──
+// 同一套规格：24x24 视窗、单色描边（currentColor）、线宽 1.6、圆头圆角、不填充。
+// 用 currentColor 才能跟按钮/菜单项的文字颜色（含选中态高亮、暗色主题）自动一致。
+const ICONS = {
+  // 单目录：一只文件夹
+  single: '<path d="M3.2 8.1a2 2 0 0 1 2-2h3.05a2 2 0 0 1 1.5.68l1.02 1.16a2 2 0 0 0 1.5.68h6.53a2 2 0 0 1 2 2v7.7a2 2 0 0 1-2 2H5.2a2 2 0 0 1-2-2V8.1Z"/>',
+  // 收藏夹：五角星
+  favorites: '<path d="M12 3.5l2.62 5.32 5.88.86-4.25 4.14 1 5.85L12 16.92l-5.25 2.75 1-5.85L3.5 9.68l5.88-.86L12 3.5Z"/>',
+  // 全部目录：两只叠起来的文件夹
+  all: '<path d="M7.2 8V5.4a1.9 1.9 0 0 1 1.9-1.9h2.7a1.9 1.9 0 0 1 1.42.64l.86.98a1.9 1.9 0 0 0 1.43.64h4.1a1.9 1.9 0 0 1 1.9 1.9v1.9"/><path d="M2.6 10.6a1.9 1.9 0 0 1 1.9-1.9h3a1.9 1.9 0 0 1 1.42.64l.86.98a1.9 1.9 0 0 0 1.43.64h5.39a1.9 1.9 0 0 1 1.9 1.9v5.64a1.9 1.9 0 0 1-1.9 1.9H4.5a1.9 1.9 0 0 1-1.9-1.9V10.6Z"/>',
+  // 选中勾
+  check: '<path d="M4.8 12.4l4.7 4.7L19.2 7.3"/>',
+  // 首次引导箭头：一支指向左边（按钮方向）的细箭头
+  hintArrow: '<path d="M21 12H4.2"/><path d="M10.2 5.6 3.8 12l6.4 6.4"/>',
+};
+function svgIcon(name, size) {
+  const d = ICONS[name];
+  if (!d) throw new Error(`svgIcon: unknown icon=${name}`);
+  return `<svg class="ico ico-${name}" viewBox="0 0 24 24" width="${size}" height="${size}" `
+    + 'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" '
+    + `stroke-linejoin="round" aria-hidden="true" focusable="false">${d}</svg>`;
+}
+
+// ── 首次使用引导箭头：没点过视图按钮时指着它，点一次后永久消失 ──
+const LIST_MODE_HINT_KEY = 'listModeHintSeen';
+function listModeHintSeen() {
+  return localStorage.getItem(LIST_MODE_HINT_KEY) === '1';
+}
+function syncListModeHint() {
+  const el = $('listModeHint');
+  if (!el) return;
+  const show = !listModeHintSeen();
+  el.hidden = !show;
+  el.innerHTML = show ? svgIcon('hintArrow', 20) : '';
+}
+function dismissListModeHint() {
+  if (listModeHintSeen()) return;
+  localStorage.setItem(LIST_MODE_HINT_KEY, '1');
+  syncListModeHint();
+}
+
 // 当前跨目录视图对应的后端接口与文案
 function listModeApi() {
   return State.listMode === 'all' ? '/api/session/list-indexed' : '/api/session/list-favorites';
@@ -101,8 +142,22 @@ function listModeApi() {
 function listModeLabelKey() {
   return State.listMode === 'all' ? 'allSessionsFolder' : State.listMode === 'favorites' ? 'favoritesFolder' : 'sessions';
 }
+// 画出视图按钮 / 菜单项的图标与勾选态。渲染会话列表时会调，applyText 里也调一次 ——
+// 还没选工作目录时 renderSessions 不会执行，按钮不能是空的。
+function paintListModeIcons() {
+  const btn = $('favoritesToggleBtn');
+  if (!btn) return;
+  btn.innerHTML = svgIcon(listModeIcon(State.listMode), 17); // 图标即当前模式，一眼看出在看哪一类列表
+  document.querySelectorAll('.lmm-item').forEach((b) => {
+    b.classList.toggle('active', b.dataset.listmode === State.listMode);
+    b.querySelector('.lmm-ico').innerHTML = svgIcon(listModeIcon(b.dataset.listmode), 17);
+    b.querySelector('.lmm-chk').innerHTML = svgIcon('check', 15);
+  });
+  syncListModeHint();
+}
+
 function listModeIcon(mode) {
-  return mode === 'all' ? '🗂' : mode === 'favorites' ? '★' : '📁';
+  return mode === 'all' ? 'all' : mode === 'favorites' ? 'favorites' : 'single';
 }
 
 // 引擎显示名
@@ -215,6 +270,7 @@ function applyText() {
   $('lmmFavHint').textContent = T('listModeFavoritesHint');
   $('lmmAll').textContent = T('listModeAll');
   $('lmmAllHint').textContent = T('listModeAllHint');
+  paintListModeIcons();
   $('sessionSearch').placeholder = T('searchSessions');
   $('advSearchLabel').textContent = T('advancedSearch');
   $('tabActiveBtn').textContent = T('tabActive');
@@ -1463,12 +1519,9 @@ function syncFavoritesButton() {
   document.body.classList.toggle('favorites-only', State.favoritesOnly);
   document.body.classList.toggle('list-mode-all', State.listMode === 'all');
   btn.classList.toggle('active', State.favoritesOnly);
-  btn.textContent = listModeIcon(State.listMode); // 图标即当前模式，一眼看出在看哪一类列表
   btn.title = T('listModeTitle') + '：' + T(listModeLabelKey());
   $('sessionsLabel').textContent = T(listModeLabelKey());
-  document.querySelectorAll('.lmm-item').forEach((b) => {
-    b.classList.toggle('active', b.dataset.listmode === State.listMode);
-  });
+  paintListModeIcons();
   refreshNewSessionButton();
   renderWorkdirBar();
 }
@@ -1492,6 +1545,7 @@ function onListModeOutside(e) {
 }
 function toggleListModeMenu(e) {
   if (e) e.stopPropagation();
+  dismissListModeHint(); // 点过就不再需要引导箭头
   const m = $('listModeMenu');
   if (!m) return;
   if (m.hidden) openListModeMenu();

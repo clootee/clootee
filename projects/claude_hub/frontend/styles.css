@@ -3017,7 +3017,7 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .list-mode-wrap { position: relative; display: inline-flex; }
 .list-mode-menu {
   position: absolute; top: 34px; left: 0; z-index: 60;
-  min-width: 230px; padding: 6px;
+  min-width: 256px; padding: 6px;
   background: var(--panel, #fff); border: 1px solid var(--border, #d8dae0);
   border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .18);
 }
@@ -3030,13 +3030,44 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
   background: transparent; color: var(--text); text-align: left; cursor: pointer;
 }
 .list-mode-menu .lmm-item:hover { background: var(--hover, rgba(127, 127, 127, .12)); }
-.list-mode-menu .lmm-ico { width: 18px; text-align: center; font-size: 14px; }
+.list-mode-menu .lmm-ico {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; flex: none; opacity: .75;
+}
+.list-mode-menu .lmm-item.active .lmm-ico { opacity: 1; }
 .list-mode-menu .lmm-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .list-mode-menu .lmm-txt b { font-size: 13px; font-weight: 600; }
 .list-mode-menu .lmm-txt i { font-size: 11px; opacity: .6; font-style: normal; }
-.list-mode-menu .lmm-chk { opacity: 0; color: var(--accent); font-size: 13px; }
+.list-mode-menu .lmm-chk {
+  display: inline-flex; align-items: center; flex: none;
+  opacity: 0; color: var(--accent);
+}
 .list-mode-menu .lmm-item.active .lmm-chk { opacity: 1; }
 .list-mode-menu .lmm-item.active b { color: var(--accent); }
+
+/* 视图按钮本身：SVG 图标居中，尺寸与其它 icon-square 一致 */
+.list-mode-wrap .lm-btn {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.list-mode-wrap .lm-btn .ico { display: block; }
+
+/* 首次使用引导：指向视图按钮的小箭头，轻微来回推移；点过按钮后从 DOM 隐藏 */
+.lm-hint {
+  display: inline-flex; align-items: center;
+  margin: 0 2px 0 4px;
+  color: var(--accent);
+  pointer-events: none;                 /* 纯提示，不挡点击 */
+  animation: lmHintNudge 1.2s ease-in-out infinite;
+}
+.lm-hint[hidden] { display: none; }
+@keyframes lmHintNudge {
+  0%, 100% { transform: translateX(0); opacity: .95; }
+  50%      { transform: translateX(-4px); opacity: .55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lm-hint { animation: none; }
+}
 
 /* 列表分页：底部「加载更多」+ 已显示条数 */
 .session-more {
