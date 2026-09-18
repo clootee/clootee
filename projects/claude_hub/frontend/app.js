@@ -1579,20 +1579,28 @@ function setFavDir(rootId) {
   else sessionStorage.removeItem('favDirRootId');
 }
 
-// 收藏会话涉及的根目录（去重 + 计数），按会话数倒序
+// 执行中的会话按这个时间参与排序：比任何真实 updatedAt 都大，但必须是有限值
+// （用 Infinity 会让两个都在执行的目录相减得 NaN，sort 结果不稳定）
+const FDF_RUNNING_AT = 8.64e15;
+
+// 收藏会话涉及的根目录（去重 + 计数），按「最近有任务」倒序
 // 顺带按目录累计「执行中」「刚执行完」的会话数：标签右上角一个这种会话画一个点
 function favDirOptions() {
   const map = new Map();
   State.sessions.forEach((s) => {
     if (!s.rootId) return;
-    const cur = map.get(s.rootId) || { rootId: s.rootId, name: rootName(s.rootId) || s.rootId, count: 0, running: 0, justFinished: 0 };
+    const cur = map.get(s.rootId) || { rootId: s.rootId, name: rootName(s.rootId) || s.rootId, count: 0, running: 0, justFinished: 0, lastAt: 0 };
     cur.count += 1;
     // 与会话列表里的标识同口径：执行中优先，停了且用户还没点开看过才算「刚执行完」
     if (State.running.has(s.id)) cur.running += 1;
     else if (State.justFinished.has(s.id)) cur.justFinished += 1;
+    // 「最近有任务」= 该目录下会话最近一次更新时间；正在执行的会话视为此刻（永远排最前）
+    const at = State.running.has(s.id) ? FDF_RUNNING_AT : (Number(s.updatedAt) || 0);
+    if (at > cur.lastAt) cur.lastAt = at;
     map.set(s.rootId, cur);
   });
-  return [...map.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  // 最近活动优先；完全同时（如都没时间戳）才退回会话数与名称
+  return [...map.values()].sort((a, b) => b.lastAt - a.lastAt || b.count - a.count || a.name.localeCompare(b.name));
 }
 
 // 收藏夹里当前筛选中的目录（校验它还活着）：新建会话时直接拿来当工作目录
