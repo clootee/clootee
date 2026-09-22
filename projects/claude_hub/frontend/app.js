@@ -3928,6 +3928,8 @@ function openShot(dataUrl, w, h) {
   $('shotSel').hidden = true;
   $('shotOverlay').hidden = false;
   renderShotTools();
+  // 工具条渲染完、布局稳定后再量一次可用区域
+  requestAnimationFrame(fitShotImage);
 }
 function setShotImage(dataUrl, w, h) {
   Shot.dataUrl = dataUrl;
@@ -3942,7 +3944,21 @@ function setShotImage(dataUrl, w, h) {
 function fitShotImage() {
   const img = $('shotImg');
   if (!Shot.w || !Shot.h) { img.style.width = ''; return; }
-  const maxW = window.innerWidth * 0.84, maxH = window.innerHeight * 0.64;
+  // 可用区域 = 视口 - 弹窗里除图片外的那些行（标题/提示/工具条/底部按钮）的实测高度。
+  // 不能写死 64vh：手机上工具条会折行、地址栏又让 100vh 大于真实可视区，图片和底部按钮会被顶出屏幕。
+  // 也不直接量 .shot-body（它的尺寸反过来由图片撑出来，会互相咬）。
+  const vw = window.innerWidth;
+  const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  const narrow = vw <= 640;
+  const pad = narrow ? 10 : 16, gap = narrow ? 8 : 10, ratio = narrow ? 0.94 : 0.9;
+  let chrome = pad * 2;
+  ['shotHead', 'shotTip', 'shotTools', 'shotActions'].forEach((id) => {
+    const el = $(id);
+    if (!el || el.hidden || el.offsetParent === null) return;
+    chrome += el.getBoundingClientRect().height + gap;
+  });
+  const maxW = Math.max(80, vw * ratio - pad * 2 - 4);
+  const maxH = Math.max(80, vh * ratio - chrome - 4);
   const k = Math.min(maxW / Shot.w, maxH / Shot.h, 3);
   img.style.width = Math.round(Shot.w * k) + 'px';
   img.style.height = 'auto';
@@ -6613,6 +6629,8 @@ function bind() {
   $('shotTextArea').addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); confirmShotText(); }
   });
+  window.addEventListener('resize', () => { if (!$('shotOverlay').hidden) { fitShotImage(); paintAnn(); } });
+  window.addEventListener('orientationchange', () => { setTimeout(() => { if (!$('shotOverlay').hidden) { fitShotImage(); paintAnn(); } }, 250); });
   const stage = $('shotStage');
   stage.addEventListener('pointerdown', shotDown);
   stage.addEventListener('pointermove', shotMove);

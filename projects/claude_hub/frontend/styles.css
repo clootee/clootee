@@ -1607,14 +1607,17 @@ body.show-process .process-panel { display: flex; }
 
 /* 截屏预览弹窗 */
 .shot-overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 90; display: flex; align-items: center; justify-content: center; padding: 20px; }
-.shot-modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; gap: 10px; }
+/* 高度用 dvh：手机地址栏收放时 100vh 会比真实可视区大，弹窗底部（取消/确定）会被顶出屏幕 */
+.shot-modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; max-width: 90vw; max-height: 90vh; max-height: 90dvh; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px; }
+/* 图片区吃掉工具条折行后剩下的空间（而不是硬写死 64vh），放不下时自己滚动 */
+.shot-body { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; align-items: center; justify-content: center; }
 .shot-head { font-weight: 600; }
 .shot-tip { font-size: 12px; color: var(--muted); }
-.shot-stage { position: relative; display: inline-block; align-self: center; overflow: hidden; touch-action: none; cursor: crosshair; max-width: 84vw; max-height: 64vh; }
-.shot-img { display: block; max-width: 84vw; max-height: 64vh; user-select: none; } /* 实际显示尺寸由 fitShotImage() 按容器算好写在 style.width 上（裁剪后小图要自然放大） */
+.shot-stage { position: relative; display: inline-block; flex: 0 0 auto; margin: auto; overflow: hidden; touch-action: none; cursor: crosshair; }
+.shot-img { display: block; user-select: none; } /* 实际显示尺寸由 fitShotImage() 按容器算好写在 style.width 上（裁剪后小图要自然放大） */
 .shot-sel { position: absolute; border: 1px dashed var(--accent); background: color-mix(in srgb, var(--accent) 15%, transparent); pointer-events: none; }
-.shot-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.shot-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shot-actions { display: flex; justify-content: flex-end; gap: 8px; flex: 0 0 auto; }
+.shot-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 0 0 auto; }
 .shot-tool-group { display: flex; align-items: center; gap: 4px; }
 .shot-tool-sep { width: 1px; height: 18px; background: var(--border); }
 .shot-tool { border: 1px solid var(--border); background: var(--panel); color: var(--fg); border-radius: 6px; padding: 3px 8px; font-size: 13px; cursor: pointer; }
@@ -1624,6 +1627,20 @@ body.show-process .process-panel { display: flex; }
 .shot-ann { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .shot-text-overlay { position: fixed; inset: 0; background: var(--overlay); z-index: 95; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .shot-text-modal { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; width: min(480px, 92vw); display: flex; flex-direction: column; gap: 10px; }
+/* 手机端：工具条改横向滚动（折 3 行会把图和底部按钮挤出屏幕），底部操作栏常驻可见 */
+@media (max-width: 640px) {
+  .shot-overlay { padding: 8px; }
+  .shot-modal { padding: 10px; gap: 8px; max-width: 96vw; width: 96vw; max-height: 94dvh; }
+  .shot-tip { display: none; }
+  .shot-tools { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .shot-tools::-webkit-scrollbar { display: none; }
+  .shot-tool-group { flex: 0 0 auto; }
+  .shot-tool { padding: 7px 12px; font-size: 14px; }
+  .shot-tools .sm { flex: 0 0 auto; padding: 7px 12px; font-size: 14px; white-space: nowrap; }
+  .shot-swatch { width: 24px; height: 24px; flex: 0 0 auto; }
+  .shot-actions { position: sticky; bottom: 0; background: var(--panel); padding-top: 8px; margin-top: -2px; }
+  .shot-actions .sm { flex: 1; padding: 11px 16px; font-size: 15px; }
+}
 .shot-text-modal textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 90px; font: inherit; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
 .queue-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .queue-toggle {
