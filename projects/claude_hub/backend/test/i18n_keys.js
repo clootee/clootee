@@ -44,10 +44,8 @@ for (const p of ['claude', 'codex']) {
 // 「逐个真实验证」只有 claude 有
 for (const id of ['mdlClaudeVerifyChk', 'mdlClaudeVerifyTitle', 'mdlClaudeVerifyDesc'])
   if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
-// 「当前登录账号」也只有 claude 有（只有原版才是订阅登录）；codex 侧故意不存在，
-// providerUi 取到 null 后跳过，所以这里只校验 claude 那一个
-if (!ids.has('claudeOfficialWho')) fail('index.html 缺 id=claudeOfficialWho');
-if (ids.has('codexOfficialWho')) fail('codexOfficialWho 不该存在（codex 没有订阅登录）');
+// Both official engines now render account/login status inside their login cards.
+for (const id of ['clBox', 'cxBox']) if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
 
 console.log(bad ? `\n${bad} 处不通过` : '全部通过');
 process.exit(bad ? 1 : 0);

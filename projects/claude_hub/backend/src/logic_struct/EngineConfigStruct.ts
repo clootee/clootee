@@ -16,6 +16,7 @@ import {
   ProviderSlot,
 } from '../models/Types';
 import { EnvHelper } from '../helper/EnvHelper';
+import { CATALOG_PROVIDERS, resolveProvider } from '../config/ProviderCatalog';
 
 // 思考强度候选。claude 原生支持全部 5 档（`--effort`）；
 // codex 的 model_reasoning_effort 只认 low/medium/high，故 xhigh/max 在 codex 侧降级到 high。
@@ -61,6 +62,7 @@ export interface ProviderMeta {
 export const MANAGED_ENV_KEYS = [
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
   'ANTHROPIC_MODEL',
   // claude 会按 sonnet/opus/haiku 别名请求模型，第三方端点不认这些别名 → 三个都指向选定模型
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
@@ -73,7 +75,7 @@ export const MANAGED_ENV_KEYS = [
 ];
 
 // 顺序即前端展示顺序：首推的服务商放最前
-export const PROVIDERS: Record<Exclude<EngineProvider, 'official' | 'custom'>, ProviderMeta> = {
+export const PROVIDERS: Record<string, ProviderMeta> = {
   minimax: {
     anthropicBase: 'https://api.minimaxi.com/anthropic',
     chatBase: 'https://api.minimaxi.com/v1',
@@ -133,13 +135,17 @@ export const PROVIDERS: Record<Exclude<EngineProvider, 'official' | 'custom'>, P
     note: '已买 Kimi Code 月卡的选这个；Key 要在 kimi.com/code 控制台单独建，和开放平台的 Key 不通用（都是 sk- 开头，别拿错）',
   },
 };
+// Preserve legacy IDs and endpoint overrides; add compatible models.dev providers.
+for (const [id, meta] of Object.entries(CATALOG_PROVIDERS)) {
+  if (!Object.prototype.hasOwnProperty.call(PROVIDERS, id)) PROVIDERS[id] = meta;
+}
 
 // 第三方服务商 id 列表（唯一来源：PROVIDERS 的键，新增服务商只需改 PROVIDERS）
 export const THIRD_PARTY_PROVIDERS = Object.keys(PROVIDERS) as Exclude<EngineProvider, 'official' | 'custom'>[];
 
 // 某字符串是否为合法服务商 id
 export function isProvider(v: unknown): v is EngineProvider {
-  return v === 'official' || v === 'custom' || (typeof v === 'string' && v in PROVIDERS);
+  return v === 'official' || v === 'custom' || (typeof v === 'string' && Object.prototype.hasOwnProperty.call(PROVIDERS, v));
 }
 
 const DEFAULT: EnginesConfig = {
@@ -203,9 +209,12 @@ export class EngineConfigStruct {
     if (provider !== 'official' && (!cfg.apiKey || !cfg.apiKey.trim()))
       throw new Error(`setProvider: ${provider} 需要填写 API Key`);
     if (provider === 'custom') this._assertUrl(cfg.baseUrl, 'Base URL');
-    // 无兜底模型：claude 走第三方端点时必须选定真实模型，否则 claude 会按 sonnet 别名请求 → 对方 404
+    const resolved = this._bases(provider, cfg.apiKey || '');
+    if (engine === 'claude' && resolved && !resolved.anthropicBase)
+      throw new Error('此服务商未配置 Anthropic 接口，请使用 Codex / This provider supports Codex; no native Anthropic endpoint is configured.');
+    // Third-party models may be fetched or manually supplied from provider documentation.
     if (engine === 'claude' && provider !== 'official' && !(cfg.model || '').trim())
-      throw new Error(`setProvider: ${provider} 需要先「拉取模型」并选定一个模型`);
+      throw new Error(`setProvider: ${provider} 需要选择或填写模型 / Select or enter a model ID`);
     if (!isEffort(cfg.effort))
       throw new Error(`setProvider: invalid effort=${cfg.effort}`);
 
@@ -285,11 +294,7 @@ export class EngineConfigStruct {
   // 用错域名会直接鉴权失败。official / custom 不走内置端点表 → 返回 null 由调用方处理。
   private static _bases(provider: EngineProvider, apiKey: string): ProviderMeta | null {
     if (provider === 'official' || provider === 'custom') return null;
-    const meta = PROVIDERS[provider];
-    if (!meta) return null;
-    const sub = meta.subscription;
-    if (!sub || !String(apiKey || '').trim().startsWith(sub.keyPrefix)) return meta;
-    return { ...meta, anthropicBase: sub.anthropicBase, chatBase: sub.chatBase, modelsUrl: sub.modelsUrl };
+    return resolveProvider(provider, String(apiKey || ''), PROVIDERS);
   }
 
   // 当前 claude 服务商对应的托管环境变量（official / 未填 Key → 空对象＝全部清除）
@@ -398,7 +403,7 @@ export class EngineConfigStruct {
   }
 
   // 供前端「新手引导 / 设置」展示的服务商清单（含开通链接与说明）
-  static providerList(): Array<{ id: EngineProvider } & Partial<ProviderMeta>> {
+  static providerList(): Array<{ id: EngineProvider; engines?: string[] } & Partial<ProviderMeta>> {
     return [
       {
         id: 'official' as EngineProvider,
@@ -407,7 +412,10 @@ export class EngineConfigStruct {
         signupUrl: 'https://claude.com/claude-code',
         docsUrl: 'https://docs.claude.com/en/docs/claude-code/overview',
       },
-      ...THIRD_PARTY_PROVIDERS.map((id) => ({ id: id as EngineProvider, ...PROVIDERS[id] })),
+      ...THIRD_PARTY_PROVIDERS.map((id) => ({
+        id, ...PROVIDERS[id],
+        engines: PROVIDERS[id].anthropicBase ? ['claude', 'codex'] : ['codex'],
+      })),
       {
         id: 'custom' as EngineProvider,
         label: '自定义服务商',

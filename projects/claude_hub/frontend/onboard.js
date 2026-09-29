@@ -30,9 +30,6 @@ const Onboard = {
   installing: '',        // 正在安装的引擎（同一时刻只允许装一个）
 };
 
-// codex 目前只支持「原版 ChatGPT」与「Kimi」（走 config.toml + 本地代理，见 CodexProfile）
-const CODEX_PROVIDERS = ['official', 'kimi'];
-
 async function showOnboard() {
   Onboard.step = 1;
   Onboard.busy = false;
@@ -57,8 +54,7 @@ function hideOnboard() {
 }
 
 function onboardProviderList() {
-  const allowed = Onboard.engine === 'codex' ? CODEX_PROVIDERS : null;
-  return Onboard.providers.filter((p) => !allowed || allowed.indexOf(p.id) >= 0);
+  return Onboard.providers.filter((p) => p.id !== 'custom' && (!p.engines || p.engines.includes(Onboard.engine)));
 }
 
 function onboardProviderMeta(id) {
@@ -281,14 +277,19 @@ function renderOnboardProvider() {
       const rec = p.recommended ? `<span class="ob-badge ok">${T('obRecommended')}</span>` : '';
       const vis = p.vision ? `<span class="ob-badge ok">${T('obVision')}</span>` : '';
       // 名称与说明走翻译层（后端只给 id；认不出的新服务商回落到后端文案）
-      const name = providerLabel(p.id, p.label);
-      return obCard(Onboard.provider === p.id, `data-pv="${p.id}"`, `<b>${name}</b>${rec}${vis}${tag}`, providerNote(p.id, p.note));
+      const name = escapeHtml(providerLabel(p.id, p.label));
+      return obCard(Onboard.provider === p.id, `data-pv="${escapeHtml(p.id)}"`, `<b>${name}</b>${rec}${vis}${tag}`, escapeHtml(providerNote(p.id, p.note)));
     })
-    .join('') +
-    (Onboard.engine === 'codex' ? `<div class="ob-note">${T('obCodexOnly')}</div>` : '');
+    .join('');
 
   $('onboardBody').querySelectorAll('.ob-card').forEach((el) => {
-    el.onclick = () => { Onboard.provider = el.dataset.pv; renderOnboard(); };
+    el.onclick = () => {
+      if (Onboard.provider !== el.dataset.pv) {
+        Onboard.key = ''; Onboard.model = ''; Onboard.models = [];
+      }
+      Onboard.provider = el.dataset.pv;
+      renderOnboard();
+    };
   });
   $('onboardBack').hidden = false;
   // 原版（Claude 或 Codex）后面还有「登录账号」一步；第三方服务商到此为止（下一步填 Key）
@@ -349,15 +350,20 @@ function renderOnboardKey() {
          <a href="${meta.docsUrl || '#'}" target="_blank" rel="noreferrer">${T('obOfficialDocs')}</a>
        </div>
      </div>
-     <input type="password" id="onboardKey" placeholder="${T('obKeyPlaceholder')}" autocomplete="off" value="${Onboard.key}" />
+     <input type="password" id="onboardKey" placeholder="${T('obKeyPlaceholder')}" autocomplete="off" />
      <button type="button" id="onboardFetch">${T('obFetchModels')}</button>
      <div class="ob-note" id="onboardKeyMsg"></div>
-     <div id="onboardModelWrap" hidden>
+     <div id="onboardModelWrap">
        <label class="ob-lbl">${T('obPickModel')}</label>
-       <select id="onboardModel"></select>
+       <input id="onboardModel" list="onboardModelList" placeholder="${T('engModelPh')}" />
+       <datalist id="onboardModelList"></datalist>
+       <div class="ob-note">${T('engModelHintCustom')}</div>
      </div>`;
 
+  $('onboardKey').value = Onboard.key;
   $('onboardKey').oninput = (e) => { Onboard.key = e.target.value; };
+  $('onboardModel').value = Onboard.model || '';
+  $('onboardModel').oninput = (e) => { Onboard.model = e.target.value.trim(); };
   $('onboardFetch').onclick = onboardFetchModels;
   $('onboardBack').hidden = false;
   $('onboardNext').textContent = T('obDone');
@@ -377,10 +383,9 @@ async function onboardFetchModels() {
     );
     Onboard.models = (r && r.models) || [];
     const sel = $('onboardModel');
-    sel.innerHTML = Onboard.models.map((m) => `<option value="${m}">${m}</option>`).join('');
-    $('onboardModelWrap').hidden = Onboard.models.length === 0;
-    Onboard.model = Onboard.models[0] || '';
-    sel.onchange = () => { Onboard.model = sel.value; };
+    $('onboardModelList').replaceChildren(...Onboard.models.map((m) => new Option(m, m)));
+    Onboard.model = Onboard.model || r.recommended || Onboard.models[0] || '';
+    sel.value = Onboard.model;
     msg.textContent = `${Onboard.models.length} ${T('obGotModels')}`;
   } catch (e) {
     msg.textContent = T('obFetchFail') + (e.message || '');
@@ -412,8 +417,8 @@ async function onboardNext() {
   if (onboardNeedsLogin()) { await onboardFinish(''); return; }
   const key = ($('onboardKey').value || '').trim();
   if (!key) { $('onboardKeyMsg').textContent = T('obNeedKeyOrOfficial'); return; }
-  // claude 引擎必须选定模型（codex 的模型由 profile 固定，无需选）
-  if (Onboard.engine === 'claude' && !Onboard.model) {
+  // Both third-party engines need an explicit model.
+  if (!Onboard.model) {
     $('onboardKeyMsg').textContent = T('obNeedModel');
     return;
   }
@@ -427,21 +432,13 @@ async function onboardFinish(key) {
   btn.disabled = true;
   btn.textContent = T('obSaving');
   try {
+    await api('/api/engine/config', {
+      engine: Onboard.engine,
+      provider: Onboard.provider,
+      apiKey: key,
+      model: Onboard.model || '',
+    });
     await api('/api/settings', { defaultEngine: Onboard.engine, onboarded: true, setupDone: true });
-    if (Onboard.engine === 'codex' && Onboard.provider === 'kimi') {
-      // codex 走 config.toml 档位 + Kimi 密钥（与 claude 的 ANTHROPIC_* 机制不同）
-      await api('/api/codex/key', { key });
-      await api('/api/codex/profile', { profile: 'kimi' });
-    } else if (Onboard.engine === 'codex') {
-      await api('/api/codex/profile', { profile: 'chatgpt' });
-    } else {
-      await api('/api/engine/config', {
-        engine: 'claude',
-        provider: Onboard.provider,
-        apiKey: key,
-        model: Onboard.model || '',
-      });
-    }
     hideOnboard();
     applyText();
     // 新用户：引导走完，最后一步才设定访问密码（设完由 doSetup 进主界面）

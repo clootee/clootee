@@ -1,0 +1,916 @@
+{
+  "source": "https://github.com/anomalyco/models.dev",
+  "fetchedAt": "2026-09-29T04:06:06.601Z",
+  "providers": {
+    "302ai": {
+      "label": "302.AI",
+      "chatBase": "https://api.302.ai/v1",
+      "docsUrl": "https://doc.302.ai"
+    },
+    "abacus": {
+      "label": "Abacus",
+      "chatBase": "https://routellm.abacus.ai/v1",
+      "docsUrl": "https://abacus.ai/help/api"
+    },
+    "abliteration-ai": {
+      "label": "abliteration.ai",
+      "chatBase": "https://api.abliteration.ai/v1",
+      "docsUrl": "https://docs.abliteration.ai/models"
+    },
+    "above": {
+      "label": "above.dev",
+      "chatBase": "https://api.above.dev/v1",
+      "docsUrl": "https://above.dev/docs"
+    },
+    "agentrouter": {
+      "label": "AgentRouter",
+      "chatBase": "https://agentrouter.org/v1",
+      "docsUrl": "https://agentrouter.org/docs/opencode.html"
+    },
+    "agnes": {
+      "label": "Agnes AI",
+      "chatBase": "https://apihub.agnes-ai.com/v1",
+      "docsUrl": "https://agnes-ai.com/doc"
+    },
+    "ai-router": {
+      "label": "AI-ROUTER",
+      "chatBase": "https://api.ai-router.dev/v1",
+      "docsUrl": "https://ai-router.dev/openai-compatible-api-gateway/"
+    },
+    "ai21": {
+      "label": "AI21 Labs",
+      "chatBase": "https://api.ai21.com/studio/v1",
+      "docsUrl": "https://docs.ai21.com/docs/jamba-foundation-models"
+    },
+    "aiand": {
+      "label": "ai&",
+      "chatBase": "https://api.aiand.com/v1",
+      "docsUrl": "https://docs.aiand.com/"
+    },
+    "ainetcafe": {
+      "label": "ainetcafe",
+      "chatBase": "https://microquickjs.com/v1",
+      "docsUrl": "https://ainetcafe.com/k3/guides/"
+    },
+    "aixy": {
+      "label": "Aixy",
+      "chatBase": "https://api.aixy-gateway.com/v1",
+      "docsUrl": "https://docs.aixy-gateway.com/integrations/overview"
+    },
+    "aki-io": {
+      "label": "AKI.IO",
+      "chatBase": "https://aki.io/v1",
+      "docsUrl": "https://aki.io/docs/"
+    },
+    "alibaba": {
+      "label": "Alibaba",
+      "chatBase": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "docsUrl": "https://www.alibabacloud.com/help/en/model-studio/models"
+    },
+    "alibaba-cn": {
+      "label": "Alibaba (China)",
+      "chatBase": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "docsUrl": "https://www.alibabacloud.com/help/en/model-studio/models"
+    },
+    "alibaba-coding-plan": {
+      "label": "Alibaba Coding Plan",
+      "chatBase": "https://coding-intl.dashscope.aliyuncs.com/v1",
+      "docsUrl": "https://www.alibabacloud.com/help/en/model-studio/coding-plan"
+    },
+    "alibaba-coding-plan-cn": {
+      "label": "Alibaba Coding Plan (China)",
+      "chatBase": "https://coding.dashscope.aliyuncs.com/v1",
+      "docsUrl": "https://help.aliyun.com/zh/model-studio/coding-plan"
+    },
+    "alibaba-token-plan": {
+      "label": "Alibaba Token Plan",
+      "chatBase": "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+      "docsUrl": "https://www.alibabacloud.com/help/en/model-studio/token-plan-overview"
+    },
+    "alibaba-token-plan-cn": {
+      "label": "Alibaba Token Plan (China)",
+      "chatBase": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+      "docsUrl": "https://www.alibabacloud.com/help/zh/model-studio/token-plan-overview"
+    },
+    "ambient": {
+      "label": "Ambient",
+      "chatBase": "https://api.ambient.xyz/v1",
+      "docsUrl": "https://ambient.xyz"
+    },
+    "amd": {
+      "label": "AMD",
+      "chatBase": "https://developer.amd.com.cn/radeon/api/v1",
+      "docsUrl": "https://developer.amd.com.cn/radeon/tokenfactory"
+    },
+    "anyapi": {
+      "label": "AnyAPI",
+      "chatBase": "https://api.anyapi.ai/v1",
+      "docsUrl": "https://docs.anyapi.ai"
+    },
+    "arcee": {
+      "label": "Arcee",
+      "chatBase": "https://api.arcee.ai/api/v1",
+      "docsUrl": "https://docs.arcee.ai"
+    },
+    "auriko": {
+      "label": "Auriko",
+      "chatBase": "https://api.auriko.ai/v1",
+      "docsUrl": "https://docs.auriko.ai"
+    },
+    "bailing": {
+      "label": "Bailing",
+      "chatBase": "https://api.tbox.cn/api/llm/v1",
+      "docsUrl": "https://alipaytbox.yuque.com/sxs0ba/ling/intro"
+    },
+    "baseten": {
+      "label": "Baseten",
+      "chatBase": "https://inference.baseten.co/v1",
+      "docsUrl": "https://docs.baseten.co/inference/model-apis/overview"
+    },
+    "bee": {
+      "label": "Bee by HEOSSI",
+      "chatBase": "https://api.bee.heossi.com/bee",
+      "docsUrl": "https://bee.heossi.com/docs/sdks"
+    },
+    "berget": {
+      "label": "Berget.AI",
+      "chatBase": "https://api.berget.ai/v1",
+      "docsUrl": "https://api.berget.ai"
+    },
+    "blueclaw": {
+      "label": "Blue Claw",
+      "chatBase": "https://openai.blueclaw.network/v1",
+      "docsUrl": "https://blueclaw.network"
+    },
+    "bothub": {
+      "label": "Bothub",
+      "chatBase": "https://openai.bothub.ru/v1",
+      "docsUrl": "https://bothub.ru/models"
+    },
+    "chutes": {
+      "label": "Chutes",
+      "chatBase": "https://llm.chutes.ai/v1",
+      "docsUrl": "https://llm.chutes.ai/v1/models"
+    },
+    "clarifai": {
+      "label": "Clarifai",
+      "chatBase": "https://api.clarifai.com/v2/ext/openai/v1",
+      "docsUrl": "https://docs.clarifai.com/compute/inference/"
+    },
+    "claudinio": {
+      "label": "Claudinio",
+      "chatBase": "https://api.claudin.io/v1",
+      "docsUrl": "https://claudin.io"
+    },
+    "cline-pass": {
+      "label": "ClinePass",
+      "chatBase": "https://api.cline.bot/api/v1",
+      "docsUrl": "https://docs.cline.bot/getting-started/clinepass"
+    },
+    "cloudferro-sherlock": {
+      "label": "CloudFerro Sherlock",
+      "chatBase": "https://api-sherlock.cloudferro.com/openai/v1",
+      "docsUrl": "https://docs.sherlock.cloudferro.com/"
+    },
+    "coralbricks": {
+      "label": "CoralBricks",
+      "chatBase": "https://inference.coralbricks.ai/v1",
+      "docsUrl": "https://www.coralbricks.ai/docs"
+    },
+    "cortecs": {
+      "label": "Cortecs",
+      "chatBase": "https://api.cortecs.ai/v1",
+      "docsUrl": "https://api.cortecs.ai/v1/models"
+    },
+    "crof": {
+      "label": "CrofAI",
+      "chatBase": "https://crof.ai/v1",
+      "docsUrl": "https://crof.ai/docs"
+    },
+    "crossmodel": {
+      "label": "CrossModel",
+      "chatBase": "https://api.crossmodel.ai/v1",
+      "docsUrl": "https://www.crossmodel.ai/docs"
+    },
+    "crusoe": {
+      "label": "Crusoe",
+      "chatBase": "https://api.inference.crusoecloud.com/v1",
+      "docsUrl": "https://docs.crusoecloud.com/managed-inference/overview"
+    },
+    "daoxe": {
+      "label": "DaoXE",
+      "chatBase": "https://daoxe.com/v1",
+      "docsUrl": "https://daoxe.com/pricing"
+    },
+    "deepseek": {
+      "label": "DeepSeek",
+      "chatBase": "https://api.deepseek.com",
+      "docsUrl": "https://api-docs.deepseek.com/quick_start/pricing"
+    },
+    "digitalocean": {
+      "label": "DigitalOcean",
+      "chatBase": "https://inference.do-ai.run/v1",
+      "docsUrl": "https://docs.digitalocean.com/products/gradient-ai-platform/details/models/"
+    },
+    "dinference": {
+      "label": "DInference",
+      "chatBase": "https://api.dinference.com/v1",
+      "docsUrl": "https://dinference.com"
+    },
+    "drun": {
+      "label": "D.Run (China)",
+      "chatBase": "https://chat.d.run/v1",
+      "docsUrl": "https://www.d.run"
+    },
+    "ebcloud": {
+      "label": "EBCloud",
+      "chatBase": "https://maas-api.ebcloud.com/v1",
+      "docsUrl": "https://docs.ebtech.com/ai/model-api.html"
+    },
+    "echo": {
+      "label": "Echo",
+      "chatBase": "https://echo.tracerml.ai/v1",
+      "docsUrl": "https://echo.tracerml.ai/docs/api"
+    },
+    "edenai": {
+      "label": "Eden AI",
+      "chatBase": "https://api.edenai.run/v3",
+      "docsUrl": "https://docs.edenai.co"
+    },
+    "empiriolabs": {
+      "label": "EmpirioLabs AI",
+      "chatBase": "https://api.empiriolabs.ai/v1",
+      "docsUrl": "https://docs.empiriolabs.ai"
+    },
+    "evroc": {
+      "label": "evroc",
+      "chatBase": "https://models.think.evroc.com/v1",
+      "docsUrl": "https://docs.evroc.com/products/think/overview.html"
+    },
+    "fastrouter": {
+      "label": "FastRouter",
+      "chatBase": "https://go.fastrouter.ai/api/v1",
+      "docsUrl": "https://fastrouter.ai/models"
+    },
+    "fireworks-ai": {
+      "label": "Fireworks AI",
+      "chatBase": "https://api.fireworks.ai/inference/v1",
+      "docsUrl": "https://fireworks.ai/docs/"
+    },
+    "friendli": {
+      "label": "Friendli",
+      "chatBase": "https://api.friendli.ai/serverless/v1",
+      "docsUrl": "https://friendli.ai/docs/guides/serverless_endpoints/introduction"
+    },
+    "frogbot": {
+      "label": "FrogBot",
+      "chatBase": "https://app.frogbot.ai/api/v1",
+      "docsUrl": "https://docs.frogbot.ai"
+    },
+    "github-copilot": {
+      "label": "GitHub Copilot",
+      "chatBase": "https://api.githubcopilot.com",
+      "docsUrl": "https://docs.github.com/en/copilot"
+    },
+    "gmicloud": {
+      "label": "GMI Cloud",
+      "chatBase": "https://api.gmi-serving.com/v1",
+      "docsUrl": "https://docs.gmicloud.ai/inference-engine/api-reference/llm-api-reference"
+    },
+    "greenpt": {
+      "label": "GreenPT",
+      "chatBase": "https://api.greenpt.ai/v1",
+      "docsUrl": "https://docs.greenpt.ai"
+    },
+    "helicone": {
+      "label": "Helicone",
+      "chatBase": "https://ai-gateway.helicone.ai/v1",
+      "docsUrl": "https://helicone.ai/models"
+    },
+    "hetzner": {
+      "label": "Hetzner",
+      "chatBase": "https://inference.hetzner.com/api/v1",
+      "docsUrl": "https://experiments.hetzner.com/docs/inference"
+    },
+    "hpc-ai": {
+      "label": "HPC-AI",
+      "chatBase": "https://api.hpc-ai.com/inference/v1",
+      "docsUrl": "https://www.hpc-ai.com/doc/docs/quickstart/"
+    },
+    "huggingface": {
+      "label": "Hugging Face",
+      "chatBase": "https://router.huggingface.co/v1",
+      "docsUrl": "https://huggingface.co/docs/inference-providers"
+    },
+    "hyper": {
+      "label": "Charm Hyper",
+      "chatBase": "https://hyper.charm.land/v1",
+      "docsUrl": "https://hyper.charm.land"
+    },
+    "iflowcn": {
+      "label": "iFlow",
+      "chatBase": "https://apis.iflow.cn/v1",
+      "docsUrl": "https://platform.iflow.cn/en/docs"
+    },
+    "impossibl": {
+      "label": "Impossibl",
+      "chatBase": "https://api.impossibl.com/v1",
+      "docsUrl": "https://impossibl.com/docs/models"
+    },
+    "inception": {
+      "label": "Inception",
+      "chatBase": "https://api.inceptionlabs.ai/v1",
+      "docsUrl": "https://docs.inceptionlabs.ai/get-started/models"
+    },
+    "inceptron": {
+      "label": "Inceptron",
+      "chatBase": "https://api.inceptron.io/v1",
+      "docsUrl": "https://docs.inceptron.io"
+    },
+    "inco": {
+      "label": "Inco",
+      "chatBase": "https://api.inco.ai/v1",
+      "docsUrl": "https://platform.inco.ai/docs"
+    },
+    "infer": {
+      "label": "Infer by Flow7",
+      "chatBase": "https://infer.flow7.org/v1",
+      "docsUrl": "https://infer.flow7.org/opencode"
+    },
+    "inference": {
+      "label": "Inference",
+      "chatBase": "https://inference.net/v1",
+      "docsUrl": "https://inference.net/models"
+    },
+    "inferx": {
+      "label": "InferX",
+      "chatBase": "https://model.inferx.net/endpoints/v1",
+      "docsUrl": "https://model.inferx.net/endpoints"
+    },
+    "io-net": {
+      "label": "IO.NET",
+      "chatBase": "https://api.intelligence.io.solutions/api/v1",
+      "docsUrl": "https://io.net/docs/guides/intelligence/io-intelligence"
+    },
+    "iteracompute": {
+      "label": "IteraCompute",
+      "chatBase": "https://api.iteracompute.com/v1",
+      "docsUrl": "https://iteracompute.com/docs.html"
+    },
+    "jalapeno": {
+      "label": "Jalapeno Cloud",
+      "chatBase": "https://api.jalapeno-cloud.ai/v1",
+      "docsUrl": "https://www.jalapeno-cloud.ai/docs/"
+    },
+    "jiekou": {
+      "label": "Jiekou.AI",
+      "chatBase": "https://api.jiekou.ai/openai",
+      "docsUrl": "https://docs.jiekou.ai/docs/support/quickstart?utm_source=github_models.dev"
+    },
+    "kenari": {
+      "label": "Kenari",
+      "chatBase": "https://kenari.id/v1",
+      "docsUrl": "https://kenari.id/docs"
+    },
+    "kilo": {
+      "label": "Kilo Gateway",
+      "chatBase": "https://api.kilo.ai/api/gateway",
+      "docsUrl": "https://kilo.ai"
+    },
+    "kimi-code-plan-cn": {
+      "label": "Kimi For Coding (kimi.com)",
+      "chatBase": "https://api.kimi.com/coding/v1",
+      "docsUrl": "https://www.kimi.com/code/docs/en/kimi-code/models.html"
+    },
+    "kimi-code-plan-global": {
+      "label": "Kimi For Coding (kimi.ai)",
+      "chatBase": "https://api.kimi.ai/coding/v1",
+      "docsUrl": "https://www.kimi.ai/code/docs/en/kimi-code/models.html"
+    },
+    "klokintegration": {
+      "label": "klokintegration.se",
+      "chatBase": "https://api-gw.klok.ipaas.se/proxy/kloker-key/v1",
+      "docsUrl": "https://klokintegration.se/docs/ai-api"
+    },
+    "kosmik": {
+      "label": "Kosmik Compute",
+      "chatBase": "https://api.koscompute.com/v1",
+      "docsUrl": "https://api.koscompute.com/docs/"
+    },
+    "kuae-cloud-coding-plan": {
+      "label": "KUAE Cloud Coding Plan",
+      "chatBase": "https://coding-plan-endpoint.kuaecloud.net/v1",
+      "docsUrl": "https://docs.mthreads.com/kuaecloud/kuaecloud-doc-online/coding_plan/"
+    },
+    "lilac": {
+      "label": "Lilac",
+      "chatBase": "https://api.getlilac.com/v1",
+      "docsUrl": "https://docs.getlilac.com/inference/models"
+    },
+    "llama": {
+      "label": "Llama",
+      "chatBase": "https://api.llama.com/compat/v1",
+      "docsUrl": "https://llama.developer.meta.com/docs/models"
+    },
+    "llmgateway": {
+      "label": "DevPass (LLM Gateway)",
+      "chatBase": "https://api.llmgateway.io/v1",
+      "docsUrl": "https://llmgateway.io/docs"
+    },
+    "llmgateway-providers": {
+      "label": "LLM Gateway",
+      "chatBase": "https://api.llmgateway.io/v1",
+      "docsUrl": "https://llmgateway.io/docs"
+    },
+    "llmtech": {
+      "label": "LLM Tech",
+      "chatBase": "https://api.llmtech.eu/v1",
+      "docsUrl": "https://llmtech.eu/models/qwen3.8-27b"
+    },
+    "llmtr": {
+      "label": "LLMTR",
+      "chatBase": "https://llmtr.com/v1",
+      "docsUrl": "https://llmtr.com/docs"
+    },
+    "longcat": {
+      "label": "LongCat",
+      "chatBase": "https://api.longcat.chat/openai",
+      "docsUrl": "https://longcat.chat/platform/docs/"
+    },
+    "lucidquery": {
+      "label": "LucidQuery",
+      "chatBase": "https://api.lucidquery.com/v1",
+      "docsUrl": "https://lucidquery.com/docs"
+    },
+    "meganova": {
+      "label": "Meganova",
+      "chatBase": "https://api.meganova.ai/v1",
+      "docsUrl": "https://docs.meganova.ai"
+    },
+    "melious": {
+      "label": "Melious",
+      "chatBase": "https://api.melious.ai/v1",
+      "docsUrl": "https://melious.ai/docs/reference/models"
+    },
+    "meta": {
+      "label": "Meta",
+      "chatBase": "https://api.meta.ai/v1",
+      "docsUrl": "https://dev.meta.ai/docs"
+    },
+    "mixlayer": {
+      "label": "Mixlayer",
+      "chatBase": "https://models.mixlayer.ai/v1",
+      "docsUrl": "https://docs.mixlayer.com"
+    },
+    "moark": {
+      "label": "Moark",
+      "chatBase": "https://moark.com/v1",
+      "docsUrl": "https://moark.com/docs/openapi/v1#tag/%E6%96%87%E6%9C%AC%E7%94%9F%E6%88%90"
+    },
+    "modal": {
+      "label": "Modal",
+      "chatBase": "https://inference.us-west.modal.direct/v1",
+      "docsUrl": "https://modal.com/docs/guide/endpoints"
+    },
+    "model-oracle-ai": {
+      "label": "Model Oracle AI",
+      "chatBase": "https://api.modeloracle.com/api/v1",
+      "docsUrl": "https://modeloracle.com/setup/"
+    },
+    "modelis": {
+      "label": "Modelis",
+      "chatBase": "https://modelishub.com/v1",
+      "docsUrl": "https://modelishub.com/pricing"
+    },
+    "modelscope": {
+      "label": "ModelScope",
+      "chatBase": "https://api-inference.modelscope.cn/v1",
+      "docsUrl": "https://modelscope.cn/docs/model-service/API-Inference/intro"
+    },
+    "moonshotai": {
+      "label": "Moonshot AI",
+      "chatBase": "https://api.moonshot.ai/v1",
+      "docsUrl": "https://platform.moonshot.ai/docs/api/chat"
+    },
+    "moonshotai-cn": {
+      "label": "Moonshot AI (China)",
+      "chatBase": "https://api.moonshot.cn/v1",
+      "docsUrl": "https://platform.moonshot.cn/docs/api/chat"
+    },
+    "morph": {
+      "label": "Morph",
+      "chatBase": "https://api.morphllm.com/v1",
+      "docsUrl": "https://docs.morphllm.com/api-reference/introduction"
+    },
+    "nan": {
+      "label": "NaN",
+      "chatBase": "https://api.nan.builders/v1",
+      "docsUrl": "https://nan.builders/docs/models"
+    },
+    "nano-gpt": {
+      "label": "NanoGPT",
+      "chatBase": "https://nano-gpt.com/api/v1",
+      "docsUrl": "https://docs.nano-gpt.com"
+    },
+    "nearai": {
+      "label": "NEAR AI Cloud",
+      "chatBase": "https://cloud-api.near.ai/v1",
+      "docsUrl": "https://docs.near.ai/"
+    },
+    "nebius": {
+      "label": "Nebius Token Factory",
+      "chatBase": "https://api.tokenfactory.nebius.com/v1",
+      "docsUrl": "https://docs.tokenfactory.nebius.com/"
+    },
+    "neosmith": {
+      "label": "NeoSmith",
+      "chatBase": "https://router.neosmith.ai/v1",
+      "docsUrl": "https://neosmith.ai/docs"
+    },
+    "neuralwatt": {
+      "label": "Neuralwatt",
+      "chatBase": "https://api.neuralwatt.com/v1",
+      "docsUrl": "https://portal.neuralwatt.com/docs"
+    },
+    "nova": {
+      "label": "Nova",
+      "chatBase": "https://api.nova.amazon.com/v1",
+      "docsUrl": "https://nova.amazon.com/dev/documentation"
+    },
+    "novita-ai": {
+      "label": "NovitaAI",
+      "chatBase": "https://api.novita.ai/openai",
+      "docsUrl": "https://novita.ai/docs/guides/introduction"
+    },
+    "nvidia": {
+      "label": "Nvidia",
+      "chatBase": "https://integrate.api.nvidia.com/v1",
+      "docsUrl": "https://docs.api.nvidia.com/nim/"
+    },
+    "oci": {
+      "label": "OCI Generative AI",
+      "chatBase": "https://inference.generativeai.us-chicago-1.oci.oraclecloud.com/openai/v1",
+      "docsUrl": "https://docs.oracle.com/en-us/iaas/Content/generative-ai/pretrained-models.htm"
+    },
+    "ofox": {
+      "label": "Ofox",
+      "chatBase": "https://api.ofox.ai/v1",
+      "docsUrl": "https://ofox.ai/docs"
+    },
+    "ollama-cloud": {
+      "label": "Ollama Cloud",
+      "chatBase": "https://ollama.com/v1",
+      "docsUrl": "https://docs.ollama.com/cloud"
+    },
+    "opencode": {
+      "label": "OpenCode Zen",
+      "chatBase": "https://opencode.ai/zen/v1",
+      "docsUrl": "https://opencode.ai/docs/zen"
+    },
+    "opencode-go": {
+      "label": "OpenCode Go",
+      "chatBase": "https://opencode.ai/zen/go/v1",
+      "docsUrl": "https://opencode.ai/docs/go"
+    },
+    "openreason": {
+      "label": "OpenReason",
+      "chatBase": "https://api.openreason.app/v1",
+      "docsUrl": "https://openreason.app/docs"
+    },
+    "openrouter": {
+      "label": "OpenRouter",
+      "chatBase": "https://openrouter.ai/api/v1",
+      "docsUrl": "https://openrouter.ai/models"
+    },
+    "opper": {
+      "label": "Opper",
+      "chatBase": "https://api.opper.ai/v3/compat",
+      "docsUrl": "https://opper.ai/models"
+    },
+    "orcarouter": {
+      "label": "OrcaRouter",
+      "chatBase": "https://api.orcarouter.ai/v1",
+      "docsUrl": "https://docs.orcarouter.ai"
+    },
+    "ovhcloud": {
+      "label": "OVHcloud AI Endpoints",
+      "chatBase": "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+      "docsUrl": "https://www.ovhcloud.com/en/public-cloud/ai-endpoints/catalog//"
+    },
+    "pareto": {
+      "label": "Pareto Inference",
+      "chatBase": "https://api.paretoinference.com/v1",
+      "docsUrl": "https://docs.paretoinference.com/"
+    },
+    "pendra": {
+      "label": "Pendra",
+      "chatBase": "https://api.pendra.ai/api/v1",
+      "docsUrl": "https://pendra.ai/docs/integrations/opencode"
+    },
+    "perplexity-agent": {
+      "label": "Perplexity Agent",
+      "chatBase": "https://api.perplexity.ai/v1",
+      "docsUrl": "https://docs.perplexity.ai/docs/agent-api/models"
+    },
+    "pioneer": {
+      "label": "Pioneer",
+      "chatBase": "https://api.fastino.ai/v1",
+      "docsUrl": "https://agent.pioneer.ai/llms.txt"
+    },
+    "poe": {
+      "label": "Poe",
+      "chatBase": "https://api.poe.com/v1",
+      "docsUrl": "https://creator.poe.com/docs/external-applications/openai-compatible-api"
+    },
+    "poolside": {
+      "label": "Poolside",
+      "chatBase": "https://inference.poolside.ai/v1",
+      "docsUrl": "https://platform.poolside.ai"
+    },
+    "qihang-ai": {
+      "label": "QiHang",
+      "chatBase": "https://api.qhaigc.net/v1",
+      "docsUrl": "https://www.qhaigc.net/docs"
+    },
+    "qiniu-ai": {
+      "label": "Qiniu",
+      "chatBase": "https://api.qnaigc.com/v1",
+      "docsUrl": "https://developer.qiniu.com/aitokenapi"
+    },
+    "regolo-ai": {
+      "label": "Regolo AI",
+      "chatBase": "https://api.regolo.ai/v1",
+      "docsUrl": "https://docs.regolo.ai/"
+    },
+    "requesty": {
+      "label": "Requesty",
+      "chatBase": "https://router.requesty.ai/v1",
+      "docsUrl": "https://requesty.ai/solution/llm-routing/models"
+    },
+    "routing-run": {
+      "label": "routing.run",
+      "chatBase": "https://api.routing.run/v1",
+      "docsUrl": "https://docs.routing.run/api-reference/models"
+    },
+    "runinfra": {
+      "label": "RunInfra",
+      "chatBase": "https://api.runinfra.ai/v1",
+      "docsUrl": "https://runinfra.ai/docs"
+    },
+    "sakana": {
+      "label": "Sakana AI",
+      "chatBase": "https://api.sakana.ai/v1",
+      "docsUrl": "https://console.sakana.ai/models"
+    },
+    "sarvam": {
+      "label": "Sarvam AI",
+      "chatBase": "https://api.sarvam.ai/v1",
+      "docsUrl": "https://docs.sarvam.ai/api-reference-docs/getting-started/models"
+    },
+    "scaleway": {
+      "label": "Scaleway",
+      "chatBase": "https://api.scaleway.ai/v1",
+      "docsUrl": "https://www.scaleway.com/en/docs/generative-apis/"
+    },
+    "scnet-token-plan": {
+      "label": "SCNet Token Plan",
+      "chatBase": "https://api.scnet.cn/api/llm/v1",
+      "docsUrl": "https://www.scnet.cn/ac/openapi/doc/2.0/moduleapi/plans/token-plan.html"
+    },
+    "scx-ai": {
+      "label": "SCX.ai",
+      "chatBase": "https://api.scx.ai/v1",
+      "docsUrl": "https://platform.scx.ai/docs"
+    },
+    "sensenova": {
+      "label": "SenseNova (China)",
+      "chatBase": "https://token.sensenova.cn/v1",
+      "docsUrl": "https://platform.sensenova.cn/docs"
+    },
+    "siliconflow": {
+      "label": "SiliconFlow",
+      "chatBase": "https://api.siliconflow.com/v1",
+      "docsUrl": "https://cloud.siliconflow.com/models"
+    },
+    "siliconflow-cn": {
+      "label": "SiliconFlow (China)",
+      "chatBase": "https://api.siliconflow.cn/v1",
+      "docsUrl": "https://cloud.siliconflow.com/models"
+    },
+    "stackit": {
+      "label": "STACKIT",
+      "chatBase": "https://api.openai-compat.model-serving.eu01.onstackit.cloud/v1",
+      "docsUrl": "https://docs.stackit.cloud/products/data-and-ai/ai-model-serving/basics/available-shared-models"
+    },
+    "standardcompute": {
+      "label": "Standard Compute",
+      "chatBase": "https://api.stdcmpt.com/v1",
+      "docsUrl": "https://standardcompute.com/models"
+    },
+    "stepfun": {
+      "label": "StepFun (China)",
+      "chatBase": "https://api.stepfun.com/v1",
+      "docsUrl": "https://platform.stepfun.com/docs/zh/overview/concept"
+    },
+    "stepfun-ai": {
+      "label": "StepFun (Global)",
+      "chatBase": "https://api.stepfun.ai/v1",
+      "docsUrl": "https://platform.stepfun.ai/docs/en/overview/concept"
+    },
+    "stepfun-ai-step-plan": {
+      "label": "StepFun Step Plan (Global)",
+      "chatBase": "https://api.stepfun.ai/step_plan/v1",
+      "docsUrl": "https://platform.stepfun.ai/docs/en/step-plan/integrations/reasoning-api"
+    },
+    "stepfun-step-plan": {
+      "label": "StepFun Step Plan (China)",
+      "chatBase": "https://api.stepfun.com/step_plan/v1",
+      "docsUrl": "https://platform.stepfun.com/docs/zh/step-plan/integrations/reasoning-api"
+    },
+    "submodel": {
+      "label": "submodel",
+      "chatBase": "https://llm.submodel.ai/v1",
+      "docsUrl": "https://submodel.gitbook.io"
+    },
+    "synthetic": {
+      "label": "Synthetic",
+      "chatBase": "https://api.synthetic.new/openai/v1",
+      "docsUrl": "https://synthetic.new/pricing"
+    },
+    "tempr": {
+      "label": "Tempr",
+      "chatBase": "https://api.temprhq.io/v1",
+      "docsUrl": "https://temprhq.io/docs/gateway-reference.html"
+    },
+    "tencent-coding-plan": {
+      "label": "Tencent Coding Plan (China)",
+      "chatBase": "https://api.lkeap.cloud.tencent.com/coding/v3",
+      "docsUrl": "https://cloud.tencent.com/document/product/1772/128947"
+    },
+    "tencent-token-plan": {
+      "label": "Tencent Token Plan",
+      "chatBase": "https://api.lkeap.cloud.tencent.com/plan/v3",
+      "docsUrl": "https://cloud.tencent.com/document/product/1823/130060"
+    },
+    "tencent-tokenhub": {
+      "label": "Tencent TokenHub",
+      "chatBase": "https://tokenhub.tencentmaas.com/v1",
+      "docsUrl": "https://cloud.tencent.com/document/product/1823/130050"
+    },
+    "tensorx": {
+      "label": "TensorX",
+      "chatBase": "https://api.tensorx.ai/v1",
+      "docsUrl": "https://docs.tensorx.ai/"
+    },
+    "the-grid-ai": {
+      "label": "The Grid AI",
+      "chatBase": "https://api.thegrid.ai/v1",
+      "docsUrl": "https://thegrid.ai/docs"
+    },
+    "tinfoil": {
+      "label": "Tinfoil",
+      "chatBase": "https://inference.tinfoil.sh/v1",
+      "docsUrl": "https://docs.tinfoil.sh"
+    },
+    "tokengo": {
+      "label": "TokenGo",
+      "chatBase": "https://api.tokengo.com/v1",
+      "docsUrl": "https://www.tokengo.com/docs"
+    },
+    "tokenrouter": {
+      "label": "TokenRouter",
+      "chatBase": "https://api.tokenrouter.com/v1",
+      "docsUrl": "https://www.tokenrouter.com/docs/tokenrouter-feature-guide/"
+    },
+    "trustedrouter": {
+      "label": "TrustedRouter",
+      "chatBase": "https://api.trustedrouter.com/v1",
+      "docsUrl": "https://trustedrouter.com/docs"
+    },
+    "umans-ai": {
+      "label": "Umans AI",
+      "chatBase": "https://api.code.umans.ai/v1",
+      "docsUrl": "https://app.umans.ai/offers/code/docs/orgs"
+    },
+    "umans-ai-coding-plan": {
+      "label": "Umans AI Coding Plan",
+      "chatBase": "https://api.code.umans.ai/v1",
+      "docsUrl": "https://app.umans.ai/offers/code/docs"
+    },
+    "unorouter": {
+      "label": "UnoRouter",
+      "chatBase": "https://api.unorouter.com/v1",
+      "docsUrl": "https://unorouter.com/models"
+    },
+    "upstage": {
+      "label": "Upstage",
+      "chatBase": "https://api.upstage.ai/v1/solar",
+      "docsUrl": "https://developers.upstage.ai/docs/apis/chat"
+    },
+    "vancine": {
+      "label": "Vancine",
+      "chatBase": "https://vancine.com/v1",
+      "docsUrl": "https://vancine.com/docs"
+    },
+    "vispark": {
+      "label": "Vispark",
+      "chatBase": "https://api.lab.vispark.in/v1",
+      "docsUrl": "https://lab.vispark.in/#vision"
+    },
+    "vivgrid": {
+      "label": "Vivgrid",
+      "chatBase": "https://api.vivgrid.com/v1",
+      "docsUrl": "https://docs.vivgrid.com/models"
+    },
+    "volcengine": {
+      "label": "Volcengine Ark",
+      "chatBase": "https://ark.cn-beijing.volces.com/api/v3",
+      "docsUrl": "https://www.volcengine.com/docs/82379/1330310"
+    },
+    "volcengine-coding-plan": {
+      "label": "Volcengine Ark Coding Plan",
+      "chatBase": "https://ark.cn-beijing.volces.com/api/coding/v3",
+      "docsUrl": "https://www.volcengine.com/docs/82379/1928261"
+    },
+    "vultr": {
+      "label": "Vultr",
+      "chatBase": "https://api.vultrinference.com/v1",
+      "docsUrl": "https://api.vultrinference.com/"
+    },
+    "wafer.ai": {
+      "label": "Wafer",
+      "chatBase": "https://pass.wafer.ai/v1",
+      "docsUrl": "https://docs.wafer.ai/wafer-pass"
+    },
+    "wallaby": {
+      "label": "Wallaby",
+      "chatBase": "https://api.wallabytoken.com/v1",
+      "docsUrl": "https://wallabytoken.com/docs"
+    },
+    "wandb": {
+      "label": "CoreWeave",
+      "chatBase": "https://api.inference.wandb.ai/v1",
+      "docsUrl": "https://docs.wandb.ai/inference"
+    },
+    "xiaomi": {
+      "label": "Xiaomi",
+      "chatBase": "https://api.xiaomimimo.com/v1",
+      "docsUrl": "https://platform.xiaomimimo.com/#/docs"
+    },
+    "xiaomi-token-plan-ams": {
+      "label": "Xiaomi Token Plan (Europe)",
+      "chatBase": "https://token-plan-ams.xiaomimimo.com/v1",
+      "docsUrl": "https://platform.xiaomimimo.com/#/docs"
+    },
+    "xiaomi-token-plan-cn": {
+      "label": "Xiaomi Token Plan (China)",
+      "chatBase": "https://token-plan-cn.xiaomimimo.com/v1",
+      "docsUrl": "https://platform.xiaomimimo.com/#/docs"
+    },
+    "xiaomi-token-plan-sgp": {
+      "label": "Xiaomi Token Plan (Singapore)",
+      "chatBase": "https://token-plan-sgp.xiaomimimo.com/v1",
+      "docsUrl": "https://platform.xiaomimimo.com/#/docs"
+    },
+    "xpersona": {
+      "label": "Xpersona",
+      "chatBase": "https://www.xpersona.co/v1",
+      "docsUrl": "https://www.xpersona.co/docs"
+    },
+    "zai": {
+      "label": "Z.AI",
+      "chatBase": "https://api.z.ai/api/paas/v4",
+      "docsUrl": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "zai-coding-plan": {
+      "label": "Z.AI Coding Plan",
+      "chatBase": "https://api.z.ai/api/coding/paas/v4",
+      "docsUrl": "https://docs.z.ai/devpack/overview"
+    },
+    "zeldoc": {
+      "label": "Zeldoc",
+      "chatBase": "https://api.zeldoc.ai/v1",
+      "docsUrl": "https://docs.zeldoc.ai"
+    },
+    "zenifra": {
+      "label": "Zenifra",
+      "chatBase": "https://ai.zenifra.com/v1",
+      "docsUrl": "https://docs.zenifra.com"
+    },
+    "zenmux": {
+      "label": "ZenMux",
+      "chatBase": "https://zenmux.ai/api/v1",
+      "docsUrl": "https://docs.zenmux.ai"
+    },
+    "zhipuai": {
+      "label": "Zhipu AI",
+      "chatBase": "https://open.bigmodel.cn/api/paas/v4",
+      "docsUrl": "https://docs.z.ai/guides/overview/pricing"
+    },
+    "zhipuai-coding-plan": {
+      "label": "Zhipu AI Coding Plan",
+      "chatBase": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "docsUrl": "https://docs.bigmodel.cn/cn/coding-plan/overview"
+    }
+  }
+}

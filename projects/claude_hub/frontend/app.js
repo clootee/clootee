@@ -7495,7 +7495,7 @@ const DETECT_ERR_KEY = {
 };
 
 function providerLabel(id, fallback) {
-  return PROVIDER_LABEL_KEY[id] ? T(PROVIDER_LABEL_KEY[id]) : (fallback || id);
+  return PROVIDER_LABEL_KEY[id] ? T(PROVIDER_LABEL_KEY[id]) : (fallback || EngineProviderCatalog.find((p) => p.id === id)?.label || id);
 }
 function providerNote(id, fallback) {
   return PROVIDER_NOTE_KEY[id] ? T(PROVIDER_NOTE_KEY[id]) : (fallback || '');
@@ -7524,7 +7524,7 @@ function modelOptionText(o) {
 // 自定义端点的模型列表未必拉得到（很多兼容网关没有 /models），所以那种情况必须允许自己写模型 id；
 // 拉到的候选转成 datalist，输入时作为提示出现，两种方式共用同一个「当前模型」值。
 function modelIsFree(engine) {
-  return providerUi(engine).select.value === 'custom';
+  return providerUi(engine).select.value !== 'official';
 }
 function modelValue(engine) {
   const u = providerUi(engine);
@@ -7609,6 +7609,12 @@ function setModelStatus(engine, text, ok) {
 // 自定义服务商是手填的输入框，change（失焦/回车）时同样走这里
 async function onModelSelect(engine) {
   const model = modelValue(engine);
+  if (modelIsFree(engine)) {
+    // Save the provider, key and model together; a draft must not alter the old slot.
+    setModelStatus(engine, T('engProviderDraft'), null);
+    renderAccSummary(engine);
+    return;
+  }
   try {
     await api('/api/model/select', { engine, model });
     setModelStatus(
@@ -7655,6 +7661,20 @@ async function detectAvailableModels(engine) {
 }
 
 // ── Claude Code / Codex 服务商（预设 + 自定义）──
+let EngineProviderCatalog = [];
+async function loadProviderCatalog(engine) {
+  const r = await api('/api/engine/providers');
+  EngineProviderCatalog = r.providers || [];
+  const select = providerUi(engine).select;
+  const previous = select.value;
+  select.innerHTML = '';
+  for (const p of EngineProviderCatalog) {
+    if (!p.engines || p.engines.includes(engine))
+      select.appendChild(new Option(providerOptionText(engine, p.id), p.id));
+  }
+  select.value = previous;
+}
+
 function providerUi(engine) {
   const p = engine === 'claude' ? 'claude' : 'codex';
   return {
@@ -7727,7 +7747,7 @@ function syncProviderVisibility(engine) {
   u.custom.hidden = provider !== 'custom';
   // 模型选择框始终显示，允许原版订阅也选择模型；
   // 自定义服务商换成可手填的输入框（拉不到模型列表时也能用）
-  const free = provider === 'custom';
+  const free = modelIsFree(engine);
   u.model.hidden = free;
   u.modelInput.hidden = !free;
   u.modelHint.hidden = !free;
@@ -7767,6 +7787,7 @@ async function onEngineProviderChange(engine) {
   } catch (e) {
     // 后端未重启时该端点 404 → 降级为「当作没配过」，不阻断
   }
+  if (u.select.value !== provider) return;
   if (slot) {
     u.key.value = slot.apiKey || '';
     u.base.value = slot.baseUrl || '';
@@ -7838,6 +7859,7 @@ function onApiKeySettled(engine) {
 async function loadEngineProvider(engine) {
   const u = providerUi(engine);
   try {
+    await loadProviderCatalog(engine);
     const cfg = await api('/api/engine/config');
     const c = (cfg && cfg[engine]) || { provider: 'official', apiKey: '', model: '' };
     u.select.value = c.provider || 'official';
@@ -7924,6 +7946,7 @@ async function fetchEngineModels(engine, auto = false) {
       q.set('modelsUrl', u.modelsUrl.value.trim());
     }
     const r = await api(`/api/engine/models?${q.toString()}`);
+    if (u.select.value !== provider || u.key.value.trim() !== apiKey) return;
     // 服务商 API 只返回 id 字符串，统一成候选对象再进下拉/提示列表
     const models = (r && r.models) || [];
     if (!models.length) throw new Error(T('modelEmptyList'));
@@ -7942,6 +7965,7 @@ async function fetchEngineModels(engine, auto = false) {
     renderAccSummary(engine);
   } catch (e) {
     // 自定义服务商拉不到列表是常事（很多网关没有 /models）：清空候选但保留已填的模型 id
+    if (u.select.value !== provider || u.key.value.trim() !== apiKey) return;
     const kept = modelIsFree(engine) ? prev : '';
     clearModelChoices(engine);
     setModelValue(engine, kept);

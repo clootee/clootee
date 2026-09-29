@@ -973,9 +973,10 @@ const DICT = {
   engModelsUrlLabel: { en: 'Model list URL (optional)', zh: '模型列表 URL（可选）' },
   engModelsUrlPh: { en: 'Defaults to Base URL + /models', zh: '默认 Base URL + /models' },
   engModelPh: { en: 'Type a model id, e.g. gpt-4o', zh: '直接填写模型 id，例如 gpt-4o' },
+  engProviderDraft: { en: 'Click Save to apply this provider, key and model together.', zh: '点击保存后，服务商、Key 和模型一起生效。' },
   engModelHintCustom: {
-    en: 'Type the model id yourself. Fetched candidates show up as suggestions while typing.',
-    zh: '模型 id 可以直接手填；拉取到的候选会在输入时作为提示出现。',
+    en: 'Fetch models or enter an ID from your provider. A model list does not verify key permissions. Xiaomi/Tencent plan keys route automatically; for Alibaba sk-sp- choose Coding Plan or Token Plan and region explicitly. For Kimi/GLM and other indistinguishable keys, select the matching plan provider.',
+    zh: '可拉取模型或手填官方模型 ID；模型列表不代表 Key 已验证。小米/腾讯的专属套餐 Key 自动分流；千问 sk-sp- 请明确选 Coding Plan 或 Token Plan 及区域。Kimi、GLM 等无法区分的 Key，请选择对应套餐服务商。',
   },
   engEffortNoteClaude: {
     en: 'Higher effort means longer thinking and higher cost. “Auto” = let the engine decide.',

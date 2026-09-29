@@ -26,7 +26,9 @@ export type Engine = 'claude' | 'codex';
 // xiaomi=小米 MiMo 开放平台，kimi=月之暗面开放平台（按量），kimicode=Kimi Code 包月订阅，minimax=MiniMax
 // ⚠ kimi 与 kimicode 是**两个独立服务商**：端点、Key、模型名全不一样且 Key 不通用，
 //   而两者的 Key 都是 sk- 开头（认不出来），所以只能各占一个槽让用户明确选。
-export type EngineProvider = 'official' | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'custom';
+// Runtime validation uses the bundled provider catalog (including legacy IDs).
+export type EngineProvider = keyof typeof import('../config/provider-catalog.json').providers
+  | 'official' | 'custom' | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
 
 // 思考强度（effort）。**空字符串 = 自动**（不传参数，由引擎自己决定）。
 // 取值来自 claude CLI 的 `--effort <level>`；codex 走 `-c model_reasoning_effort=<level>`
