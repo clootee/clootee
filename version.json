@@ -1,10 +1,10 @@
 {
-  "version": "3.0.1",
+  "version": "3.0.2",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-09-17",
+  "releasedAt": "2026-09-29",
   "notesI18n": {
-    "zh": "· 目录筛选标签右键（手机长按）可看完整路径、文件夹/文件数量，并能直接打开该目录（Windows / macOS）\n· 目录名过长自动截断到 20 字符，完整名在悬浮提示和右键菜单里\n· 目录标签默认只显示 3 行，多出来的点「更多」展开、点「收起」收回",
-    "en": "· Right-click (long-press on mobile) a directory filter tag to see its full path, folder/file counts, and open it in the file manager (Windows / macOS)\n· Long directory names are truncated to 20 chars; the full name stays in the tooltip and the context menu\n· Directory tags show only 3 rows by default — expand with \"More\" and fold back with \"Collapse\""
+    "zh": "· 接入 models.dev 多服务商目录，新增 OpenRouter、千问、腾讯等接入选项\n· 小米、腾讯专属套餐 Key 自动分流；千问等格式相同的 Key 可明确选择套餐与区域，避免误用计费接口\n· 支持手填模型，修复 Codex 新手引导保存服务商配置的问题",
+    "en": "· Add the models.dev provider catalog, including OpenRouter, Alibaba/Qwen and Tencent\n· Route identifiable Xiaomi and Tencent plan keys automatically; select the plan and region explicitly for ambiguous keys\n· Allow manual model IDs and fix provider persistence in Codex onboarding"
   }
 }
