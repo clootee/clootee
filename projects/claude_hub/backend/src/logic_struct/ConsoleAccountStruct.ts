@@ -1,0 +1,103 @@
+// Clootee 默认服务商的本机账户（调度骨架）。
+// 松耦合：对引擎来说 clootee 只是一个普通的 Anthropic/OpenAI 兼容服务商（见 EngineConfigStruct.PROVIDERS.clootee），
+// 本模块只多做一件事——首次使用时向 console.clootee.com 匿名领一把设备令牌，当作 API Key 填进服务商槽。
+// 余额、用量、充值都在 console.clootee.com，这里只转述，不计费、不存钱。
+// 具体 IO（读写 data/console.json、HTTP 调 console）由 Realize 实现。
+import { EngineConfig } from '../logic_realize/EngineConfig';
+
+// 默认模型：DeepSeek Flash（便宜、快、1M 上下文）
+export const CLOOTEE_DEFAULT_MODEL = 'deepseek-flash';
+
+export interface ConsoleRecord {
+  installId: string; // 本机安装 id（随机生成，持久化；重装 data 目录才会变）
+  token: string;     // 设备令牌（ck-…）；'' = 还没领
+}
+
+export interface ConsoleStatus {
+  registered: boolean;      // 是否已领到设备令牌
+  active: boolean;          // 当前 Claude 引擎是否正在用 clootee
+  balanceMicro: number | null; // 余额（微美元）；null = 没联网/没注册，查不到
+  email: string | null;     // 已绑定的邮箱；null = 匿名设备
+  consoleUrl: string;       // 充值 / 账单页
+  error?: string;           // 查询失败的原因（不抛给前端，原样显示）
+}
+
+export interface ConsoleUsageItem {
+  at: number;
+  model: string;
+  inputTokens: number;
+  cacheReadTokens: number;
+  outputTokens: number;
+  costMicro: number;
+  status: string;
+}
+
+export class ConsoleAccountStruct {
+  // 一键开通：领令牌 → 两个引擎都切到 clootee + 默认模型。重复调用是幂等的（令牌已领就直接用）。
+  static async activate(): Promise<ConsoleStatus> {
+    const token = await this.ensureToken();
+    this._useForEngine('claude', token);
+    this._useForEngine('codex', token);
+    return this.status();
+  }
+
+  // 拿到设备令牌：本机已有就用，没有就匿名注册一把（同时领取新用户体验额度）
+  static async ensureToken(): Promise<string> {
+    const rec = this._readRecord();
+    if (rec.token) return rec.token;
+    const token = await this._register(rec.installId);
+    this._writeRecord({ installId: rec.installId, token });
+    return token;
+  }
+
+  // 余额与状态（前端顶部的余额徽章、额度耗尽弹层都读这个）
+  static async status(): Promise<ConsoleStatus> {
+    const rec = this._readRecord();
+    const active = EngineConfig.get().claude.provider === 'clootee';
+    if (!rec.token) return { registered: false, active, balanceMicro: null, email: null, consoleUrl: this._consoleUrl() };
+    return this._fetchStatus(rec.token, active);
+  }
+
+  // 最近 N 笔用量（每一笔都能在 console 里点开看单价与 token 构成）
+  static async usage(limit: number): Promise<{ items: ConsoleUsageItem[]; balanceMicro: number }> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error(`ConsoleAccount.usage: invalid limit=${limit}`);
+    const token = await this.ensureToken();
+    return this._fetchUsage(token, limit);
+  }
+
+  // 充值 / 绑定邮箱入口：换一个 10 分钟有效的绑定码，浏览器打开后登录即把本机归到该邮箱账户
+  static async linkUrl(): Promise<string> {
+    const token = await this.ensureToken();
+    return this._requestLinkUrl(token);
+  }
+
+  // 把某个引擎切到 clootee（只写 clootee 自己那一槽，其他服务商的 Key 原样保留）
+  private static _useForEngine(engine: 'claude' | 'codex', token: string): void {
+    const cur = EngineConfig.get()[engine];
+    const model = cur.provider === 'clootee' && cur.model ? cur.model : CLOOTEE_DEFAULT_MODEL;
+    EngineConfig.setProvider(engine, { provider: 'clootee', apiKey: token, model, effort: cur.effort || '' });
+  }
+
+  // ── IO 钩子（Realize 实现）──
+  protected static _readRecord(): ConsoleRecord {
+    throw new Error('Not implemented');
+  }
+  protected static _writeRecord(_rec: ConsoleRecord): void {
+    throw new Error('Not implemented');
+  }
+  protected static _register(_installId: string): Promise<string> {
+    throw new Error('Not implemented');
+  }
+  protected static _fetchStatus(_token: string, _active: boolean): Promise<ConsoleStatus> {
+    throw new Error('Not implemented');
+  }
+  protected static _fetchUsage(_token: string, _limit: number): Promise<{ items: ConsoleUsageItem[]; balanceMicro: number }> {
+    throw new Error('Not implemented');
+  }
+  protected static _requestLinkUrl(_token: string): Promise<string> {
+    throw new Error('Not implemented');
+  }
+  protected static _consoleUrl(): string {
+    throw new Error('Not implemented');
+  }
+}

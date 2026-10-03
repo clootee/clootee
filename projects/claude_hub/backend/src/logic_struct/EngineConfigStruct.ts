@@ -72,10 +72,31 @@ export const MANAGED_ENV_KEYS = [
   'CLAUDE_CODE_SUBAGENT_MODEL',
   'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
   'CLAUDE_CODE_EFFORT_LEVEL',
+  // Claude Code 不认识的模型名默认按 200K 上下文处理；1M 上下文的模型要显式告诉它
+  'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
 ];
+
+// Clootee 默认服务商的地址。它只是一个普通的 Anthropic / OpenAI 兼容服务商（松耦合），
+// 这里只有一个 URL：没有上游密钥、没有价格、没有商户信息——那些全在 console.clootee.com 自己那边。
+// 自建/测试时用环境变量 CLOOTEE_CONSOLE_BASE 指到别处。
+export const CLOOTEE_CONSOLE_BASE = String(process.env.CLOOTEE_CONSOLE_BASE || 'https://console.clootee.com').replace(/\/+$/, '');
 
 // 顺序即前端展示顺序：首推的服务商放最前
 export const PROVIDERS: Record<string, ProviderMeta> = {
+  // 默认服务商：Key 由本机首次使用时自动领取（设备令牌），用户不用注册、不用填 Key
+  clootee: {
+    anthropicBase: CLOOTEE_CONSOLE_BASE,
+    chatBase: `${CLOOTEE_CONSOLE_BASE}/v1`,
+    modelsUrl: `${CLOOTEE_CONSOLE_BASE}/v1/models`,
+    label: 'Clootee（默认，免注册）',
+    signupUrl: CLOOTEE_CONSOLE_BASE,
+    docsUrl: CLOOTEE_CONSOLE_BASE,
+    note: '开箱即用：DeepSeek Flash / Pro、MiniMax M3，按上游原价计费，新用户送体验额度',
+    recommended: true,
+    // 三个模型都是 1M 上下文（实测 Claude Code 不认识这些模型名时会按 200K 截断并告警）
+    extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000' },
+    preferModels: ['deepseek-flash'],
+  },
   minimax: {
     anthropicBase: 'https://api.minimaxi.com/anthropic',
     chatBase: 'https://api.minimaxi.com/v1',
@@ -341,7 +362,8 @@ export class EngineConfigStruct {
     if (!baseUrl || !cfg.apiKey || !cfg.model)
       throw new Error('Codex 第三方服务商缺少 Base URL、API Key 或模型');
     return {
-      baseUrl: this._cleanUrl(baseUrl),
+      // 用户常把完整端点（…/chat/completions）当 base 填进来；代理还会再拼一次，这里截回 base
+      baseUrl: this._cleanUrl(baseUrl).replace(/\/chat\/completions$/i, ''),
       apiKey: cfg.apiKey,
       model: cfg.model,
       label: meta?.label || '自定义服务商',

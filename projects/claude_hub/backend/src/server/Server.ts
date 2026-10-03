@@ -34,6 +34,7 @@ import { CommandRunner } from '../logic_realize/CommandRunner';
 import { CommandsConfig } from '../config/CommandsConfig';
 import { UpdateChecker } from '../logic_realize/UpdateChecker';
 import { ExternalInbox } from '../logic_realize/ExternalInbox';
+import { ConsoleAccount } from '../logic_realize/ConsoleAccount';
 
 export class Server {
   static start(): void {
@@ -48,6 +49,15 @@ export class Server {
     // ── 首次设定密码（仅在尚未设定时可用，无需鉴权） ──
     app.post('/api/auth/setup', (req, res) =>
       this._wrap(res, 'auth.setup', () => ({ token: AuthManager.setup(req.body.password) })),
+    );
+    // ── 一键开始（无需鉴权）：尚未设定密码时生成随机本机密码并直接登录。
+    //    只接受本机回环 + Host 为 localhost/127.0.0.1 的请求：局域网里的其他机器、以及借 DNS 重绑定
+    //    冒充本机的网页都拿不到这个口子（设定后接口立即失效，与 /api/auth/setup 同一条件） ──
+    app.post('/api/auth/quickstart', (req, res) =>
+      this._wrap(res, 'auth.quickstart', () => {
+        if (!this._isLocalRequest(req)) throw new Error('quickstart: 只能在本机浏览器里使用（请用 http://localhost 打开）');
+        return { token: AuthManager.quickstart() };
+      }),
     );
     // ── 登录（无需鉴权） ──
     app.post('/api/auth/login', (req, res) =>
@@ -127,6 +137,19 @@ export class Server {
     // 可选服务商清单（含开通链接与说明），供新手引导与设置面板渲染
     app.get('/api/engine/providers', (_req, res) =>
       this._ok(res, { providers: EngineConfig.providerList() }),
+    );
+    // ── Clootee 默认服务商（console.clootee.com）：一键开通 / 余额 / 用量 / 充值入口 ──
+    app.post('/api/console/activate', (_req, res) =>
+      this._wrapAsync(res, 'console.activate', () => ConsoleAccount.activate()),
+    );
+    app.get('/api/console/status', (_req, res) =>
+      this._wrapAsync(res, 'console.status', () => ConsoleAccount.status()),
+    );
+    app.get('/api/console/usage', (req, res) =>
+      this._wrapAsync(res, 'console.usage', () => ConsoleAccount.usage(Number(req.query.limit) || 10)),
+    );
+    app.post('/api/console/link', (_req, res) =>
+      this._wrapAsync(res, 'console.link', async () => ({ url: await ConsoleAccount.linkUrl() })),
     );
     // 引擎是否已安装（系统 / out_end 内置），供引导提示「一键安装内置引擎」
     // 默认读进程级缓存（探测要起子进程，Windows 上还会闪窗）；
@@ -636,6 +659,15 @@ export class Server {
   }
 
   // 统一成功响应
+  // 请求是否来自本机浏览器：对端是回环地址，且 Host 头是 localhost / 127.0.0.1 / [::1]（防 DNS 重绑定）
+  private static _isLocalRequest(req: Request): boolean {
+    const ip = String(req.socket.remoteAddress || '');
+    const loopIp = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+    const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
+    const loopHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+    return loopIp && loopHost;
+  }
+
   private static _ok(res: Response, data: unknown): void {
     res.json({ success: true, data });
   }

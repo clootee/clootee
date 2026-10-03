@@ -28,7 +28,7 @@ export type Engine = 'claude' | 'codex';
 //   而两者的 Key 都是 sk- 开头（认不出来），所以只能各占一个槽让用户明确选。
 // Runtime validation uses the bundled provider catalog (including legacy IDs).
 export type EngineProvider = keyof typeof import('../config/provider-catalog.json').providers
-  | 'official' | 'custom' | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
+  | 'official' | 'custom' | 'clootee' | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
 
 // 思考强度（effort）。**空字符串 = 自动**（不传参数，由引擎自己决定）。
 // 取值来自 claude CLI 的 `--effort <level>`；codex 走 `-c model_reasoning_effort=<level>`

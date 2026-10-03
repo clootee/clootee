@@ -18,6 +18,8 @@ export const Paths = {
   AUTH_FILE: path.join(DATA_ROOT, 'auth.json'),
   // 各引擎（claude/codex）服务商配置（原版 / minimax / kimi + apiKey + model）
   ENGINES_FILE: path.join(DATA_ROOT, 'engines.json'),
+  // Clootee 默认服务商（console.clootee.com）发给本机的设备令牌与安装 id；真实凭据，已在 .gitignore
+  CONSOLE_FILE: path.join(DATA_ROOT, 'console.json'),
   LOGS_DIR: path.join(DATA_ROOT, 'logs'),
   // 过程轨迹：data/traces/<rootId>/<claudeSessionId>.jsonl（AI 工作全过程逐事件记录）
   TRACES_DIR: path.join(DATA_ROOT, 'traces'),

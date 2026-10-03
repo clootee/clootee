@@ -42,6 +42,9 @@ export class AuthManagerStruct {
     // 引导里缺什么装什么（Node / Git / 引擎）
     '/toolchain/status',
     '/toolchain/install',
+    // 一键开始：领取 Clootee 默认服务商的设备令牌并切过去
+    '/console/activate',
+    '/console/status',
   ];
 
   // 是否属于「尚未设定密码期间」可免鉴权的引导接口。
@@ -62,6 +65,13 @@ export class AuthManagerStruct {
     const hash = Hash.sha256(password + '::' + salt);
     this._write({ salt, hash });
     return hash;
+  }
+
+  // 一键开始（免设密码）：生成一个强随机本机密码直接完成首次设定，返回登录 token 让浏览器记住。
+  // 本机依然有密码保护（不会变成「谁都能连上执行命令」），只是用户不用想、不用记；
+  // 以后想换个自己记得住的，在设置里改即可。只允许在尚未设定时调用（路由层还会限制必须本机回环访问）。
+  static quickstart(): string {
+    return this.setup(this._randomPassword());
   }
 
   // 校验密码，正确则返回长期有效的 token
@@ -139,6 +149,9 @@ export class AuthManagerStruct {
     throw new Error('Not implemented');
   }
   protected static _delete(): void {
+    throw new Error('Not implemented');
+  }
+  protected static _randomPassword(): string {
     throw new Error('Not implemented');
   }
 }
