@@ -20,6 +20,8 @@ data/settings.json
 data/session_meta.json
 data/queue_state.json
 data/*-workdir/
+data/run/
+data/console.json
 .runtime-port
 
 # 测试与录制产物

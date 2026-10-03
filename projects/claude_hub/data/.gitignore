@@ -10,3 +10,9 @@ settings.json
 
 # 会话/任务队列持久化：含每个会话的真实 prompt 内容（密码/业务数据），不入库
 queue_state.json
+
+# 后台服务运行时状态：pid 文件 + 启动器重定向的服务日志，每机独有
+run/
+
+# 控制台（console.clootee.com）分配的设备令牌：真实凭据，绝不入库
+console.json

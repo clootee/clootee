@@ -31,7 +31,9 @@ whatever is missing — with a progress bar, not a blank screen.
 1. Download the release and **unzip it** (right-click → Extract All — don't run it from inside the zip).
 2. Double-click **`Windows_Start.bat`**.
 
-To stop, double-click **`Windows_Stop.bat`**.
+The server runs in the **background**: once the launcher says it is running, you can close that window — the service keeps going. Double-clicking again just reopens the UI.
+
+To stop, double-click **`Windows_Stop.bat`** (closing windows does not stop it).
 
 > If SmartScreen warns you, click *More info → Run anyway*. Nothing is installed system-wide —
 > everything lives inside the Clootee folder, and deleting the folder removes it completely.
