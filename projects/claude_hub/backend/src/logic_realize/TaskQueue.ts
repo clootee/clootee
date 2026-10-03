@@ -180,7 +180,7 @@ export class TaskQueue extends TaskQueueStruct {
   // 之后续接走 --resume。绝不自造 id，一律以 claude 回报为准。
   protected static _reconcileSessionId(sessionId: string, realId: string): void {
     if (!realId) return;
-    const session = SessionManager.getSession(sessionId);
+    const session = SessionManager.getRuntimeSession(sessionId);
     if (session.claudeSessionId === realId) return;
     const oldTraceId = this._traceSessionId(sessionId); // 校正前的轨迹文件（草稿 id）
     session.claudeSessionId = realId;
@@ -200,7 +200,7 @@ export class TaskQueue extends TaskQueueStruct {
 
   // 轨迹文件归属：已拿到 claude 真实 uuid 就用 `<rootId>:<uuid>`，否则仍是草稿 id
   protected static _traceSessionId(sessionId: string): string {
-    const session = SessionManager.getSession(sessionId);
+    const session = SessionManager.getRuntimeSession(sessionId);
     return session.claudeSessionId ? `${session.rootId}:${session.claudeSessionId}` : session.id;
   }
 

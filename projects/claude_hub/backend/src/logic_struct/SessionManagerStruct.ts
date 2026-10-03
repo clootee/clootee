@@ -230,6 +230,12 @@ export class SessionManagerStruct {
   }
 
   // 读取会话元信息（不含正文）。优先内存运行期会话；否则由 id 解析出 uuid 从 jsonl 构造。
+  // 引擎事件只需运行期身份，不应逐条同步读取完整历史会话。
+  static getRuntimeSession(id: string): Session {
+    if (!id) throw new Error(`getRuntimeSession: invalid id=${id}`);
+    return this._get(id) || this._getLiveByNaturalId(id) || this.getSession(id);
+  }
+
   static getSession(id: string): Session {
     if (!id) throw new Error(`getSession: invalid id=${id}`);
     // 先精确按运行期表键取；miss 再按自然 id 兜底（reconcile 后键与自然 id 分叉时仍能拿到任务队列）
