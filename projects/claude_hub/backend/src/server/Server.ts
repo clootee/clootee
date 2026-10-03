@@ -148,6 +148,10 @@ export class Server {
     app.get('/api/console/usage', (req, res) =>
       this._wrapAsync(res, 'console.usage', () => ConsoleAccount.usage(Number(req.query.limit) || 10)),
     );
+    app.get('/api/console/turn', (req, res) =>
+      this._wrapAsync(res, 'console.turn', () =>
+        ConsoleAccount.turnCost(String(req.query.taskId || ''))),
+    );
     app.post('/api/console/link', (_req, res) =>
       this._wrapAsync(res, 'console.link', async () => ({ url: await ConsoleAccount.linkUrl() })),
     );
@@ -158,11 +162,12 @@ export class Server {
       this._ok(res, EngineStatus.get(req.query.refresh === '1')),
     );
     app.get('/api/engine/config', (_req, res) => this._ok(res, EngineConfig.get()));
+    // clootee 的 Key 是本机自动领的设备令牌：前端没带 Key 时由 ConsoleAccount 补上，用户永远不用填
     app.post('/api/engine/config', (req, res) =>
-      this._wrap(res, 'engine.config', () =>
+      this._wrapAsync(res, 'engine.config', async () =>
         EngineConfig.setProvider(req.body.engine, {
           provider: req.body.provider,
-          apiKey: req.body.apiKey || '',
+          apiKey: req.body.apiKey || (req.body.provider === 'clootee' ? await ConsoleAccount.ensureToken() : ''),
           model: req.body.model || '',
           effort: req.body.effort || '',
           baseUrl: req.body.baseUrl || '',
@@ -182,7 +187,7 @@ export class Server {
         const provider = req.query.provider as any;
         const models = await EngineConfig.listModels(
           provider,
-          String(req.query.apiKey || ''),
+          String(req.query.apiKey || '') || (provider === 'clootee' ? await ConsoleAccount.ensureToken() : ''),
           String(req.query.baseUrl || ''),
           String(req.query.modelsUrl || ''),
         );

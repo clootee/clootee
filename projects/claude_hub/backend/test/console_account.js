@@ -32,7 +32,11 @@ const fake = http.createServer((req, res) => {
     }
     if (!valid.has(auth)) return send(401, { error: { message: 'invalid key' } });
     if (req.url === '/api/v1/me') return send(200, { balanceMicro: 654321, email: null });
-    if (req.url.startsWith('/api/v1/me/usage')) return send(200, { balanceMicro: 654321, items: [{ at: 1, model: 'deepseek-flash', inputTokens: 10, cacheReadTokens: 0, outputTokens: 5, costMicro: 4, status: 'ok' }] });
+    if (req.url.startsWith('/api/v1/me/usage')) {
+      const tag = new URL(req.url, 'http://x').searchParams.get('tag');
+      return send(200, { balanceMicro: 654321, items: [{ at: 1, model: 'deepseek-flash', inputTokens: 10, cacheReadTokens: 0, outputTokens: 5, costMicro: 4, status: 'ok' }],
+        ...(tag ? { tagged: { calls: tag === 'task-1' ? 3 : 0, costMicro: tag === 'task-1' ? 1234 : 0 } } : {}) });
+    }
     if (req.url === '/api/v1/devices/link-code') return send(200, { code: 'abc', url: 'http://console.test/#link=abc' });
     send(404, {});
   });
@@ -102,9 +106,19 @@ fake.listen(0, '127.0.0.1', async () => {
     ok('usage passthrough', u.items.length === 1 && u.items[0].costMicro === 4);
     ok('link url passthrough', (await ConsoleAccount.linkUrl()) === 'http://console.test/#link=abc');
 
+    const turn = await ConsoleAccount.turnCost('task-1');
+    ok('turnCost sums one task by tag', turn.calls === 3 && turn.costMicro === 1234 && turn.balanceMicro === 654321, turn);
+    const sess = { id: 'r:draft-1', tasks: [{ id: 'task-0', status: 'done' }, { id: 'task-1', status: 'running' }] };
+    ok('runEnv tags requests with the running task id', ConsoleAccount.runEnv(sess).ANTHROPIC_CUSTOM_HEADERS === 'x-clootee-session: task-1', ConsoleAccount.runEnv(sess));
+    ok('runEnv is empty when no task is running', Object.keys(ConsoleAccount.runEnv({ id: 'x', tasks: [] })).length === 0);
+
     let threw = '';
     try { await ConsoleAccount.usage(0); } catch (e) { threw = e.message; }
     ok('usage rejects invalid limit with method name + value', threw.includes('ConsoleAccount.usage') && threw.includes('limit=0'), threw);
+
+    // 不用 clootee 时：绝不给别家服务商发标签头
+    EngineConfig.setProvider('claude', { provider: 'minimax', apiKey: 'sk-mm', model: 'MiniMax-M3', effort: '' });
+    ok('runEnv sends nothing when claude is not on clootee', Object.keys(ConsoleAccount.runEnv(sess)).length === 0);
 
     // Codex 自定义服务商：用户把完整端点当 base 填 → 代理不应再拼一次 /chat/completions
     EngineConfig.setProvider('codex', { provider: 'custom', apiKey: 'sk-x', model: 'm', baseUrl: 'https://api.example.com/chat/completions', effort: '' });

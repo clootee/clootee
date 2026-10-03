@@ -2781,15 +2781,125 @@ function renderElapsedNotes() {
     const next = msgs[i + 1];
     const turnEnd = (next && next.role === 'user') || (i === msgs.length - 1 && !running);
     if (!turnEnd || !lastUserTime || !m.createdAt) continue;
-    const node = box.querySelector(`[data-mid="${CSS.escape(m.id)}"]`);
+    // AI 消息被「收拢」成一组时没有单条节点，挂到包含它的那个组上（组 key 里带着组内最后一条的 id）
+    const node = box.querySelector(`[data-mid="${CSS.escape(m.id)}"]`)
+      || [...box.querySelectorAll('[data-group-key]')].find((g) => g.dataset.groupKey.split(':').includes(m.id));
     if (!node) continue;
     const el = document.createElement('div');
     el.className = 'msg-elapsed';
     el.textContent = `${T('elapsed')}${T('colon')}${fmtElapsed(m.createdAt - lastUserTime)}`;
+    // 用的是 Clootee 默认服务商：就地写上这一轮花了多少、还剩多少（最近几轮才查，历史会话不刷请求）
+    const turnEndAt = next && next.createdAt ? next.createdAt : Date.now();
+    const cost = Clootee.turnText(Clootee.taskOfTurn(lastUserTime, turnEndAt), !next, i >= msgs.length - 12);
+    if (cost) el.textContent += ` · ${cost}`;
     node.appendChild(el); // 放进气泡内部（末尾），而非气泡外部
     lastUserTime = 0; // 本轮已消费
   }
 }
+
+// ── Clootee 默认服务商：余额徽章 / 每轮花费 / 额度用完弹层 ──
+// 只是一个普通服务商的「账户视图」：数据都来自 console.clootee.com（经后端 /api/console/* 转述），
+// 不用 clootee 时整个模块静默（徽章不显示、不发任何请求）。
+const Clootee = {
+  st: null,          // /api/console/status 的结果
+  turns: {},         // taskId → { costMicro, calls, balanceMicro } | 'loading' | 'fail'
+  usd(micro, fine) {
+    const v = Number(micro || 0) / 1e6;
+    // fine：小于 $1 显示 4 位小数，否则一次几厘钱的消耗在数字上根本看不出变化
+    const s = fine && v > 0 && v < 1 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
+    return currentLang() === 'zh' && !fine ? `${s}（约 ¥${(v * 7.2).toFixed(2)}）` : s;
+  },
+  active() { return !!(this.st && this.st.active && this.st.registered); },
+  async refresh() {
+    try { this.st = await api('/api/console/status'); } catch { this.st = null; }
+    this.renderBadge();
+  },
+  renderBadge() {
+    const b = $('clooteeBal');
+    if (!b) return;
+    const show = this.active() && this.st.balanceMicro !== null;
+    b.hidden = !show;
+    if (!show) return;
+    b.textContent = `◎ ${this.usd(this.st.balanceMicro, true)}`;
+    b.title = T('clooteeBalTitle');
+    b.classList.toggle('low', this.st.balanceMicro < 50000);
+    b.onclick = () => this.openBilling();
+  },
+  // 先同步开一个空窗口再填地址：异步拿到地址后再 window.open 会被浏览器当成弹窗拦掉
+  async openBilling() {
+    const w = window.open('about:blank', '_blank');
+    try {
+      const r = await api('/api/console/link', {});
+      if (w) w.location.href = r.url; else location.href = r.url;
+    } catch (e) {
+      if (w) w.close();
+      alert(T('clooteeLinkFail') + (e.message || ''));
+    }
+  },
+  // 这一轮对应的任务：开始时间落在「本轮用户消息 ~ 下一轮用户消息」之间的最后一条
+  taskOfTurn(since, until) {
+    const tasks = (State.session && State.session.tasks) || [];
+    const hit = tasks.filter((t) => t.startedAt && t.startedAt >= since - 5000 && t.startedAt <= until);
+    return hit.length ? hit[hit.length - 1].id : '';
+  },
+  // 每轮花费文案；没查过就后台查一次，查完重渲染（fetch=false 的老轮次不查）。
+  // 余额只跟在最新一轮后面（老轮次后面写的余额早就过时了）。
+  turnText(taskId, latest, fetch) {
+    if (!this.active() || !taskId) return '';
+    const v = this.turns[taskId];
+    if (v && typeof v === 'object') {
+      if (!v.calls) return '';
+      const parts = [T('clooteeTurnCost').replace('{c}', this.usd(v.costMicro, true))];
+      if (latest) parts.push(T('clooteeLeft').replace('{b}', this.usd(v.balanceMicro, true)));
+      return parts.join(' · ');
+    }
+    if (!v && fetch) {
+      this.turns[taskId] = 'loading';
+      api(`/api/console/turn?taskId=${encodeURIComponent(taskId)}`)
+        .then((r) => {
+          this.turns[taskId] = r;
+          if (this.st && latest) { this.st.balanceMicro = r.balanceMicro; this.renderBadge(); }
+          renderElapsedNotes();
+        })
+        .catch(() => { this.turns[taskId] = 'fail'; });
+    }
+    return '';
+  },
+  onTaskEnd(task) {
+    if (!this.active()) return;
+    // 本会话最后一轮的缓存作废（任务刚结束，最后几个请求可能还没落账），稍等片刻再取
+    setTimeout(() => {
+      delete this.turns[task.id];
+      Object.keys(this.turns).forEach((k) => { if (this.turns[k] === 'fail') delete this.turns[k]; });
+      this.refresh().then(() => { if (State.session) renderElapsedNotes(); });
+    }, 1200);
+    if (task.status === 'error' && this.isOutOfCredit(task.error)) this.showOutOfCredit();
+  },
+  isOutOfCredit(text) {
+    const s = String(text || '');
+    return s.includes('billing_error') || s.includes('balance is used up') || s.includes('余额已用完');
+  },
+  // 额度用完：就地弹层，「充值」与「改用自己的服务商」两条路并列，都是一步到位
+  showOutOfCredit() {
+    if ($('clooteeOut')) return;
+    const box = document.createElement('div');
+    box.className = 'login-overlay';
+    box.id = 'clooteeOut';
+    box.innerHTML = `<div class="onboard-card" style="max-width:460px">
+      <h2>${escapeHtml(T('clooteeOutTitle'))}</h2>
+      <div class="ob-sub">${escapeHtml(T('clooteeOutBody'))}</div>
+      <div class="ob-foot">
+        <button type="button" data-act="own">${escapeHtml(T('clooteeUseOwn'))}</button>
+        <span style="flex:1"></span>
+        <button type="button" data-act="close">✕</button>
+        <button type="button" class="primary" data-act="topup">${escapeHtml(T('clooteeTopupNow'))}</button>
+      </div></div>`;
+    document.body.appendChild(box);
+    box.querySelector('[data-act=topup]').onclick = () => { box.remove(); this.openBilling(); };
+    box.querySelector('[data-act=own]').onclick = () => { box.remove(); openSettings(); };
+    box.querySelector('[data-act=close]').onclick = () => box.remove();
+  },
+};
 
 // ── 渲染：执行失败 / 引擎无响应的提示卡片 ──
 // 后台跑挂了（引擎没装好、被安全软件拦下、退出码 0 却零输出）时界面必须看得到原因，
@@ -5512,12 +5622,16 @@ function connectWs() {
     // 任务事件：无论是否当前会话，都据此更新侧栏"执行中"标识
     if (e.kind === 'task') {
       updateRunningFromTask(e.sessionId, e.task);
+      if (e.task.status === 'done' || e.task.status === 'error') Clootee.onTaskEnd(e.task);
       if (e.task.status === 'done') dropTaskNotices(e.task.id); // 跑通了就撤掉中途的告警
       // 外部系统推送来的消息：不管现在正看哪个会话都弹一下，不能让用户全靠手动刷新才发现
       if (e.task.external && e.task.status === 'pending') showExtMsgToast(e.sessionId, e.task.prompt);
     }
     // 运行提示（引擎无响应等）：任务还没结束就要让用户看到
     if (e.kind === 'notice') { pushNotice(e); return; }
+    // Claude Code 把服务商的 402 原样写成一条助手消息（task.error 里反而没有）。额度是全局的，
+    // 不管发生在哪个会话都要提示，所以放在按会话过滤之前
+    if (e.kind === 'message' && e.message && e.message.role === 'assistant' && Clootee.isOutOfCredit(e.message.text)) Clootee.showOutOfCredit();
     if (e.sessionId !== State.sessionId) return; // 其余（正文/过程）仅更新当前查看的会话
     // 轨迹事件：缓存标脏（下次展开「过程」时重新拉取）；全过程抽屉打开时顺带刷新
     if (e.kind === 'trace') {
@@ -6641,6 +6755,7 @@ function bind() {
 // 已登录后才连接 WS / 加载数据
 async function startApp() {
   connectWs();
+  Clootee.refresh();
   await loadSettings();
   await loadRoots();
   await markSetupDone();
@@ -7775,6 +7890,9 @@ async function onEngineProviderChange(engine) {
   u.key.value = '';
   u.base.value = '';
   u.modelsUrl.value = '';
+  // clootee：Key 由本机自动领取，留空即可；占位文字直接说清楚，免得用户去找 Key
+  if (!u.key.dataset.ph) u.key.dataset.ph = u.key.placeholder || '';
+  u.key.placeholder = provider === 'clootee' ? T('clooteeKeyAuto') : u.key.dataset.ph;
   if (u.effort) u.effort.value = '';
   setModelStatus(engine, '', null);
   syncModelProviderTag(engine);
@@ -7840,7 +7958,8 @@ async function autoPickModel(engine) {
     return;
   }
   if (modelValue(engine)) return; // 已有模型就不动，避免覆盖用户的选择
-  if (!u.key.value.trim()) {
+  // clootee 的 Key 由本机自动领取（后端补），不要求用户填
+  if (!u.key.value.trim() && provider !== 'clootee') {
     setModelStatus(engine, T('modelNeedKey'), null);
     return;
   }
@@ -7934,7 +8053,7 @@ async function fetchEngineModels(engine, auto = false) {
     }
     return;
   }
-  if (!apiKey) { say(T('modelNeedKey'), false); return; }
+  if (!apiKey && provider !== 'clootee') { say(T('modelNeedKey'), false); return; }
   if (provider === 'custom' && !u.base.value.trim()) { say(T('modelNeedBase'), false); return; }
   const prev = modelValue(engine);
   clearModelChoices(engine);

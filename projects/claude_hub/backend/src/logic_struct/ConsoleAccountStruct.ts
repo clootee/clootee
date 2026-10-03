@@ -4,6 +4,7 @@
 // 余额、用量、充值都在 console.clootee.com，这里只转述，不计费、不存钱。
 // 具体 IO（读写 data/console.json、HTTP 调 console）由 Realize 实现。
 import { EngineConfig } from '../logic_realize/EngineConfig';
+import { Session, Task } from '../models/Types';
 
 // 默认模型：DeepSeek Flash（便宜、快、1M 上下文）
 export const CLOOTEE_DEFAULT_MODEL = 'deepseek-flash';
@@ -65,6 +66,24 @@ export class ConsoleAccountStruct {
     return this._fetchUsage(token, limit);
   }
 
+  // 某一轮任务花了多少 + 当前余额：任务结束后在对话里就地显示「本次 $x · 剩余 $y」。
+  // 用任务 id 作标签而不是会话 id：新会话首轮跑完后会话 id 会从草稿 id 校正成真实 uuid，会话 id 对不上。
+  static async turnCost(taskId: string): Promise<{ calls: number; costMicro: number; balanceMicro: number }> {
+    if (!taskId) throw new Error(`ConsoleAccount.turnCost: invalid taskId=${taskId}`);
+    const token = await this.ensureToken();
+    return this._fetchTagged(token, this._tagOf(taskId));
+  }
+
+  // 启动 claude 子进程时额外注入的环境变量：正在用 clootee 时，给这一轮的每个请求带上任务标签
+  // （Claude Code 的 ANTHROPIC_CUSTOM_HEADERS），console 据此精确汇总这一轮花了多少。
+  // 不用 clootee、或找不到正在执行的任务时返回空对象——绝不把任何东西发给别家服务商。
+  static runEnv(session: Session): Record<string, string> {
+    if (EngineConfig.get().claude.provider !== 'clootee') return {};
+    const task = this._runningTask(session);
+    if (!task) return {};
+    return { ANTHROPIC_CUSTOM_HEADERS: `x-clootee-session: ${this._tagOf(task.id)}` };
+  }
+
   // 充值 / 绑定邮箱入口：换一个 10 分钟有效的绑定码，浏览器打开后登录即把本机归到该邮箱账户
   static async linkUrl(): Promise<string> {
     const token = await this.ensureToken();
@@ -98,6 +117,15 @@ export class ConsoleAccountStruct {
     throw new Error('Not implemented');
   }
   protected static _consoleUrl(): string {
+    throw new Error('Not implemented');
+  }
+  protected static _tagOf(_sessionId: string): string {
+    throw new Error('Not implemented');
+  }
+  protected static _fetchTagged(_token: string, _tag: string): Promise<{ calls: number; costMicro: number; balanceMicro: number }> {
+    throw new Error('Not implemented');
+  }
+  protected static _runningTask(_session: Session): Task | null {
     throw new Error('Not implemented');
   }
 }

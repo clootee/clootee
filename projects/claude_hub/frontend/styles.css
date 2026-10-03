@@ -3114,3 +3114,21 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
   padding: 10px 8px 14px;
 }
 .session-more span { font-size: 11px; opacity: .55; }
+
+/* ── 一键开始（默认引导） ── */
+.ob-quick-lang{display:flex;gap:8px;margin:4px 0 14px}
+.ob-chip{padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:transparent;color:inherit;cursor:pointer;font-size:13px}
+.ob-chip.on{border-color:var(--accent);color:var(--accent);font-weight:600}
+.ob-quick-stages{list-style:none;margin:6px 0 10px;padding:0}
+.ob-quick-stages li{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:14px;opacity:.55}
+.ob-quick-stages li.done,.ob-quick-stages li.run,.ob-quick-stages li.err{opacity:1}
+.ob-quick-stages li.err{color:#d9534f}
+.ob-qi{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-size:12px;border:1px solid var(--line)}
+.ob-quick-stages li.done .ob-qi{background:#2e9e5b;border-color:#2e9e5b;color:#fff}
+.ob-quick-stages li.err .ob-qi{background:#d9534f;border-color:#d9534f;color:#fff}
+.ob-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:obspin .8s linear infinite}
+@keyframes obspin{to{transform:rotate(360deg)}}
+.ob-quick-err{white-space:pre-wrap;color:#d9534f;font-size:13px;margin-top:8px}
+.ob-foot button.link{background:none;border:0;padding:0;color:var(--muted,inherit);text-decoration:underline;cursor:pointer;font-size:13px;opacity:.8}
+.clootee-bal{padding:3px 9px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums;cursor:pointer}
+.clootee-bal.low{border-color:#d9534f;color:#d9534f}

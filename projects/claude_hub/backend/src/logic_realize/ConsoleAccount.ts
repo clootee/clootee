@@ -11,6 +11,7 @@ import {
 import { CLOOTEE_CONSOLE_BASE } from '../logic_struct/EngineConfigStruct';
 import { EngineConfig } from './EngineConfig';
 import { Paths } from '../paths';
+import { Session, Task } from '../models/Types';
 import { Logger } from '../helper/Logger';
 import { ErrorHandler } from '../helper/ErrorHandler';
 
@@ -73,6 +74,27 @@ export class ConsoleAccount extends ConsoleAccountStruct {
 
   protected static _consoleUrl(): string {
     return CLOOTEE_CONSOLE_BASE;
+  }
+
+  // 标签只保留安全字符并限长（console 端同样会清洗一次）
+  protected static _tagOf(sessionId: string): string {
+    return String(sessionId).replace(/[^\w:.\-]/g, '').slice(0, 120);
+  }
+
+  // 调度器总是先把任务标成 running 再启动引擎，所以此刻 running 的那一条就是这一轮
+  protected static _runningTask(session: Session): Task | null {
+    const tasks = Array.isArray(session && session.tasks) ? session.tasks : [];
+    return tasks.find((t) => t.status === 'running') || null;
+  }
+
+  protected static async _fetchTagged(token: string, tag: string) {
+    const q = new URLSearchParams({ tag, limit: '1' });
+    const r = await this._authed('GET', `/api/v1/me/usage?${q.toString()}`, token);
+    return {
+      calls: Number(r.tagged && r.tagged.calls) || 0,
+      costMicro: Number(r.tagged && r.tagged.costMicro) || 0,
+      balanceMicro: Number(r.balanceMicro),
+    };
   }
 
   // 带令牌调用；令牌失效（401：在网页上被作废、或 console 换库）时用同一个 installId 重新领一把，
