@@ -5677,9 +5677,11 @@ function waitForAppRestart(box) {
 }
 
 // ── WebSocket 实时事件 ──
+let hubWs = null;
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
+  hubWs = ws;
   ws.onmessage = (ev) => {
     const e = JSON.parse(ev.data);
     // 引擎/工具安装进度：没有 sessionId，必须在按会话过滤之前处理
@@ -5766,8 +5768,26 @@ function connectWs() {
       refreshEngineControl();        // 有任务入队即已开始 → 引擎锁定
     } else if (e.kind === 'taskRemoved') removeTaskLocal(e.taskId);
   };
-  ws.onclose = () => setTimeout(connectWs, 1500);
+  ws.onclose = () => { if (hubWs === ws) setTimeout(connectWs, 1500); };
 }
+
+// 移动端切到后台后 WS 常被系统掐断，期间的任务结束事件全丢了 → 会话一直显示「进行中」。
+// 页面重新可见时：连接已断就立刻重连，并重新拉一遍会话列表（重建运行态）和当前会话内容。
+let visResyncAt = 0;
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || !TOKEN) return;
+  if (Date.now() - visResyncAt < 1000) return;
+  visResyncAt = Date.now();
+  if (!hubWs || hubWs.readyState > WebSocket.OPEN) {
+    const old = hubWs; hubWs = null;
+    try { old && old.close(); } catch {}
+    connectWs();
+  }
+  try {
+    await loadSessions();
+    if (State.sessionId && !isFavoriteDraftId(State.sessionId)) await selectSession(State.sessionId);
+  } catch {}
+});
 
 // ── 工具 ──
 // 精确到秒的日期时间：YYYY-MM-DD HH:MM:SS
