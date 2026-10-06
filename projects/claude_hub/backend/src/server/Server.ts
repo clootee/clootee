@@ -35,6 +35,7 @@ import { CommandsConfig } from '../config/CommandsConfig';
 import { UpdateChecker } from '../logic_realize/UpdateChecker';
 import { ExternalInbox } from '../logic_realize/ExternalInbox';
 import { ConsoleAccount } from '../logic_realize/ConsoleAccount';
+import { RootLock } from '../logic_realize/RootLock';
 
 export class Server {
   static start(): void {
@@ -88,6 +89,22 @@ export class Server {
       const token = (req.headers['x-auth-token'] as string) || String(req.query.token || '');
       if (!AuthManager.verify(token)) {
         res.status(401).json({ success: false, error: 'unauthorized' });
+        return;
+      }
+      next();
+    });
+
+    // ── 目录私有密码：请求里涉及的根目录 / 会话（id 形如 rootId:uuid）若已加锁且未携带解锁凭据 → 403。
+    //    列表类接口不拦，改为在返回时把加锁目录的会话脱敏（前端显示「加密」）；锁管理接口自行校验密码 ──
+    app.use('/api', (req, res, next) => {
+      const p = req.path;
+      if (p.startsWith('/root/lock/') || p === '/root/list' || p.startsWith('/session/list') || p === '/session/search') {
+        next();
+        return;
+      }
+      const keys = RootLock.keysFromCookie(req.headers.cookie);
+      if (this._lockedIds(req).some((rid) => !RootLock.canAccess(rid, keys))) {
+        res.status(403).json({ success: false, error: 'root locked', locked: true });
         return;
       }
       next();
@@ -315,7 +332,31 @@ export class Server {
     );
 
     // ── 根目录 ──
-    app.get('/api/root/list', (_req, res) => this._ok(res, RootManager.listRoots()));
+    app.get('/api/root/list', (req, res) => {
+      const keys = RootLock.keysFromCookie(req.headers.cookie);
+      this._ok(
+        res,
+        RootManager.listRoots().map((r) =>
+          RootLock.isLocked(r.id) ? { ...r, locked: true, unlocked: RootLock.canAccess(r.id, keys) } : r,
+        ),
+      );
+    });
+    // 目录私有密码：设置/修改（已加锁需旧密码）、关闭、解锁
+    app.post('/api/root/lock/set', (req, res) =>
+      this._wrap(res, 'root.lockSet', () =>
+        RootLock.setPassword(String(req.body.id || ''), String(req.body.password || ''), req.body.oldPassword),
+      ),
+    );
+    app.post('/api/root/lock/clear', (req, res) =>
+      this._wrap(res, 'root.lockClear', () =>
+        RootLock.clear(String(req.body.id || ''), String(req.body.password || '')),
+      ),
+    );
+    app.post('/api/root/lock/unlock', (req, res) =>
+      this._wrap(res, 'root.lockUnlock', () =>
+        RootLock.unlock(String(req.body.id || ''), String(req.body.password || '')),
+      ),
+    );
     app.post('/api/root/add', (req, res) =>
       this._wrap(res, 'root.add', () => RootManager.addRoot(req.body.name, req.body.path)),
     );
@@ -410,18 +451,18 @@ export class Server {
 
     // ── 会话 ──
     app.get('/api/session/list', (req, res) =>
-      this._wrap(res, 'session.list', () => SessionManager.listSessions(String(req.query.rootId))),
+      this._wrap(res, 'session.list', () => this._redact(req, SessionManager.listSessions(String(req.query.rootId)))),
     );
     // 工作台模式：跨全部根目录合并列出会话
-    app.get('/api/session/list-all', (_req, res) =>
-      this._wrap(res, 'session.listAll', () => SessionManager.listAllSessions()),
+    app.get('/api/session/list-all', (req, res) =>
+      this._wrap(res, 'session.listAll', () => this._redact(req, SessionManager.listAllSessions())),
     );
-    app.get('/api/session/list-favorites', (_req, res) =>
-      this._wrap(res, 'session.listFavorites', () => SessionManager.listFavoriteSessions()),
+    app.get('/api/session/list-favorites', (req, res) =>
+      this._wrap(res, 'session.listFavorites', () => this._redact(req, SessionManager.listFavoriteSessions())),
     );
     // 「全部目录」视图：只取带索引标记的会话（本版本起新建即打标），不逐目录扫盘
-    app.get('/api/session/list-indexed', (_req, res) =>
-      this._wrap(res, 'session.listIndexed', () => SessionManager.listIndexedSessions()),
+    app.get('/api/session/list-indexed', (req, res) =>
+      this._wrap(res, 'session.listIndexed', () => this._redact(req, SessionManager.listIndexedSessions())),
     );
     app.post('/api/session/create', (req, res) =>
       this._wrap(res, 'session.create', () =>
@@ -439,7 +480,12 @@ export class Server {
     // 全文搜索：跨会话读 jsonl 找关键词（标题 + 全部对话正文）。rootId 缺省=跨全部根目录
     app.get('/api/session/search', (req, res) =>
       this._wrapAsync(res, 'session.search', () =>
-        SessionManager.searchSessions(String(req.query.q || ''), String(req.query.rootId || '') || undefined),
+        SessionManager.searchSessions(String(req.query.q || ''), String(req.query.rootId || '') || undefined).then(
+          (hits) => {
+            const keys = RootLock.keysFromCookie(req.headers.cookie);
+            return hits.filter((h) => RootLock.canAccess(this._rootOf(h.id), keys));
+          },
+        ),
       ),
     );
     app.post('/api/session/remove', (req, res) =>
@@ -660,6 +706,52 @@ export class Server {
       );
       // 端口到手后才开始看护：记开机行、挂信号钩子、开心跳
       LifeGuard.install(AppConfig.PORT);
+    });
+  }
+
+  // 会话 id = rootId:uuid；根目录 id 本身不含冒号
+  private static _rootOf(id: string): string {
+    return String(id || '').split(':')[0];
+  }
+
+  // 请求参数里出现的、已加锁的根目录 id（query/body 的 id / sessionId / rootId / ids）
+  private static _lockedIds(req: Request): string[] {
+    const vals: unknown[] = [];
+    for (const src of [req.query as Record<string, unknown>, (req.body || {}) as Record<string, unknown>]) {
+      vals.push(src.id, src.sessionId, src.rootId);
+      if (Array.isArray(src.ids)) vals.push(...src.ids);
+    }
+    const out = new Set<string>();
+    vals.forEach((v) => {
+      if (typeof v !== 'string' || !v) return;
+      const rid = this._rootOf(v);
+      if (RootLock.isLocked(rid)) out.add(rid);
+    });
+    return [...out];
+  }
+
+  // 列表脱敏：加锁且未解锁目录下的会话只留 id/rootId/时间，标题与预览清空并打 locked 标记
+  private static _redact<T extends { id: string; rootId: string }>(req: Request, list: T[]): T[] {
+    const keys = RootLock.keysFromCookie(req.headers.cookie);
+    return list.map((s) => {
+      if (RootLock.canAccess(s.rootId, keys)) return s;
+      const x = s as unknown as Record<string, unknown>;
+      return {
+        id: s.id,
+        rootId: s.rootId,
+        engine: x.engine,
+        createdAt: x.createdAt,
+        updatedAt: x.updatedAt,
+        favorite: x.favorite,
+        pinned: x.pinned,
+        status: x.status,
+        name: '',
+        claudeSessionId: '',
+        tasks: [],
+        messages: [],
+        source: 'other',
+        locked: true,
+      } as unknown as T;
     });
   }
 

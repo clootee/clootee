@@ -1205,6 +1205,17 @@ const DICT = {
   extApiDone: { en: 'Done', zh: '完成' },
   extMsgToastMsg: { en: 'External message arrived: {text}', zh: '收到外部消息：{text}' },
   extMsgToastGo: { en: 'View', zh: '查看' },
+  lockSet: { en: 'Set private password', zh: '设置私有密码' },
+  lockManage: { en: 'Private (change / turn off)', zh: '已私有（修改 / 关闭密码）' },
+  lockUnlock: { en: 'Enter password to unlock', zh: '输入密码解锁' },
+  lockNewPw: { en: 'Set a private password for this directory (min 4 chars). Only browsers that enter it can see its sessions:', zh: '为该目录设置私有访问密码（至少 4 位）。设置后只有输入过密码的浏览器能查看其中的会话：' },
+  lockNewPw2: { en: 'Enter the password again:', zh: '再输入一次密码：' },
+  lockMismatch: { en: 'Passwords do not match', zh: '两次密码不一致' },
+  lockAskPw: { en: 'This directory is private. Enter its password:', zh: '该目录已设为私有，请输入密码：' },
+  lockManageAsk: { en: 'OK = turn off private mode; Cancel = change password', zh: '确定 = 关闭私有（取消密码）；取消 = 修改密码' },
+  lockCurPw: { en: 'Current password:', zh: '当前密码：' },
+  lockedTitle: { en: '🔒 Encrypted', zh: '🔒 加密' },
+  lockedHint: { en: 'Private directory — click to enter password', zh: '私有目录，点击输入密码查看' },
 };
 
 let LANG = localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');

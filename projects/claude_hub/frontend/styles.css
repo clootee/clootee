@@ -3132,3 +3132,7 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .ob-foot button.link{background:none;border:0;padding:0;color:var(--muted,inherit);text-decoration:underline;cursor:pointer;font-size:13px;opacity:.8}
 .clootee-bal{padding:3px 9px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums;cursor:pointer}
 .clootee-bal.low{border-color:#d9534f;color:#d9534f}
+
+/* 私有目录未解锁的会话：只显示「加密」占位 */
+.session-item.locked { opacity: .65; cursor: pointer; }
+.session-item.locked .name { font-style: italic; }
