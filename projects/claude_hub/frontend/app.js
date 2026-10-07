@@ -6422,6 +6422,7 @@ function closeFilePreview() {
   $('fpBody').innerHTML = '';
   $('fpTabs').hidden = true;
   $('fpTabs').innerHTML = '';
+  $('fpCopy').hidden = true;
 }
 
 async function openFilePreview(f, urlFn) {
@@ -6437,6 +6438,14 @@ async function openFilePreview(f, urlFn) {
   $('fpDownload').textContent = '⬇ ' + T('download');
   $('fpTabs').hidden = true;
   $('fpTabs').innerHTML = '';
+  // 文本类（MD/代码/纯文本）可一键复制全文；拿到正文后才显示
+  const copyBtn = $('fpCopy');
+  copyBtn.hidden = true;
+  const showCopy = (raw) => {
+    copyBtn.hidden = false;
+    copyBtn.textContent = '📋 ' + T('copyAll');
+    copyBtn.onclick = () => copyText(raw, copyBtn, '📋 ' + T('copyAll'));
+  };
   const body = $('fpBody');
   $('fpOverlay').hidden = false;
 
@@ -6465,6 +6474,7 @@ async function openFilePreview(f, urlFn) {
       renderSheets(sheets);
     } else if (kind === 'md') {
       const raw = await (await fetch(url)).text();
+      showCopy(raw);
       const el = document.createElement('div');
       el.className = 'msg-body fp-md'; // 复用 .msg-body.md 排版（renderMarkdown 会补 .md）
       renderMarkdown(el, raw);
@@ -6472,6 +6482,7 @@ async function openFilePreview(f, urlFn) {
       body.appendChild(el);
     } else {
       const raw = await (await fetch(url)).text();
+      showCopy(raw);
       const mode = extToCmMode(ext);
       body.innerHTML = '';
       if (mode && window.CodeMirror) {

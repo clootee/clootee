@@ -1174,6 +1174,7 @@ const DICT = {
   download: { en: 'Download', zh: '下载' },
   loading: { en: 'Loading…', zh: '加载中…' },
   previewFail: { en: 'Preview failed', zh: '预览失败' },
+  copyAll: { en: 'Copy all', zh: '复制全文' },
   // 文件管理器
   fileManager: { en: 'Files', zh: '文件管理' },
   emptyFolder: { en: 'Empty folder', zh: '空文件夹' },
