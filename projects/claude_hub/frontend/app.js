@@ -5749,7 +5749,13 @@ function connectWs() {
     else if (e.kind === 'output') appendProcess('output', e.text);
     else if (e.kind === 'message') {
       const wasEmpty = (State.session.messages || []).length === 0;
-      State.session.messages.push(e.message);
+      // 去重：重连/回到前台时会重新拉历史，随后推送的同一条消息不能再追加一次
+      // （历史里的 id 可能与推送的不同，所以再按 角色+正文+时间相近 兜底比对）
+      const nm = e.message;
+      const dup = (State.session.messages || []).slice(-20).some((m) => m.id === nm.id
+        || (m.role === nm.role && m.text === nm.text && Math.abs((m.createdAt || 0) - (nm.createdAt || 0)) < 10000));
+      if (dup) return;
+      State.session.messages.push(nm);
       removeTypingIndicator();       // 新消息插到底部前先移除动画
       renderMessages();
       // 首条消息出现后，标题随之确定：刷新主区标题与会话列表
