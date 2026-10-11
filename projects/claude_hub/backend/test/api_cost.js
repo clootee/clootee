@@ -43,4 +43,17 @@ assert.deepStrictEqual(m.turns.map((x) => x.taskId), ['b']);
 assert.strictEqual(m.turns[0].lines.length, 1);
 assert.strictEqual(m.turns[0].lines[0].outputTokens, 50);
 assert.ok(Math.abs(m.totalUsd - (100 * 4e-6 + 50 * 20e-6)) < 1e-9);
-console.log('api_cost ok', t.totalUsd, m.totalUsd);
+
+// CLI 的 total_cost_usd / modelUsage 是会话累计值：第二轮只能按与上一次 result 的差额补
+const cum = [
+  { kind: 'task_start', taskId: 'p', engine: 'claude', ts: 1, raw: { provider: 'anthropic' } },
+  { kind: 'text', taskId: 'p', ts: 2, model: 'claude-opus-5-5', msgId: 'p1', usage: usage({ output_tokens: 100 }) },
+  { kind: 'result', taskId: 'p', ts: 3, costUsd: 1, raw: { model_usage: { 'claude-opus-5-5': { outputTokens: 100 } } } },
+  { kind: 'task_start', taskId: 'q', engine: 'claude', ts: 4, raw: { provider: 'anthropic' } },
+  { kind: 'text', taskId: 'q', ts: 5, model: 'claude-opus-5-5', msgId: 'q1', usage: usage({ output_tokens: 10 }) },
+  { kind: 'result', taskId: 'q', ts: 6, costUsd: 1.5, raw: { model_usage: { 'claude-opus-5-5': { outputTokens: 110 } } } },
+];
+const c = ApiCost._compute('c', cum);
+assert.strictEqual(c.turns[1].lines[0].outputTokens, 10, 'no cumulative overcount');
+assert.strictEqual(c.turns[1].cliUsd, 0.5, 'cli cost is the per-turn delta');
+console.log('api_cost ok', t.totalUsd, m.totalUsd, c.totalUsd);

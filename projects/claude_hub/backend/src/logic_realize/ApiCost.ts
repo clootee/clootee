@@ -53,28 +53,65 @@ export class ApiCost extends ApiCostStruct {
       const raw = e.raw as { provider?: string } | undefined;
       if (e.kind === 'task_start' && e.engine !== 'codex' && raw?.provider === API_COST_PROVIDER) apiTasks.set(e.taskId, e.ts);
     }
+    const deltas = this._resultDeltas(events);
     const turns: ApiTurnCost[] = [];
     for (const [taskId, startedAt] of apiTasks) {
-      turns.push(this._turn(taskId, startedAt, events.filter((e) => e.taskId === taskId)));
+      turns.push(this._turn(taskId, startedAt, events.filter((e) => e.taskId === taskId), deltas.get(taskId)));
     }
     turns.sort((a, b) => a.startedAt - b.startedAt);
     return { sessionId, turns, totalUsd: this._round(turns.reduce((n, t) => n + t.totalUsd, 0)) };
   }
 
-  private static _turn(taskId: string, startedAt: number, events: TraceEvent[]): ApiTurnCost {
+  // CLI 的 result.total_cost_usd / modelUsage 是「整个会话（含 --resume 恢复的）累计值」，不是本轮：
+  // 按时间顺序与上一次 result 相减得到本轮增量；数值回落（CLI 计数被重置）时当作从零开始。
+  private static _resultDeltas(events: TraceEvent[]): Map<string, { cli: number | null; mu: ModelUsage | null }> {
+    const out = new Map<string, { cli: number | null; mu: ModelUsage | null }>();
+    let prevCost = 0;
+    let prevMu: ModelUsage = {};
+    let seenResult = false; // 之前出现过 result
+    let muKnown = true;     // 上一次 result 带 modelUsage（否则累计基线未知，无法求差）
+    const results = events.filter((e) => e.kind === 'result').sort((a, b) => a.ts - b.ts);
+    for (const e of results) {
+      const cost = typeof e.costUsd === 'number' ? e.costUsd : null;
+      const mu = (e.raw as { model_usage?: ModelUsage } | undefined)?.model_usage || null;
+      const reset = (cost !== null && cost < prevCost) || (mu !== null && this._dropped(prevMu, mu));
+      const baseCost = reset ? 0 : prevCost;
+      const baseMu = reset ? {} : prevMu;
+      const delta: ModelUsage | null = mu && (reset || !seenResult || muKnown) ? {} : null;
+      if (mu && delta) {
+        for (const [model, m] of Object.entries(mu)) {
+          const b = baseMu[model] || {};
+          delta[model] = {};
+          for (const k of Object.keys(m)) delta[model][k] = num(m[k]) - num(b[k]);
+        }
+      }
+      out.set(e.taskId, { cli: cost === null ? null : this._round(cost - baseCost), mu: delta });
+      if (cost !== null) prevCost = cost;
+      if (mu) prevMu = mu;
+      muKnown = !!mu;
+      seenResult = true;
+    }
+    return out;
+  }
+
+  private static _dropped(prev: ModelUsage, cur: ModelUsage): boolean {
+    for (const [model, p] of Object.entries(prev)) {
+      const c = cur[model];
+      if (!c || num(c.outputTokens) < num(p.outputTokens) || num(c.cacheReadInputTokens) < num(p.cacheReadInputTokens)) return true;
+    }
+    return false;
+  }
+
+  private static _turn(
+    taskId: string, startedAt: number, events: TraceEvent[], delta?: { cli: number | null; mu: ModelUsage | null },
+  ): ApiTurnCost {
     // 同一条消息拆成多帧（每个内容块一帧）时 usage 重复出现，取 output 最大（最终）的那份
     const byMsg = new Map<string, Req>();
     let anon = 0;
-    let cliUsd: number | null = null;
-    let modelUsage: ModelUsage | null = null;
+    const cliUsd = delta ? delta.cli : null;
+    const modelUsage = delta ? delta.mu : null;
     for (const e of events) {
-      if (e.kind === 'result') {
-        if (typeof e.costUsd === 'number') cliUsd = e.costUsd;
-        const mu = (e.raw as { model_usage?: ModelUsage } | undefined)?.model_usage;
-        if (mu && typeof mu === 'object') modelUsage = mu;
-        continue;
-      }
-      if (!e.usage || !e.model) continue;
+      if (e.kind === 'result' || !e.usage || !e.model) continue;
       const req = this._req(e.model, e.usage);
       const key = e.msgId || `anon-${anon++}`;
       const prev = byMsg.get(key);
