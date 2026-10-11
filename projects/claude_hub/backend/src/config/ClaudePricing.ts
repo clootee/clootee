@@ -43,5 +43,8 @@ export const LONG_CONTEXT_THRESHOLD = 200_000;
 export const LONG_CONTEXT_INPUT_MULT = 2;
 export const LONG_CONTEXT_OUTPUT_MULT = 1.5;
 export const WEB_SEARCH_USD = 0.01; // $10 / 1000 次
-export const API_COST_PROVIDER = 'anthropic'; // 只有这个服务商（官方 API Key）才统计
+// 只有这些服务商（按量计费的 Key）才统计：anthropic 用上面的官方价目，openrouter 用 OpenRouter 公开价目
+export const API_COST_PROVIDERS = ['anthropic', 'openrouter'];
+export const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
+export const OPENROUTER_PRICES_TTL_MS = 6 * 3600 * 1000;
 export const API_COST_MAX_BATCH = 300;

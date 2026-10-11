@@ -389,6 +389,7 @@ export interface ApiCostLine {
 }
 export interface ApiTurnCost {
   taskId: string;
+  provider: string;         // anthropic | openrouter
   startedAt: number;
   lines: ApiCostLine[];
   totalUsd: number;

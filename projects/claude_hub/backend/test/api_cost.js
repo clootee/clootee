@@ -56,4 +56,23 @@ const cum = [
 const c = ApiCost._compute('c', cum);
 assert.strictEqual(c.turns[1].lines[0].outputTokens, 10, 'no cumulative overcount');
 assert.strictEqual(c.turns[1].cliUsd, 0.5, 'cli cost is the per-turn delta');
-console.log('api_cost ok', t.totalUsd, m.totalUsd, c.totalUsd);
+
+// OpenRouter：按 OpenRouter 公开价目（每 token 美元，含 1h 缓存写与分档 overrides）计价
+const { OpenRouterPrices } = require('../dist/logic_realize/OpenRouterPrices');
+OpenRouterPrices._mem = { fetchedAt: Date.now(), models: {
+  'anthropic/claude-opus-5.5': { prompt: 4e-6, completion: 20e-6, cacheRead: 0.2e-6, cacheWrite: 5e-6, cacheWrite1h: 8e-6, webSearch: 0.01, overrides: [] },
+  'anthropic/claude-haiku-5.5': { prompt: 1e-7, completion: 5e-7, cacheRead: 1e-8, cacheWrite: 1.25e-7, cacheWrite1h: 2e-7, webSearch: 0.01,
+    overrides: [{ minPromptTokens: 100000, prompt: 5e-7, completion: 2.5e-6, cacheRead: 5e-8 }] },
+} };
+const or = [
+  { kind: 'task_start', taskId: 'o', engine: 'claude', ts: 1, raw: { provider: 'openrouter' } },
+  { kind: 'text', taskId: 'o', ts: 2, model: 'anthropic/claude-opus-5.5', msgId: 'g1', usage: usage({ input_tokens: 10, output_tokens: 100, cache_read_input_tokens: 1000, cache_creation_input_tokens: 300, cache_creation: { ephemeral_5m_input_tokens: 200, ephemeral_1h_input_tokens: 100 } }) },
+  // Anthropic 风格 id 也能映射到 OpenRouter 的 anthropic/claude-haiku-5.5；输入超 10 万走高档价
+  { kind: 'text', taskId: 'o', ts: 3, model: 'claude-haiku-5-5', msgId: 'g2', usage: usage({ input_tokens: 150000, output_tokens: 10 }) },
+];
+const o = ApiCost._compute('o', or);
+assert.strictEqual(o.turns[0].provider, 'openrouter');
+const oOpus = 10 * 4e-6 + 100 * 20e-6 + 1000 * 0.2e-6 + 200 * 5e-6 + 100 * 8e-6;
+const oHaiku = 150000 * 5e-7 + 10 * 2.5e-6;
+assert.ok(Math.abs(o.totalUsd - (oOpus + oHaiku)) < 1e-9, `openrouter ${o.totalUsd} vs ${oOpus + oHaiku}`);
+console.log('api_cost ok', t.totalUsd, m.totalUsd, c.totalUsd, o.totalUsd);

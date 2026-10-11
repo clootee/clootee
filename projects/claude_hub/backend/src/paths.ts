@@ -20,6 +20,8 @@ export const Paths = {
   ENGINES_FILE: path.join(DATA_ROOT, 'engines.json'),
   // Clootee 默认服务商（console.clootee.com）发给本机的设备令牌与安装 id；真实凭据，已在 .gitignore
   CONSOLE_FILE: path.join(DATA_ROOT, 'console.json'),
+  // OpenRouter 公开价目缓存（/api/v1/models），计费用；定期刷新
+  OPENROUTER_PRICES_FILE: path.join(DATA_ROOT, 'openrouter_prices.json'),
   LOGS_DIR: path.join(DATA_ROOT, 'logs'),
   // 过程轨迹：data/traces/<rootId>/<claudeSessionId>.jsonl（AI 工作全过程逐事件记录）
   TRACES_DIR: path.join(DATA_ROOT, 'traces'),

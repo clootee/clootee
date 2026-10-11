@@ -2849,7 +2849,7 @@ const ApiBill = {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'api-cost-toggle';
-    btn.textContent = `${T('apiTurnCost').replace('{c}', this.usd(turn.totalUsd))} ${isOpen ? '▾' : '▸'}`;
+    btn.textContent = `${T(turn.provider === 'openrouter' ? 'apiTurnCostOr' : 'apiTurnCost').replace('{c}', this.usd(turn.totalUsd))} ${isOpen ? '▾' : '▸'}`;
     btn.title = T('apiCostTip');
     btn.onclick = (ev) => {
       ev.stopPropagation();
