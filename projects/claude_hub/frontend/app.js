@@ -2966,10 +2966,11 @@ const Clootee = {
       alert(T('clooteeLinkFail') + (e.message || ''));
     }
   },
-  // 这一轮对应的任务：开始时间落在「本轮用户消息 ~ 下一轮用户消息」之间的最后一条
+  // 这一轮对应的任务：开始时间落在「本轮用户消息 ~ 下一轮用户消息」之间的最后一条。
+  // 两端各放宽 5 秒：任务常比它的用户消息早几毫秒入账，结束端不收窄就会把下一轮的任务算进来
   taskOfTurn(since, until) {
     const tasks = (State.session && State.session.tasks) || [];
-    const hit = tasks.filter((t) => t.startedAt && t.startedAt >= since - 5000 && t.startedAt <= until);
+    const hit = tasks.filter((t) => t.startedAt && t.startedAt >= since - 5000 && t.startedAt < until - 5000);
     return hit.length ? hit[hit.length - 1].id : '';
   },
   // 每轮花费文案；没查过就后台查一次，查完重渲染（fetch=false 的老轮次不查）。
