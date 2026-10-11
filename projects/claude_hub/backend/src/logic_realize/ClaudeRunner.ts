@@ -109,6 +109,7 @@ export class ClaudeRunner extends ClaudeRunnerStruct {
           duration_ms: evt.duration_ms,
           duration_api_ms: evt.duration_api_ms,
           is_error: evt.is_error,
+          model_usage: evt.modelUsage,
           permission_denials: evt.permission_denials,
         },
       });
@@ -122,7 +123,7 @@ export class ClaudeRunner extends ClaudeRunnerStruct {
       for (const block of evt.message.content) {
         const extra = usageAttached
           ? { engine: 'claude' as const }
-          : { engine: 'claude' as const, model: evt.message.model, usage: evt.message.usage };
+          : { engine: 'claude' as const, model: evt.message.model, usage: evt.message.usage, msgId: evt.message.id };
         if (evt.message.usage || evt.message.model) usageAttached = true;
 
         if (block.type === 'thinking') {

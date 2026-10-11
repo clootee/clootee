@@ -98,6 +98,16 @@ function setFavoritesOnly(on) {
 // 同一套规格：24x24 视窗、单色描边（currentColor）、线宽 1.6、圆头圆角、不填充。
 // 用 currentColor 才能跟按钮/菜单项的文字颜色（含选中态高亮、暗色主题）自动一致。
 const ICONS = {
+  // 目录管理：叠放的两个文件夹
+  manageRoots: '<path d="M6.5 6.5V5.6a1.6 1.6 0 0 1 1.6-1.6h2.5l1.5 1.6h5.8a1.6 1.6 0 0 1 1.6 1.6v6.6a1.6 1.6 0 0 1-1.6 1.6h-.4"/><path d="M3.5 10a1.6 1.6 0 0 1 1.6-1.6h2.6l1.5 1.6h5.7a1.6 1.6 0 0 1 1.6 1.6v6.3a1.6 1.6 0 0 1-1.6 1.6H5.1a1.6 1.6 0 0 1-1.6-1.6V10Z"/>',
+  // 推送：云 + 上箭头
+  gitPush: '<path d="M7.2 18.5H6.6a4.1 4.1 0 0 1-.6-8.15 5.6 5.6 0 0 1 10.9-1.1 4.65 4.65 0 0 1 .6 9.25h-.7"/><path d="M12 20.5v-8"/><path d="m8.9 15.3 3.1-3.1 3.1 3.1"/>',
+  // 打开文件夹
+  openFolder: '<path d="M3.5 17.5V6.6A1.6 1.6 0 0 1 5.1 5h3.3l1.7 1.8h6.3a1.6 1.6 0 0 1 1.6 1.6v1.8"/><path d="M3.5 17.5 6 11.3a1.6 1.6 0 0 1 1.5-1h12a1.1 1.1 0 0 1 1 1.5l-2.3 5.9a1.6 1.6 0 0 1-1.5 1H5a1.5 1.5 0 0 1-1.5-1.2Z"/>',
+  // 添加
+  plus: '<path d="M12 5.5v13"/><path d="M5.5 12h13"/>',
+  // 删除：垃圾桶
+  trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5.4a1.4 1.4 0 0 1 1.4-1.4h2.2a1.4 1.4 0 0 1 1.4 1.4V7"/><path d="m6.3 7 .8 11.4a1.8 1.8 0 0 0 1.8 1.6h6.2a1.8 1.8 0 0 0 1.8-1.6L17.7 7"/><path d="M10.2 11v5"/><path d="M13.8 11v5"/>',
   // 单目录：一只文件夹
   single: '<path d="M3.2 8.1a2 2 0 0 1 2-2h3.05a2 2 0 0 1 1.5.68l1.02 1.16a2 2 0 0 0 1.5.68h6.53a2 2 0 0 1 2 2v7.7a2 2 0 0 1-2 2H5.2a2 2 0 0 1-2-2V8.1Z"/>',
   // 收藏夹：五角星
@@ -301,9 +311,11 @@ function applyText() {
   if (!$('guideMenu').hidden) renderGuideMenu();
   if (!$('guideOverlay').hidden) renderGuide();
   $('rootLabel').textContent = T('root');
-  $('addRootBtn').textContent = '＋';
+  $('addRootBtn').innerHTML = svgIcon('plus', 17);
   $('addRootBtn').title = T('addRoot');
-  $('removeRootBtn').textContent = '🗑';
+  $('removeRootBtn').innerHTML = svgIcon('trash', 17);
+  $('manageRootsBtn').innerHTML = svgIcon('manageRoots', 17);
+  $('openFolderBtn').innerHTML = svgIcon('openFolder', 17);
   $('removeRootBtn').title = T('removeRoot');
   $('manageRootsBtn').title = T('manageRoots');
   $('batchToggleBtn').title = T('batchSelect');
@@ -318,7 +330,7 @@ function applyText() {
   $('batchMarkTesting').textContent = `🧪 ${T('markTesting')}`;
   $('batchMarkActive').textContent = `🔥 ${T('markActive')}`;
   $('batchCancelBtn').textContent = T('cancel');
-  $('gitPushBtn').textContent = '⇪';
+  $('gitPushBtn').innerHTML = svgIcon('gitPush', 17);
   $('rootEditTitle').textContent = T('editRootTitle');
   $('rootEditClose').textContent = T('close');
   $('noteLabel').textContent = T('note');
@@ -434,6 +446,7 @@ function applyText() {
   $('defaultEngineLabel').textContent = T('defaultEngine');
   $('settingsPaneSave').textContent = T('save');
   $('settingsPaneBack').title = T('back');
+  renderPaneStatus(); // 状态条里可能挂着「有未保存的改动」等文案，切语言要跟着变
   // 设置弹窗开着时切语言 → 重渲染板块列表 / 当前板块标题
   if (!$('settingsOverlay').hidden) renderSettingsNav();
   if (!$('settingsPaneOverlay').hidden && CurrentPane) {
@@ -1980,6 +1993,7 @@ function renderSessions() {
   if (!q && total > Page.shown) sessions = sessions.slice(0, Page.shown);
   Page.more = total - sessions.length;
   list.innerHTML = '';
+  setTimeout(() => ApiBill.flushList(), 0);
   sessions.forEach((s) => {
     const div = document.createElement('div');
     if (s.locked) {
@@ -2044,7 +2058,7 @@ function renderSessions() {
         <div class="name">${escapeHtml(title)}</div>
         ${lastLine}
         <div class="meta">
-          <span class="meta-tags">${dirBadge}${favoriteTag}${pinTag}${doneTag}${testingTag}${runTag}${justFinishedTag}${engBadge}</span>
+          <span class="meta-tags">${dirBadge}${favoriteTag}${pinTag}${doneTag}${testingTag}${runTag}${justFinishedTag}${engBadge}${ApiBill.listTag(s)}</span>
           <span class="meta-time">${escapeHtml(updatedTime)}</span>
         </div>
         ${snippet}
@@ -2895,10 +2909,146 @@ function renderElapsedNotes() {
     const turnEndAt = next && next.createdAt ? next.createdAt : Date.now();
     const cost = Clootee.turnText(Clootee.taskOfTurn(lastUserTime, turnEndAt), !next, i >= msgs.length - 12);
     if (cost) el.textContent += ` · ${cost}`;
+    ApiBill.attach(el, Clootee.taskOfTurn(lastUserTime, turnEndAt));
     node.appendChild(el); // 放进气泡内部（末尾），而非气泡外部
     lastUserTime = 0; // 本轮已消费
   }
 }
+
+// ── 每轮费用 + 可展开明细 + 会话列表合计（订阅 / OpenRouter / DeepSeek / 官方 API）──
+// 数据源 GET /api/session/api-cost（后端按每条消息 usage × 服务商价目逐项计算，含 5m/1h 缓存写、缓存读）。
+// 订阅登录跑的轮次不实扣，但同样按 Claude 价目折算成「相当于花了多少」，用「订阅」+ 黄色区分。
+const ApiBill = {
+  bySession: {},     // sessionId → ApiSessionCost | 'loading'
+  totals: {},        // sessionId → { usd: 合计, sub: 其中订阅轮次的等价估价 }（会话列表用）
+  asked: new Set(),  // 已请求过合计的会话
+  pending: new Set(),
+  open: new Set(),   // 已展开明细的 taskId
+  usd(v) {
+    const n = Number(v) || 0;
+    return `$${n < 1 ? n.toFixed(6) : n.toFixed(4)}`;
+  },
+  tok(n) { return fmtNum(Number(n) || 0); },
+  // 轮次性质：订阅登录（等价估价）/ OpenRouter / DeepSeek / 其它按量服务商
+  kind(turn) {
+    if (turn.billing === 'subscription') return 'sub';
+    const m = String((turn.lines[0] && turn.lines[0].model) || '').toLowerCase();
+    if (turn.provider === 'openrouter' || m.includes('/')) return 'or';
+    if (m.startsWith('deepseek')) return 'ds';
+    return 'api';
+  },
+  labelKey(kind) {
+    return { sub: 'apiTurnCostSub', or: 'apiTurnCostOr', ds: 'apiTurnCostDs' }[kind] || 'apiTurnCost';
+  },
+  load(sid) {
+    if (!sid || this.bySession[sid] === 'loading') return;
+    this.bySession[sid] = 'loading';
+    api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
+      .then((r) => {
+        this.bySession[sid] = r;
+        if (r.turns.length) { this.totals[sid] = { usd: r.totalUsd, sub: r.subscriptionUsd }; this.paintListTag(sid); }
+        if (State.session && State.session.id === sid) renderElapsedNotes();
+      })
+      .catch(() => { delete this.bySession[sid]; });
+  },
+  // 在「耗时」行后追加「API 本轮 $x ▸」，点开显示按模型 × 计费项的明细
+  attach(el, taskId) {
+    const sid = State.session && State.session.id;
+    if (!sid || !taskId) return;
+    const data = this.bySession[sid];
+    if (!data) { this.load(sid); return; }
+    if (data === 'loading') return;
+    const turn = data.turns.find((t) => t.taskId === taskId);
+    if (!turn) return;
+    const isOpen = this.open.has(taskId);
+    const kind = this.kind(turn);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `api-cost-toggle${kind === 'sub' ? ' sub' : ''}`;
+    btn.textContent = `${T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.usd(turn.totalUsd))} ${isOpen ? '▾' : '▸'}`;
+    btn.title = T(kind === 'sub' ? 'apiCostTipSub' : 'apiCostTip');
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      if (this.open.has(taskId)) this.open.delete(taskId); else this.open.add(taskId);
+      renderElapsedNotes();
+    };
+    el.appendChild(document.createTextNode(' · '));
+    el.appendChild(btn);
+    if (isOpen) el.appendChild(this.detail(turn, data));
+  },
+  detail(turn, data) {
+    const box = document.createElement('div');
+    box.className = 'api-cost-detail';
+    const items = [
+      ['apiInput', 'inputTokens', 'input'],
+      ['apiOutput', 'outputTokens', 'output'],
+      ['apiCacheRead', 'cacheReadTokens', 'cacheRead'],
+      ['apiCacheWrite5m', 'cacheWrite5mTokens', 'cacheWrite5m'],
+      ['apiCacheWrite1h', 'cacheWrite1hTokens', 'cacheWrite1h'],
+      ['apiWebSearch', 'webSearches', 'webSearch'],
+    ];
+    const blocks = turn.lines.map((l) => {
+      const rows = items
+        .filter(([, tk]) => l[tk] > 0)
+        .map(([k, tk, uk]) => `<tr><td>${escapeHtml(T(k))}</td><td class="num">${this.tok(l[tk])}</td>` +
+          `<td class="num">${l.priced || uk === 'webSearch' ? this.usd(l.usd[uk]) : '?'}</td></tr>`)
+        .join('');
+      const actual = l.requests > 0 && l.reportedRequests === l.requests;
+      const tags = [l.extra ? T('apiExtra') : '', actual ? T('apiActual') : '', l.priced || actual ? '' : T('apiUnpriced')].filter(Boolean).join(' · ');
+      const reqs = l.requests ? ` · ${T('apiRequests').replace('{n}', l.requests)}` : '';
+      return `<div class="api-cost-model"><b>${escapeHtml(l.model)}</b>${reqs}${tags ? ` · <em>${escapeHtml(tags)}</em>` : ''}` +
+        `<span class="api-cost-sum">${this.usd(l.totalUsd)}</span></div>` +
+        `<table class="api-cost-table"><tr><th>${escapeHtml(T('apiItem'))}</th><th class="num">${escapeHtml(T('apiTokens'))}</th>` +
+        `<th class="num">${escapeHtml(T('apiUsd'))}</th></tr>${rows}</table>`;
+    }).join('');
+    const sub = turn.billing === 'subscription'
+      ? `<div class="api-cost-note sub">${escapeHtml(T('apiSubscription'))}</div>` : '';
+    const cli = turn.cliUsd !== null && turn.cliUsd !== undefined
+      ? `<div class="api-cost-note">${escapeHtml(T('apiCliRef').replace('{c}', this.usd(turn.cliUsd)))}</div>` : '';
+    box.innerHTML = blocks + sub +
+      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${this.usd(turn.totalUsd)}</b> · ` +
+      `${escapeHtml(T('apiSessionTotal'))} <b>${this.usd(this.runningTotal(turn, data))}</b></div>${cli}`;
+    box.addEventListener('click', (ev) => ev.stopPropagation());
+    return box;
+  },
+  // 截至这一轮（含）的累计：每条消息显示的是它当时的累计，而不是会话现在的总额（总额在左侧会话列表）
+  runningTotal(turn, data) {
+    return data.turns.filter((t) => t.startedAt <= turn.startedAt).reduce((n, t) => n + t.totalUsd, 0);
+  },
+  // 会话列表：已知合计就出徽章；有订阅轮次的话额外用黄色标出其中「订阅」的那部分
+  listTag(s) {
+    if (s.engine === 'codex') return '';
+    if (!this.asked.has(s.id)) this.pending.add(s.id);
+    const t = this.totals[s.id];
+    return `<span class="api-cost-tag" data-api-sid="${escapeHtml(s.id)}" title="${escapeHtml(T('apiListTip'))}"${t ? '' : ' hidden'}>${t ? this.tagHtml(t) : ''}</span>`;
+  },
+  tagHtml(t) {
+    const sub = t.sub > 0 ? `<span class="api-cost-sub">${escapeHtml(T('apiSubBadge').replace('{c}', this.usd(t.sub)))}</span>` : '';
+    return `${this.usd(t.usd)}${sub}`;
+  },
+  paintListTag(sid) {
+    document.querySelectorAll('.api-cost-tag').forEach((tag) => {
+      if (tag.dataset.apiSid !== sid) return;
+      const t = this.totals[sid];
+      tag.hidden = !t;
+      tag.innerHTML = t ? this.tagHtml(t) : '';
+    });
+  },
+  flushList() {
+    if (!this.pending.size) return;
+    const ids = [...this.pending].slice(0, 300);
+    ids.forEach((id) => { this.pending.delete(id); this.asked.add(id); });
+    api('/api/sessions/api-cost', { ids })
+      .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); })
+      .catch(() => { ids.forEach((id) => this.asked.delete(id)); });
+  },
+  // 任务结束：该会话缓存作废，重新取明细与合计
+  onTaskEnd(sessionId) {
+    delete this.bySession[sessionId];
+    if (State.session && State.session.id === sessionId) this.load(sessionId);
+    else { this.asked.delete(sessionId); this.pending.add(sessionId); this.flushList(); }
+  },
+};
 
 // ── Clootee 默认服务商：余额徽章 / 每轮花费 / 额度用完弹层 ──
 // 只是一个普通服务商的「账户视图」：数据都来自 console.clootee.com（经后端 /api/console/* 转述），
@@ -2939,10 +3089,11 @@ const Clootee = {
       alert(T('clooteeLinkFail') + (e.message || ''));
     }
   },
-  // 这一轮对应的任务：开始时间落在「本轮用户消息 ~ 下一轮用户消息」之间的最后一条
+  // 这一轮对应的任务：开始时间落在「本轮用户消息 ~ 下一轮用户消息」之间的最后一条。
+  // 两端各放宽 5 秒：任务常比它的用户消息早几毫秒入账，结束端不收窄就会把下一轮的任务算进来
   taskOfTurn(since, until) {
     const tasks = (State.session && State.session.tasks) || [];
-    const hit = tasks.filter((t) => t.startedAt && t.startedAt >= since - 5000 && t.startedAt <= until);
+    const hit = tasks.filter((t) => t.startedAt && t.startedAt >= since - 5000 && t.startedAt < until - 5000);
     return hit.length ? hit[hit.length - 1].id : '';
   },
   // 每轮花费文案；没查过就后台查一次，查完重渲染（fetch=false 的老轮次不查）。
@@ -4882,7 +5033,7 @@ function closeTrace() {
 // ── 会话统计详情（右键 → 统计详情）：对任意会话做「时间花在哪」的细分分析 ──
 // 数据源 GET /api/session/trace-stats（后端 TraceStore 已算好 phases/activeMs/rounds）。
 // 与 trOverlay 不同：这里按传入的 sessionId 取数，不依赖当前打开的会话。
-const Stats = { sid: '', title: '', charts: [] };
+const Stats = { sid: '', title: '', charts: [], charChart: null };
 // 阶段元数据：key 对应后端 TracePhaseBreakdown 字段，label 走 i18n，color 固定配色
 const STAT_PHASES = [
   { key: 'ttft', tk: 'phTtft', color: '#f59e0b' },
@@ -4914,6 +5065,8 @@ function closeSessionStats() {
 function _disposeStatsCharts() {
   Stats.charts.forEach((c) => { try { c.dispose(); } catch { /* ignore */ } });
   Stats.charts = [];
+  if (Stats.charChart) { try { Stats.charChart.dispose(); } catch { /* ignore */ } }
+  Stats.charChart = null;
 }
 
 async function loadSessionStats() {
@@ -5017,8 +5170,13 @@ function renderSessionStats(s) {
   const countsBlock = (kchips || kchars)
     ? `<div class="st-h">${T('statsCountsTitle')}</div><div class="st-counts">${kchips}${kchars}</div>`
     : '';
+  const charBlock = `<div class="st-char-head"><div class="st-h">${T('statsCharsTitle')}</div>` +
+    `<div class="st-char-controls"><span>${T('statsCharsInterval')}</span>` +
+    [1, 2, 5].map((minutes) => `<button type="button" class="st-char-btn${minutes === 1 ? ' active' : ''}" data-minutes="${minutes}">${minutes}m</button>`).join('') +
+    `</div></div><div class="st-char-chart" id="statsCharChart"></div>`;
 
   body.innerHTML =
+    charBlock +
     summary +
     countsBlock +
     `<div class="st-h">${T('statsPhaseTitle')}</div>` +
@@ -5029,7 +5187,49 @@ function renderSessionStats(s) {
     `<div class="st-note">${T('statsNote')}</div>`;
 
   // ECharts 需要容器有尺寸：入文档后再画
-  setTimeout(() => _renderPhaseChart(rows), 0);
+  body.querySelectorAll('.st-char-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      body.querySelectorAll('.st-char-btn').forEach((item) => item.classList.toggle('active', item === button));
+      _renderCharChart(s, Number(button.dataset.minutes) || 1);
+    });
+  });
+  setTimeout(() => { _renderCharChart(s, 1); _renderPhaseChart(rows); }, 0);
+}
+
+function _renderCharChart(stats, intervalMinutes) {
+  const el = $('statsCharChart');
+  if (Stats.charChart) { try { Stats.charChart.dispose(); } catch { /* ignore */ } Stats.charChart = null; }
+  if (!el || !el.isConnected || typeof echarts === 'undefined') return;
+  const source = Array.isArray(stats.charTimeline) ? stats.charTimeline : [];
+  const size = Math.max(1, intervalMinutes) * 60000;
+  const buckets = new Map();
+  source.forEach((item) => {
+    const startTs = Math.floor(Number(item.startTs) / size) * size;
+    const current = buckets.get(startTs) || { startTs, textChars: 0, thinkingChars: 0 };
+    current.textChars += Number(item.textChars) || 0;
+    current.thinkingChars += Number(item.thinkingChars) || 0;
+    buckets.set(startTs, current);
+  });
+  const rows = [...buckets.values()].sort((a, b) => a.startTs - b.startTs);
+  if (!rows.length) return;
+  const cs = getComputedStyle(document.body);
+  const cText = (cs.getPropertyValue('--text') || '#cbd5e1').trim();
+  const cBorder = (cs.getPropertyValue('--border') || '#475569').trim();
+  const formatTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const chart = echarts.init(el);
+  chart.setOption({
+    backgroundColor: 'transparent',
+    grid: { left: 12, right: 18, top: 28, bottom: 28, containLabel: true },
+    legend: { top: 0, textStyle: { color: cText }, data: [T('statsCharsThinking'), T('statsCharsText')] },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (value) => fmtNum(value) + ' ' + T('statsCharsUnit') },
+    xAxis: { type: 'category', data: rows.map((row) => formatTime(row.startTs)), axisLabel: { color: cText }, axisLine: { lineStyle: { color: cBorder } } },
+    yAxis: { type: 'value', axisLabel: { color: cText, formatter: (value) => fmtNum(value) }, splitLine: { lineStyle: { color: cBorder, opacity: 0.4 } } },
+    series: [
+      { name: T('statsCharsThinking'), type: 'bar', stack: 'chars', data: rows.map((row) => row.thinkingChars), itemStyle: { color: '#8b5cf6' }, barMaxWidth: 42 },
+      { name: T('statsCharsText'), type: 'bar', stack: 'chars', data: rows.map((row) => row.textChars), itemStyle: { color: '#06b6d4' }, barMaxWidth: 42 },
+    ],
+  });
+  Stats.charChart = chart;
 }
 
 // 横向条形图：每个阶段一根条（秒）。跟随明暗主题取色。
@@ -5727,7 +5927,7 @@ function connectWs() {
     // 任务事件：无论是否当前会话，都据此更新侧栏"执行中"标识
     if (e.kind === 'task') {
       updateRunningFromTask(e.sessionId, e.task);
-      if (e.task.status === 'done' || e.task.status === 'error') Clootee.onTaskEnd(e.task);
+      if (e.task.status === 'done' || e.task.status === 'error') { Clootee.onTaskEnd(e.task); ApiBill.onTaskEnd(e.sessionId); }
       if (e.task.status === 'done') dropTaskNotices(e.task.id); // 跑通了就撤掉中途的告警
       // 外部系统推送来的消息：不管现在正看哪个会话都弹一下，不能让用户全靠手动刷新才发现
       if (e.task.external && e.task.status === 'pending') showExtMsgToast(e.sessionId, e.task.prompt);
@@ -6660,12 +6860,18 @@ function bind() {
   $('claudeApiKey').addEventListener('change', () => onApiKeySettled('claude'));
   $('claudeApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('claude'); });
   $('claudeModelsBtn').addEventListener('click', fetchClaudeModels);
-  $('claudeSaveBtn').addEventListener('click', saveClaudeProvider);
   $('codexProviderSelect').addEventListener('change', () => onEngineProviderChange('codex'));
   $('codexApiKey').addEventListener('change', () => onApiKeySettled('codex'));
   $('codexApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('codex'); });
   $('codexModelsBtn').addEventListener('click', () => fetchEngineModels('codex'));
-  $('codexSaveBtn').addEventListener('click', () => saveEngineProvider('codex'));
+  // 引擎块没有自己的保存按钮了（全板块只有一个，在 footer），靠脏标记告诉用户「这块动了还没存」。
+  // 「脏」只由用户操作产生：换服务商在 onEngineProviderChange 里标，Key/地址/手填模型在这里标；
+  // 思考强度与原版订阅的模型下拉是即时落盘的，不算脏，故不在监听之列。
+  for (const eng of ['claude', 'codex']) {
+    for (const id of [`${eng}ApiKey`, `${eng}BaseUrl`, `${eng}ModelsUrl`, `${eng}ModelInput`]) {
+      $(id).addEventListener('input', () => markEngineDirty(eng));
+    }
+  }
   // 更新引擎 + 修改密码
   $('tcRefreshBtn').addEventListener('click', renderToolchain);
   $('runAsUserSaveBtn').addEventListener('click', saveRunAsUser);
@@ -7193,38 +7399,84 @@ function renderSettingsNav() {
 // 当前打开的板块 id（null=没开）；保存/返回都以它为准
 let CurrentPane = null;
 
+// ── footer 状态条：紧挨着「保存」按钮的唯一反馈面 ──
+// 以前保存结果写在板块内容里（比如 claudeProviderStatus），用户点了底部保存根本看不到；
+// 现在保存中/已保存/未保存改动/失败原因一律出现在按钮左边。
+// 存的是 key 而非成句文字，切语言时能重新翻译。
+let PaneNotice = null;      // { key, params, kind } —— 瞬时结果（保存中 / 已保存 / 失败）
+let PaneNoticeTimer = null;
+
+function setPaneNotice(key, params, kind, ms) {
+  if (PaneNoticeTimer) { clearTimeout(PaneNoticeTimer); PaneNoticeTimer = null; }
+  PaneNotice = key ? { key, params: params || {}, kind: kind || '' } : null;
+  if (key && ms) {
+    PaneNoticeTimer = setTimeout(() => { PaneNoticeTimer = null; PaneNotice = null; renderPaneStatus(); }, ms);
+  }
+  renderPaneStatus();
+}
+// 没有瞬时结果时，回落显示当前板块的「有未保存的改动」
+function renderPaneStatus() {
+  const el = $('settingsPaneStatus');
+  if (!el) return;
+  const show = (text, kind) => {
+    el.className = 'sx-foot-status' + (kind ? ' ' + kind : '');
+    el.textContent = text;
+    el.title = kind === 'err' ? '' : text; // 失败原因允许换行，不靠 title 兜底
+  };
+  if (PaneNotice) {
+    let s = T(PaneNotice.key);
+    for (const [k, v] of Object.entries(PaneNotice.params)) s = s.replace(`{${k}}`, v);
+    show(s, PaneNotice.kind);
+    return;
+  }
+  if (CurrentPane === 'engine' && (EngineDirty.claude || EngineDirty.codex)) return show(T('engDirty'), 'warn');
+  show('', '');
+}
+
 function openSettingsPane(id) {
   const p = paneById(id);
   if (!p) return;
   CurrentPane = id;
+  PaneLeaveBlocked = false;
   for (const q of SETTINGS_PANES) $(`pane-${q.id}`).hidden = q.id !== id;
   $('settingsPaneTitle').textContent = `${p.icon} ${p.title()}`;
   $('settingsPaneSave').textContent = T('save');
   $('settingsPaneOverlay').hidden = false;
   $('settingsPaneOverlay').querySelector('.sx-body').scrollTop = 0;
+  setPaneNotice(null); // 进入板块先清掉上一个板块残留的「已保存」
   if (p.fill) p.fill();
 }
-// 返回板块列表：先落盘本板块的改动，再刷新列表摘要
-async function backToSettingsNav() {
-  await saveCurrentPane();
+// 离开板块：先落盘。保存没过就**不关**（footer 已把原因写在按钮旁边），
+// 再点一次才问「仍要离开吗」，避免把人困在保存不成功的板块里。
+let PaneLeaveBlocked = false;
+async function leavePane(close) {
+  const ok = await saveCurrentPane();
+  if (!ok) {
+    if (!PaneLeaveBlocked) { PaneLeaveBlocked = true; return; }
+    if (!confirm(T('engLeaveUnsaved'))) return;
+  }
+  PaneLeaveBlocked = false;
   CurrentPane = null;
   $('settingsPaneOverlay').hidden = true;
-  renderSettingsNav();
+  close();
+}
+// 返回板块列表（回到列表前刷新摘要，让「引擎：Claude」这类当前状态是最新的）
+function backToSettingsNav() {
+  return leavePane(renderSettingsNav);
 }
 // 直接关掉整个设置（也先保存，避免改了没生效）
-async function closeSettingsPane() {
-  await saveCurrentPane();
-  CurrentPane = null;
-  $('settingsPaneOverlay').hidden = true;
-  closeSettings();
+function closeSettingsPane() {
+  return leavePane(closeSettings);
 }
 // 提交当前板块负责的 /api/settings 字段（局部 patch，后端 SettingsStruct.update 只认传入的键）
+// 返回 false＝这次没存成功（板块自定义 save 判定），调用方据此决定要不要真的离开
 async function saveCurrentPane() {
   const p = paneById(CurrentPane);
-  if (!p) return;
-  if (p.save) { await p.save(); return; }
-  if (!p.saveKeys || !p.saveKeys.length) return;
+  if (!p) return true;
+  if (p.save) return (await p.save()) !== false;
+  if (!p.saveKeys || !p.saveKeys.length) return true;
   await patchSettings(collectPaneKeys(p.saveKeys));
+  return true;
 }
 // 按字段名从 DOM 收集值（供 saveKeys 声明式保存）
 function collectPaneKeys(keys) {
@@ -7280,9 +7532,9 @@ function applyEnginePaneText() {
     $(`${engine}EffortNote`).textContent = T(engine === 'claude' ? 'engEffortNoteClaude' : 'engEffortNoteCodex');
     $(`${engine}AdvLabel`).textContent = T('advOptions');
     $(`${engine}ModelsBtn`).textContent = T('engRefetchModels');
+    // 引擎块没有自己的保存按钮了，统一用板块底部那个（见 saveEnginePane）
     $(`mdl${cap}DetectBtn`).textContent = T('engDetectCurrent');
     $(`mdl${cap}ListBtn`).textContent = T('engDetectAvailable');
-    $(`${engine}SaveBtn`).textContent = T(engine === 'claude' ? 'engSaveClaude' : 'engSaveCodex');
     syncModelProviderTag(engine);
   }
   // 「逐个真实验证」只有 claude 有（原版订阅没有模型列表接口，只能挨个试）
@@ -7296,11 +7548,50 @@ function applyEnginePaneText() {
 // 服务商下拉的选项文字：原版按引擎分两种说法，MiniMax 在 claude 侧带「推荐」后缀
 function providerOptionText(engine, id) {
   if (id === 'official') return T(engine === 'claude' ? 'pvOfficialClaude' : 'pvOfficialCodex');
+  // 「官方 API」与「原版订阅」是同一家的两条路：下拉里必须一眼看出这条要填 Key、按量付费
+  if (id === 'anthropic' && engine === 'claude') return T('pvAnthropic') + T('pvApiTag');
+  if (id === 'openai' && engine === 'codex') return T('pvOpenai') + T('pvApiTag');
   if (id === 'minimax' && engine === 'claude') return T('pvMinimax') + T('pvMinimaxTag');
   return providerLabel(id);
 }
 
+// ── 引擎块的「未保存」状态 ──
+// 引擎块里的服务商/Key/模型不是即时落盘的（要显式保存），而保存按钮只有一个、在板块底部，
+// 所以必须把「哪一块动过还没存」显式画出来：折叠块标题上一个圆点 + footer 按钮旁边一句话。
+// 脏标记只由**用户操作**产生（换服务商、改 Key/地址/手填模型），程序回填表单不算——
+// 否则 loadEngineProvider / autoPickModel 自动填一次就会把它标脏。
+const EngineDirty = { claude: false, codex: false };
+// 配置有没有成功读到过：没读到就全是空表单，这时保存会把已存的 Key 覆盖成空，必须跳过
+const EngineLoaded = { claude: false, codex: false };
+
+function engineBlockLabel(engine) { return engine === 'claude' ? 'Claude Code' : 'Codex'; }
+
+function markEngineDirty(engine) {
+  if (EngineDirty[engine]) { PaneNotice = null; renderPaneStatus(); return; }
+  EngineDirty[engine] = true;
+  PaneNotice = null; // 用户又动了 → 之前的「已保存」不再成立
+  if (PaneNoticeTimer) { clearTimeout(PaneNoticeTimer); PaneNoticeTimer = null; }
+  renderEngineDirty();
+  renderPaneStatus();
+}
+function clearEngineDirty(engine) {
+  EngineDirty[engine] = false;
+  renderEngineDirty();
+}
+function renderEngineDirty() {
+  for (const engine of ['claude', 'codex']) {
+    const head = $(engine === 'claude' ? 'engAccClaudeHead' : 'engAccCodexHead');
+    head.classList.toggle('eng-dirty', EngineDirty[engine]);
+  }
+}
+
 function fillEnginePane() {
+  EngineDirty.claude = false;
+  EngineDirty.codex = false;
+  EngineLoaded.claude = false;
+  EngineLoaded.codex = false;
+  setPaneNotice(null);
+  renderEngineDirty();
   $('defaultEngineSelect').value = State.settings.defaultEngine;
   $('defaultEngineNote').textContent = defaultEngineNoteText();
   setAdvOpen('claude', false);
@@ -7323,9 +7614,32 @@ function defaultEngineNoteText() {
   }
   return note;
 }
+// 板块「保存」＝把这个板块里的东西全部落盘：默认引擎 + 每个**有改动**的引擎块。
+// 逐块独立提交：某一块存不上（比如第三方服务商还没选到模型、Key 填错了拉不到模型）
+// 不连累另一块，也不连累默认引擎；失败的那块展开并滚动到可视区，原因同时写到 footer。
+// 返回 false ＝ 有块没存上，调用方（leavePane）据此决定先别关弹窗。
 async function saveEnginePane() {
   const eng = $('defaultEngineSelect').value === 'codex' ? 'codex' : 'claude';
-  await patchSettings({ defaultEngine: eng });
+  const targets = ['claude', 'codex'].filter((e) => EngineDirty[e]);
+  if (targets.length) setPaneNotice('engSaving', null, '', 0);
+  const fails = [];
+  for (const e of targets) {
+    const label = engineBlockLabel(e);
+    // 表单没读到过（loadEngineProvider 失败）＝里面是空的，存下去会把已配好的 Key 抹掉
+    if (!EngineLoaded[e]) { fails.push({ engine: e, label, msg: T('engBlockNotLoaded') }); continue; }
+    const err = await saveEngineProvider(e);
+    if (err) fails.push({ engine: e, label, msg: err.msg });
+  }
+  const savedDefault = await patchSettings({ defaultEngine: eng });
+  if (fails.length) {
+    const f = fails[0];
+    setPaneNotice('engBlockSaveFail', { block: f.label, msg: f.msg }, 'err', 0);
+    setAccOpen(f.engine, true); // 展开出错的那块，想看细节不用自己找
+    return false;
+  }
+  if (!savedDefault) { setPaneNotice('engSaveFailShort', null, 'err', 0); return false; }
+  setPaneNotice('engSavedToast', null, 'ok', 2500);
+  return true;
 }
 
 function fillNetworkPane() {
@@ -7731,11 +8045,13 @@ function renderAccSummary(engine) {
 // ── 服务商 / 模型 / 强度的展示名（唯一来源：trans.js，后端只下发 id）──
 // 后端新增了前端还没加文案的 id 时，一律回落到 id 本身，绝不显示空白。
 const PROVIDER_LABEL_KEY = {
-  official: 'pvOfficial', minimax: 'pvMinimax', xiaomi: 'pvXiaomi',
+  official: 'pvOfficial', anthropic: 'pvAnthropic', openai: 'pvOpenai', openrouter: 'pvOpenrouter',
+  minimax: 'pvMinimax', xiaomi: 'pvXiaomi',
   kimi: 'pvKimi', kimicode: 'pvKimicode', custom: 'pvCustom',
 };
 const PROVIDER_NOTE_KEY = {
   official: 'pvNoteOfficial', custom: 'pvNoteCustom',
+  anthropic: 'pvNoteAnthropic', openai: 'pvNoteOpenai', openrouter: 'pvNoteOpenrouter',
   minimax: 'pvNoteMinimax', xiaomi: 'pvNoteXiaomi', kimi: 'pvNoteKimi', kimicode: 'pvNoteKimicode',
 };
 const EFFORT_LABEL_KEY = {
@@ -7873,6 +8189,7 @@ async function onModelSelect(engine) {
   if (modelIsFree(engine)) {
     // Save the provider, key and model together; a draft must not alter the old slot.
     setModelStatus(engine, T('engProviderDraft'), null);
+    markEngineDirty(engine); // 手填模型只是草稿，等板块底部的「保存」一起落盘
     renderAccSummary(engine);
     return;
   }
@@ -8028,6 +8345,7 @@ function syncProviderVisibility(engine) {
 // 该服务商从没配过就清空并自动定档。这是「选原版却看到 MiniMax 模型」那个 bug 的前端一半。
 async function onEngineProviderChange(engine) {
   syncProviderVisibility(engine);
+  markEngineDirty(engine); // 换服务商＝动过表单，一律标脏（切回原来那个也照标，宁多勿漏）
   const u = providerUi(engine);
   const provider = u.select.value;
   // 先清干净，绝不让上一个服务商的值留在表单里
@@ -8140,6 +8458,7 @@ async function loadEngineProvider(engine) {
     if (u.effort) u.effort.value = c.effort || '';
     syncProviderVisibility(engine);
     syncModelProviderTag(engine);
+    EngineLoaded[engine] = true; // 读到过才算可靠：没读到就不允许拿这份空表单去覆盖已存的配置
     u.status.className = 'sx-note';
     // 说明的是「已保存」的状态（表单里可能已改成别的服务商但还没点保存），文案要写明白
     u.status.textContent = c.provider === 'official'
@@ -8155,6 +8474,7 @@ async function loadEngineProvider(engine) {
     // 已存了第三方服务商与 Key、却没有模型（历史配置/上次没选完）→ 进面板就自动补一个
     if (c.provider !== 'official' && c.apiKey && !c.model) autoPickModel(engine);
   } catch (e) {
+    EngineLoaded[engine] = false;
     u.status.className = 'sx-note err';
     u.status.textContent = T('engLoadFail').replace('{engine}', engine).replace('{err}', e.message);
   }
@@ -8239,6 +8559,8 @@ async function fetchEngineModels(engine, auto = false) {
 }
 function fetchClaudeModels() { return fetchEngineModels('claude'); }
 
+// 保存一个引擎块的服务商配置。返回 null＝成功；返回 {msg}＝失败（原因同时写进块内与 footer）。
+// 由板块保存（saveEnginePane）调用，没有自己的按钮。
 async function saveEngineProvider(engine) {
   const u = providerUi(engine);
   const provider = u.select.value;
@@ -8248,7 +8570,7 @@ async function saveEngineProvider(engine) {
   if (provider !== 'official' && !model) {
     u.status.className = 'sx-note err';
     u.status.textContent = T('modelPickFirst');
-    return;
+    return { msg: T('modelPickFirst') };
   }
   try {
     await api('/api/engine/config', {
@@ -8259,14 +8581,16 @@ async function saveEngineProvider(engine) {
     });
     u.status.className = 'sx-note ok';
     u.status.textContent = T('engSavedOk');
+    clearEngineDirty(engine);
     await loadModelState();
     renderAccSummary(engine);
+    return null;
   } catch (e) {
     u.status.className = 'sx-note err';
     u.status.textContent = T('engSaveFail').replace('{err}', e.message);
+    return { msg: e.message };
   }
 }
-function saveClaudeProvider() { return saveEngineProvider('claude'); }
 
 // ── 手动安装/更新引擎（npm 全局安装，源自动选官方或国内镜像中更快的那个）──
 async function updateEngine(engine) {

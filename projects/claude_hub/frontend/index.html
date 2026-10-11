@@ -412,6 +412,9 @@
               <label class="sx-lbl" id="claudeProviderLbl">服务商</label>
               <select class="sx-input" id="claudeProviderSelect">
                 <option value="official">原版（订阅登录，未登录会引导登录）</option>
+                <!-- 官方 API：不用订阅登录，直接把 Anthropic Console 的 API Key 填进来即可 -->
+                <option value="anthropic">Claude 官方 API（填 API Key，按量付费）</option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="minimax">MiniMax（推荐，支持图片识别）</option>
                 <option value="xiaomi">小米 MiMo</option>
                 <option value="kimi">Kimi 开放平台（按量计费）</option>
@@ -459,9 +462,6 @@
                 </div>
               </div>
               <div class="sx-note" id="mdlClaudeStatus"></div>
-              <div class="sx-row sx-right">
-                <button class="sx-btn sx-btn-primary" id="claudeSaveBtn">保存 Claude Code 设置</button>
-              </div>
               <div class="sx-note" id="claudeProviderStatus"></div>
             </div>
           </div>
@@ -476,6 +476,9 @@
               <label class="sx-lbl" id="codexProviderLbl">服务商</label>
               <select class="sx-input" id="codexProviderSelect">
                 <option value="official">原版 ChatGPT（账号登录）</option>
+                <!-- 官方 API：不用 ChatGPT 订阅，直接把 OpenAI 平台的 API Key 填进来即可 -->
+                <option value="openai">OpenAI 官方 API（填 API Key，按量付费）</option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="minimax">MiniMax</option>
                 <option value="xiaomi">小米 MiMo</option>
                 <!-- Codex 不列 Kimi Code：那是给编程 Agent 的包月订阅，OpenAI 兼容端点对客户端有限制，
@@ -518,9 +521,6 @@
                 </div>
               </div>
               <div class="sx-note" id="mdlCodexStatus"></div>
-              <div class="sx-row sx-right">
-                <button class="sx-btn sx-btn-primary" id="codexSaveBtn">保存 Codex 设置</button>
-              </div>
               <div class="sx-note sx-pre" id="codexProviderStatus"></div>
             </div>
           </div>
@@ -660,6 +660,9 @@
 
       </div>
       <div class="sx-foot">
+        <!-- 状态条：保存中/已保存/未保存改动/失败原因都写在这里，紧挨保存按钮，
+             用户不用滚回出错的板块去看（长内容换行显示，见 .sx-foot-status） -->
+        <span class="sx-foot-status" id="settingsPaneStatus"></span>
         <button class="sx-btn sx-btn-primary" id="settingsPaneSave"></button>
       </div>
     </div>
