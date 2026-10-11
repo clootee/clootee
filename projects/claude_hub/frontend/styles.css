@@ -3173,4 +3173,5 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .api-cost-note { margin-top: 2px; text-align: right; color: var(--muted); font-size: 11px; }
 .api-cost-note.sub { text-align: left; color: var(--yellow); }
 .api-cost-tag { font-size: 11px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--border); color: var(--accent); font-variant-numeric: tabular-nums; }
+.batch-cost { font-size: 12px; font-weight: 600; }
 .api-cost-sub { color: var(--yellow); margin-left: 4px; }

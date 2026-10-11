@@ -7,6 +7,7 @@ import { EngineConfig } from './EngineConfig';
 import { ClaudeBin } from '../helper/ClaudeBin';
 import { CodexBin } from '../helper/CodexBin';
 import { ProcessSpawner } from '../helper/ProcessSpawner';
+import { RunAsUser } from '../helper/RunAsUser';
 import { AppConfig } from '../config/AppConfig';
 import { Logger } from '../helper/Logger';
 import { ModelDetect, ModelOption } from '../models/Types';
@@ -116,6 +117,11 @@ export class ModelManager extends ModelManagerStruct {
     ];
     if (model) args.push('--model', model);
 
+    // 探测必须和真实任务用同一套身份：以 root 探测会在目标用户（runAsUser）的家目录里留下
+    // root 所有的 codex tmp/arg0* 目录，之后 claudeuser 的真任务清理不掉 →
+    // 每次执行都刷 `WARNING: failed to clean up stale arg0 temp dirs`；
+    // claude 侧更严重：root 身份下 --dangerously-skip-permissions 直接被拒，探测必然失败。
+    const run = RunAsUser.wrap(bin, args, Settings.runAsUser());
     const cwd = this._probeCwd();
     const timeoutMs = killOnInit ? 60_000 : 120_000;
 
@@ -138,8 +144,8 @@ export class ModelManager extends ModelManagerStruct {
       };
 
       const handle = ProcessSpawner.run(
-        bin,
-        args,
+        run.bin,
+        run.args,
         cwd,
         {
           onLine: (line) => {
@@ -189,14 +195,16 @@ export class ModelManager extends ModelManagerStruct {
   // 注意每项还带巨大的 base_instructions，只取需要的字段。
   private static _codexCatalog(): Promise<ModelOption[]> {
     const { bin, prefixArgs } = CodexBin.resolve(AppConfig.CODEX_BIN, Settings.get().preferBundled);
+    // 同 _probeClaude：以 root 探测会把 root 所有的 arg0 临时目录留在目标用户家目录里
+    const run = RunAsUser.wrap(bin, [...prefixArgs, 'debug', 'models'], Settings.runAsUser());
     const cwd = this._probeCwd();
     return new Promise<ModelOption[]>((resolve, reject) => {
       let out = '';
       let stderr = '';
       let settled = false;
       const handle = ProcessSpawner.run(
-        bin,
-        [...prefixArgs, 'debug', 'models'],
+        run.bin,
+        run.args,
         cwd,
         {
           onLine: (line) => {

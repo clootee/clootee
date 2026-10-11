@@ -1279,6 +1279,7 @@ function refreshBatchBar() {
   act.disabled = n === 0;
   act.textContent = n > 0 ? `${T('batchActions')} (${n}) ▾` : `${T('batchActions')} ▾`;
   if (n === 0) closeBatchMenu();
+  ApiBill.paintSelection();
 }
 // 批量操作下拉菜单
 function toggleBatchMenu(on) {
@@ -3041,6 +3042,21 @@ const ApiBill = {
     api('/api/sessions/api-cost', { ids })
       .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); })
       .catch(() => { ids.forEach((id) => this.asked.delete(id)); });
+  },
+  // 批量勾选：工具条上即时显示已选会话的费用合计；没取过合计的会话先补取再刷新
+  paintSelection() {
+    const el = $('batchCost');
+    const ids = [...State.selectedSessions];
+    const miss = ids.filter((id) => !this.asked.has(id));
+    if (miss.length) {
+      miss.forEach((id) => this.asked.add(id));
+      api('/api/sessions/api-cost', { ids: miss.slice(0, 300) })
+        .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); this.paintSelection(); })
+        .catch(() => { miss.forEach((id) => this.asked.delete(id)); });
+    }
+    const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.sub += t.sub || 0; } return a; }, { usd: 0, sub: 0 });
+    el.hidden = sum.usd <= 0;
+    el.innerHTML = sum.usd > 0 ? this.tagHtml(sum) : '';
   },
   // 任务结束：该会话缓存作废，重新取明细与合计
   onTaskEnd(sessionId) {
