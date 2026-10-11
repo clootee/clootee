@@ -462,9 +462,6 @@
                 </div>
               </div>
               <div class="sx-note" id="mdlClaudeStatus"></div>
-              <div class="sx-row sx-right">
-                <button class="sx-btn sx-btn-primary" id="claudeSaveBtn">保存 Claude Code 设置</button>
-              </div>
               <div class="sx-note" id="claudeProviderStatus"></div>
             </div>
           </div>
@@ -524,9 +521,6 @@
                 </div>
               </div>
               <div class="sx-note" id="mdlCodexStatus"></div>
-              <div class="sx-row sx-right">
-                <button class="sx-btn sx-btn-primary" id="codexSaveBtn">保存 Codex 设置</button>
-              </div>
               <div class="sx-note sx-pre" id="codexProviderStatus"></div>
             </div>
           </div>
@@ -666,6 +660,9 @@
 
       </div>
       <div class="sx-foot">
+        <!-- 状态条：保存中/已保存/未保存改动/失败原因都写在这里，紧挨保存按钮，
+             用户不用滚回出错的板块去看（长内容换行显示，见 .sx-foot-status） -->
+        <span class="sx-foot-status" id="settingsPaneStatus"></span>
         <button class="sx-btn sx-btn-primary" id="settingsPaneSave"></button>
       </div>
     </div>

@@ -2334,9 +2334,18 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 /* 只允许纵向滚动 */
 .sx-body { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 14px 16px 4px; }
 .sx-foot {
-  flex: none; display: flex; justify-content: flex-end;
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 11px 16px; border-top: 1px solid var(--border, #333);
 }
+/* 保存按钮左侧的状态条：所有保存反馈（保存中/已保存/未保存改动/失败）只在这里出现。
+   失败原因可能较长，允许换行——宁可 footer 高一点，也不能把原因截断成省略号。 */
+.sx-foot-status {
+  flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sx-foot-status.ok { color: #66bb6a; }
+.sx-foot-status.warn { color: var(--yellow, #d9a441); }
+.sx-foot-status.err { color: #e57373; white-space: normal; word-break: break-word; }
 
 .sx-sec {
   margin: 20px 0 8px; padding-top: 14px; border-top: 1px solid var(--border, #333);
@@ -2354,6 +2363,10 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
   color: var(--muted, #8b8f96); overflow-wrap: anywhere;
 }
 .sx-note:empty { display: none; margin: 0; }
+/* 折叠块标题右侧的「未保存」小圆点：折叠状态下也能一眼看到该块动过 */
+.eng-acc-head.eng-dirty .eng-acc-title::after {
+  content: '●'; margin-left: 6px; font-size: 9px; vertical-align: 2px; color: var(--yellow, #d9a441);
+}
 .sx-note.err { color: #e57373; }
 .sx-note.ok { color: #66bb6a; }
 .sx-pre { white-space: pre-wrap; }

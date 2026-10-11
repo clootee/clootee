@@ -1,10 +1,10 @@
 {
-  "version": "3.1.0",
+  "version": "3.1.1",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-10-11",
   "notesI18n": {
-    "zh": "· 新增 Clootee 默认服务商：一键开始，自动领取设备额度，顶部显示余额，每轮显示花费\n· 设置里可直接选择 Claude / OpenAI 官方 API（填 Key 按量计费），OpenRouter 提前\n· 使用 Claude 官方 API 时，每轮回复按官方价目精确计价（含缓存读写），可展开明细，会话列表显示累计花费\n· Windows 后台隐藏运行，流式事件性能优化",
-    "en": "· New Clootee default provider: one-click start, free device credit, balance badge and per-turn cost\n· Pick the official Claude / OpenAI API (pay-as-you-go key) directly in settings; OpenRouter moved up\n· With the official Claude API, every turn shows an exact cost at official prices (including cache reads/writes) with an expandable breakdown, plus per-session totals\n· The hub runs hidden in the background on Windows; faster stream event handling"
+    "zh": "· 修复：设置 → AI 引擎里改了服务商或模型后，点整个弹窗底部的「保存」却没生效（那个按钮只存了默认引擎）\n· 整个板块现在只有一个保存按钮，保存结果与「有未保存的改动」都显示在按钮旁边，不用再进折叠块里找\n· 服务商/模型保存失败时不再静默丢弃改动：会说明是哪一块、为什么，并展开那一块",
+    "en": "· Fix: after changing the provider or model under Settings → AI engine, clicking the dialog's bottom Save did nothing — that button only wrote the default engine\n· The pane now has a single Save button, and both the result and an “unsaved changes” hint appear right next to it, so there is no inner button to hunt for\n· A failed provider/model save is no longer silent: it names the block that failed and why, and expands it"
   }
 }

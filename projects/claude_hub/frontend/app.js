@@ -362,6 +362,7 @@ function applyText() {
   $('defaultEngineLabel').textContent = T('defaultEngine');
   $('settingsPaneSave').textContent = T('save');
   $('settingsPaneBack').title = T('back');
+  renderPaneStatus(); // 状态条里可能挂着「有未保存的改动」等文案，切语言要跟着变
   // 设置弹窗开着时切语言 → 重渲染板块列表 / 当前板块标题
   if (!$('settingsOverlay').hidden) renderSettingsNav();
   if (!$('settingsPaneOverlay').hidden && CurrentPane) {
@@ -6701,12 +6702,18 @@ function bind() {
   $('claudeApiKey').addEventListener('change', () => onApiKeySettled('claude'));
   $('claudeApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('claude'); });
   $('claudeModelsBtn').addEventListener('click', fetchClaudeModels);
-  $('claudeSaveBtn').addEventListener('click', saveClaudeProvider);
   $('codexProviderSelect').addEventListener('change', () => onEngineProviderChange('codex'));
   $('codexApiKey').addEventListener('change', () => onApiKeySettled('codex'));
   $('codexApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('codex'); });
   $('codexModelsBtn').addEventListener('click', () => fetchEngineModels('codex'));
-  $('codexSaveBtn').addEventListener('click', () => saveEngineProvider('codex'));
+  // 引擎块没有自己的保存按钮了（全板块只有一个，在 footer），靠脏标记告诉用户「这块动了还没存」。
+  // 「脏」只由用户操作产生：换服务商在 onEngineProviderChange 里标，Key/地址/手填模型在这里标；
+  // 思考强度与原版订阅的模型下拉是即时落盘的，不算脏，故不在监听之列。
+  for (const eng of ['claude', 'codex']) {
+    for (const id of [`${eng}ApiKey`, `${eng}BaseUrl`, `${eng}ModelsUrl`, `${eng}ModelInput`]) {
+      $(id).addEventListener('input', () => markEngineDirty(eng));
+    }
+  }
   // 更新引擎 + 修改密码
   $('tcRefreshBtn').addEventListener('click', renderToolchain);
   $('runAsUserSaveBtn').addEventListener('click', saveRunAsUser);
@@ -7228,38 +7235,84 @@ function renderSettingsNav() {
 // 当前打开的板块 id（null=没开）；保存/返回都以它为准
 let CurrentPane = null;
 
+// ── footer 状态条：紧挨着「保存」按钮的唯一反馈面 ──
+// 以前保存结果写在板块内容里（比如 claudeProviderStatus），用户点了底部保存根本看不到；
+// 现在保存中/已保存/未保存改动/失败原因一律出现在按钮左边。
+// 存的是 key 而非成句文字，切语言时能重新翻译。
+let PaneNotice = null;      // { key, params, kind } —— 瞬时结果（保存中 / 已保存 / 失败）
+let PaneNoticeTimer = null;
+
+function setPaneNotice(key, params, kind, ms) {
+  if (PaneNoticeTimer) { clearTimeout(PaneNoticeTimer); PaneNoticeTimer = null; }
+  PaneNotice = key ? { key, params: params || {}, kind: kind || '' } : null;
+  if (key && ms) {
+    PaneNoticeTimer = setTimeout(() => { PaneNoticeTimer = null; PaneNotice = null; renderPaneStatus(); }, ms);
+  }
+  renderPaneStatus();
+}
+// 没有瞬时结果时，回落显示当前板块的「有未保存的改动」
+function renderPaneStatus() {
+  const el = $('settingsPaneStatus');
+  if (!el) return;
+  const show = (text, kind) => {
+    el.className = 'sx-foot-status' + (kind ? ' ' + kind : '');
+    el.textContent = text;
+    el.title = kind === 'err' ? '' : text; // 失败原因允许换行，不靠 title 兜底
+  };
+  if (PaneNotice) {
+    let s = T(PaneNotice.key);
+    for (const [k, v] of Object.entries(PaneNotice.params)) s = s.replace(`{${k}}`, v);
+    show(s, PaneNotice.kind);
+    return;
+  }
+  if (CurrentPane === 'engine' && (EngineDirty.claude || EngineDirty.codex)) return show(T('engDirty'), 'warn');
+  show('', '');
+}
+
 function openSettingsPane(id) {
   const p = paneById(id);
   if (!p) return;
   CurrentPane = id;
+  PaneLeaveBlocked = false;
   for (const q of SETTINGS_PANES) $(`pane-${q.id}`).hidden = q.id !== id;
   $('settingsPaneTitle').textContent = `${p.icon} ${p.title()}`;
   $('settingsPaneSave').textContent = T('save');
   $('settingsPaneOverlay').hidden = false;
   $('settingsPaneOverlay').querySelector('.sx-body').scrollTop = 0;
+  setPaneNotice(null); // 进入板块先清掉上一个板块残留的「已保存」
   if (p.fill) p.fill();
 }
-// 返回板块列表：先落盘本板块的改动，再刷新列表摘要
-async function backToSettingsNav() {
-  await saveCurrentPane();
+// 离开板块：先落盘。保存没过就**不关**（footer 已把原因写在按钮旁边），
+// 再点一次才问「仍要离开吗」，避免把人困在保存不成功的板块里。
+let PaneLeaveBlocked = false;
+async function leavePane(close) {
+  const ok = await saveCurrentPane();
+  if (!ok) {
+    if (!PaneLeaveBlocked) { PaneLeaveBlocked = true; return; }
+    if (!confirm(T('engLeaveUnsaved'))) return;
+  }
+  PaneLeaveBlocked = false;
   CurrentPane = null;
   $('settingsPaneOverlay').hidden = true;
-  renderSettingsNav();
+  close();
+}
+// 返回板块列表（回到列表前刷新摘要，让「引擎：Claude」这类当前状态是最新的）
+function backToSettingsNav() {
+  return leavePane(renderSettingsNav);
 }
 // 直接关掉整个设置（也先保存，避免改了没生效）
-async function closeSettingsPane() {
-  await saveCurrentPane();
-  CurrentPane = null;
-  $('settingsPaneOverlay').hidden = true;
-  closeSettings();
+function closeSettingsPane() {
+  return leavePane(closeSettings);
 }
 // 提交当前板块负责的 /api/settings 字段（局部 patch，后端 SettingsStruct.update 只认传入的键）
+// 返回 false＝这次没存成功（板块自定义 save 判定），调用方据此决定要不要真的离开
 async function saveCurrentPane() {
   const p = paneById(CurrentPane);
-  if (!p) return;
-  if (p.save) { await p.save(); return; }
-  if (!p.saveKeys || !p.saveKeys.length) return;
+  if (!p) return true;
+  if (p.save) return (await p.save()) !== false;
+  if (!p.saveKeys || !p.saveKeys.length) return true;
   await patchSettings(collectPaneKeys(p.saveKeys));
+  return true;
 }
 // 按字段名从 DOM 收集值（供 saveKeys 声明式保存）
 function collectPaneKeys(keys) {
@@ -7315,9 +7368,9 @@ function applyEnginePaneText() {
     $(`${engine}EffortNote`).textContent = T(engine === 'claude' ? 'engEffortNoteClaude' : 'engEffortNoteCodex');
     $(`${engine}AdvLabel`).textContent = T('advOptions');
     $(`${engine}ModelsBtn`).textContent = T('engRefetchModels');
+    // 引擎块没有自己的保存按钮了，统一用板块底部那个（见 saveEnginePane）
     $(`mdl${cap}DetectBtn`).textContent = T('engDetectCurrent');
     $(`mdl${cap}ListBtn`).textContent = T('engDetectAvailable');
-    $(`${engine}SaveBtn`).textContent = T(engine === 'claude' ? 'engSaveClaude' : 'engSaveCodex');
     syncModelProviderTag(engine);
   }
   // 「逐个真实验证」只有 claude 有（原版订阅没有模型列表接口，只能挨个试）
@@ -7338,7 +7391,43 @@ function providerOptionText(engine, id) {
   return providerLabel(id);
 }
 
+// ── 引擎块的「未保存」状态 ──
+// 引擎块里的服务商/Key/模型不是即时落盘的（要显式保存），而保存按钮只有一个、在板块底部，
+// 所以必须把「哪一块动过还没存」显式画出来：折叠块标题上一个圆点 + footer 按钮旁边一句话。
+// 脏标记只由**用户操作**产生（换服务商、改 Key/地址/手填模型），程序回填表单不算——
+// 否则 loadEngineProvider / autoPickModel 自动填一次就会把它标脏。
+const EngineDirty = { claude: false, codex: false };
+// 配置有没有成功读到过：没读到就全是空表单，这时保存会把已存的 Key 覆盖成空，必须跳过
+const EngineLoaded = { claude: false, codex: false };
+
+function engineBlockLabel(engine) { return engine === 'claude' ? 'Claude Code' : 'Codex'; }
+
+function markEngineDirty(engine) {
+  if (EngineDirty[engine]) { PaneNotice = null; renderPaneStatus(); return; }
+  EngineDirty[engine] = true;
+  PaneNotice = null; // 用户又动了 → 之前的「已保存」不再成立
+  if (PaneNoticeTimer) { clearTimeout(PaneNoticeTimer); PaneNoticeTimer = null; }
+  renderEngineDirty();
+  renderPaneStatus();
+}
+function clearEngineDirty(engine) {
+  EngineDirty[engine] = false;
+  renderEngineDirty();
+}
+function renderEngineDirty() {
+  for (const engine of ['claude', 'codex']) {
+    const head = $(engine === 'claude' ? 'engAccClaudeHead' : 'engAccCodexHead');
+    head.classList.toggle('eng-dirty', EngineDirty[engine]);
+  }
+}
+
 function fillEnginePane() {
+  EngineDirty.claude = false;
+  EngineDirty.codex = false;
+  EngineLoaded.claude = false;
+  EngineLoaded.codex = false;
+  setPaneNotice(null);
+  renderEngineDirty();
   $('defaultEngineSelect').value = State.settings.defaultEngine;
   $('defaultEngineNote').textContent = defaultEngineNoteText();
   setAdvOpen('claude', false);
@@ -7361,9 +7450,32 @@ function defaultEngineNoteText() {
   }
   return note;
 }
+// 板块「保存」＝把这个板块里的东西全部落盘：默认引擎 + 每个**有改动**的引擎块。
+// 逐块独立提交：某一块存不上（比如第三方服务商还没选到模型、Key 填错了拉不到模型）
+// 不连累另一块，也不连累默认引擎；失败的那块展开并滚动到可视区，原因同时写到 footer。
+// 返回 false ＝ 有块没存上，调用方（leavePane）据此决定先别关弹窗。
 async function saveEnginePane() {
   const eng = $('defaultEngineSelect').value === 'codex' ? 'codex' : 'claude';
-  await patchSettings({ defaultEngine: eng });
+  const targets = ['claude', 'codex'].filter((e) => EngineDirty[e]);
+  if (targets.length) setPaneNotice('engSaving', null, '', 0);
+  const fails = [];
+  for (const e of targets) {
+    const label = engineBlockLabel(e);
+    // 表单没读到过（loadEngineProvider 失败）＝里面是空的，存下去会把已配好的 Key 抹掉
+    if (!EngineLoaded[e]) { fails.push({ engine: e, label, msg: T('engBlockNotLoaded') }); continue; }
+    const err = await saveEngineProvider(e);
+    if (err) fails.push({ engine: e, label, msg: err.msg });
+  }
+  const savedDefault = await patchSettings({ defaultEngine: eng });
+  if (fails.length) {
+    const f = fails[0];
+    setPaneNotice('engBlockSaveFail', { block: f.label, msg: f.msg }, 'err', 0);
+    setAccOpen(f.engine, true); // 展开出错的那块，想看细节不用自己找
+    return false;
+  }
+  if (!savedDefault) { setPaneNotice('engSaveFailShort', null, 'err', 0); return false; }
+  setPaneNotice('engSavedToast', null, 'ok', 2500);
+  return true;
 }
 
 function fillNetworkPane() {
@@ -7913,6 +8025,7 @@ async function onModelSelect(engine) {
   if (modelIsFree(engine)) {
     // Save the provider, key and model together; a draft must not alter the old slot.
     setModelStatus(engine, T('engProviderDraft'), null);
+    markEngineDirty(engine); // 手填模型只是草稿，等板块底部的「保存」一起落盘
     renderAccSummary(engine);
     return;
   }
@@ -8068,6 +8181,7 @@ function syncProviderVisibility(engine) {
 // 该服务商从没配过就清空并自动定档。这是「选原版却看到 MiniMax 模型」那个 bug 的前端一半。
 async function onEngineProviderChange(engine) {
   syncProviderVisibility(engine);
+  markEngineDirty(engine); // 换服务商＝动过表单，一律标脏（切回原来那个也照标，宁多勿漏）
   const u = providerUi(engine);
   const provider = u.select.value;
   // 先清干净，绝不让上一个服务商的值留在表单里
@@ -8180,6 +8294,7 @@ async function loadEngineProvider(engine) {
     if (u.effort) u.effort.value = c.effort || '';
     syncProviderVisibility(engine);
     syncModelProviderTag(engine);
+    EngineLoaded[engine] = true; // 读到过才算可靠：没读到就不允许拿这份空表单去覆盖已存的配置
     u.status.className = 'sx-note';
     // 说明的是「已保存」的状态（表单里可能已改成别的服务商但还没点保存），文案要写明白
     u.status.textContent = c.provider === 'official'
@@ -8195,6 +8310,7 @@ async function loadEngineProvider(engine) {
     // 已存了第三方服务商与 Key、却没有模型（历史配置/上次没选完）→ 进面板就自动补一个
     if (c.provider !== 'official' && c.apiKey && !c.model) autoPickModel(engine);
   } catch (e) {
+    EngineLoaded[engine] = false;
     u.status.className = 'sx-note err';
     u.status.textContent = T('engLoadFail').replace('{engine}', engine).replace('{err}', e.message);
   }
@@ -8279,6 +8395,8 @@ async function fetchEngineModels(engine, auto = false) {
 }
 function fetchClaudeModels() { return fetchEngineModels('claude'); }
 
+// 保存一个引擎块的服务商配置。返回 null＝成功；返回 {msg}＝失败（原因同时写进块内与 footer）。
+// 由板块保存（saveEnginePane）调用，没有自己的按钮。
 async function saveEngineProvider(engine) {
   const u = providerUi(engine);
   const provider = u.select.value;
@@ -8288,7 +8406,7 @@ async function saveEngineProvider(engine) {
   if (provider !== 'official' && !model) {
     u.status.className = 'sx-note err';
     u.status.textContent = T('modelPickFirst');
-    return;
+    return { msg: T('modelPickFirst') };
   }
   try {
     await api('/api/engine/config', {
@@ -8299,14 +8417,16 @@ async function saveEngineProvider(engine) {
     });
     u.status.className = 'sx-note ok';
     u.status.textContent = T('engSavedOk');
+    clearEngineDirty(engine);
     await loadModelState();
     renderAccSummary(engine);
+    return null;
   } catch (e) {
     u.status.className = 'sx-note err';
     u.status.textContent = T('engSaveFail').replace('{err}', e.message);
+    return { msg: e.message };
   }
 }
-function saveClaudeProvider() { return saveEngineProvider('claude'); }
 
 // ── 手动安装/更新引擎（npm 全局安装，源自动选官方或国内镜像中更快的那个）──
 async function updateEngine(engine) {

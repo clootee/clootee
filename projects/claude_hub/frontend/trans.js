@@ -1051,7 +1051,7 @@ const DICT = {
   engModelsUrlLabel: { en: 'Model list URL (optional)', zh: '模型列表 URL（可选）' },
   engModelsUrlPh: { en: 'Defaults to Base URL + /models', zh: '默认 Base URL + /models' },
   engModelPh: { en: 'Type a model id, e.g. gpt-4o', zh: '直接填写模型 id，例如 gpt-4o' },
-  engProviderDraft: { en: 'Click Save to apply this provider, key and model together.', zh: '点击保存后，服务商、Key 和模型一起生效。' },
+  engProviderDraft: { en: 'Click Save (bottom right) to apply this provider, key and model together.', zh: '点右下角的「保存」后，服务商、Key 和模型一起生效。' },
   engModelHintCustom: {
     en: 'Fetch models or enter an ID from your provider. A model list does not verify key permissions. Xiaomi/Tencent plan keys route automatically; for Alibaba sk-sp- choose Coding Plan or Token Plan and region explicitly. For Kimi/GLM and other indistinguishable keys, select the matching plan provider.',
     zh: '可拉取模型或手填官方模型 ID；模型列表不代表 Key 已验证。小米/腾讯的专属套餐 Key 自动分流；千问 sk-sp- 请明确选 Coding Plan 或 Token Plan 及区域。Kimi、GLM 等无法区分的 Key，请选择对应套餐服务商。',
@@ -1072,8 +1072,17 @@ const DICT = {
     en: 'Sends one tiny request per candidate — slower, but accurate',
     zh: '每个候选发一次极小请求，较慢但更准确',
   },
-  engSaveClaude: { en: 'Save Claude Code settings', zh: '保存 Claude Code 设置' },
-  engSaveCodex: { en: 'Save Codex settings', zh: '保存 Codex 设置' },
+  // 板块底部「保存」按钮旁的状态条（反馈一律出现在按钮旁边，用户不必翻回出错的折叠块）
+  engDirty: { en: '● Unsaved changes', zh: '● 有未保存的改动' },
+  engSaving: { en: 'Saving…', zh: '保存中…' },
+  engSavedToast: { en: 'Saved', zh: '已保存' },
+  engBlockSaveFail: { en: '{block} was not saved — {msg}', zh: '{block} 未保存：{msg}' },
+  engBlockNotLoaded: { en: 'its config was not loaded, skipped', zh: '配置未加载成功，已跳过' },
+  engSaveFailShort: { en: 'Save failed (the settings request did not go through)', zh: '保存失败（设置接口没有保存成功）' },
+  engLeaveUnsaved: {
+    en: 'Some changes were not saved. Leave anyway?',
+    zh: '有改动没能保存成功，仍要离开吗？',
+  },
   // 思考强度档位（后端只下发 id，文案在这里）
   effAuto: { en: 'Auto (let the engine decide)', zh: '自动（交给引擎决定）' },
   effAutoShort: { en: 'auto', zh: '自动' },
