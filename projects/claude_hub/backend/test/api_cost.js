@@ -75,4 +75,15 @@ assert.strictEqual(o.turns[0].provider, 'openrouter');
 const oOpus = 10 * 4e-6 + 100 * 20e-6 + 1000 * 0.2e-6 + 200 * 5e-6 + 100 * 8e-6;
 const oHaiku = 150000 * 5e-7 + 10 * 2.5e-6;
 assert.ok(Math.abs(o.totalUsd - (oOpus + oHaiku)) < 1e-9, `openrouter ${o.totalUsd} vs ${oOpus + oHaiku}`);
-console.log('api_cost ok', t.totalUsd, m.totalUsd, c.totalUsd, o.totalUsd);
+
+// OpenRouter 在 usage.cost 回报实扣金额时，合计以它为准（实测与价目计算一致：24×$4/M + 200×$20/M = $0.004096）
+const rep = ApiCost._compute('r', [
+  { kind: 'task_start', taskId: 'r', engine: 'claude', ts: 1, raw: { provider: 'openrouter' } },
+  { kind: 'text', taskId: 'r', ts: 2, model: 'anthropic/claude-opus-5.5', msgId: 'r1', usage: usage({ input_tokens: 24, output_tokens: 200, cost: 0.004096 }) },
+  { kind: 'text', taskId: 'r', ts: 3, model: 'anthropic/claude-opus-5.5', msgId: 'r2', usage: usage({ input_tokens: 10, output_tokens: 10, cost: 0.5 }) },
+]);
+const rl = rep.turns[0].lines[0];
+assert.strictEqual(rl.reportedRequests, 2);
+assert.ok(Math.abs(rl.totalUsd - 0.504096) < 1e-9, 'reported cost wins');
+assert.ok(Math.abs(rl.usd.input + rl.usd.output - (34 * 4e-6 + 210 * 20e-6)) < 1e-9, 'breakdown still at list price');
+console.log('api_cost ok', t.totalUsd, m.totalUsd, c.totalUsd, o.totalUsd, rep.totalUsd);

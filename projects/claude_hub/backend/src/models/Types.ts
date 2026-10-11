@@ -378,6 +378,8 @@ export interface ApiCostLine {
   priced: boolean;          // 价目表里找到了该模型
   extra: boolean;           // 来自 result.modelUsage 的补差（CLI 后台调用，未出现在消息流里）
   requests: number;
+  reportedUsd?: number;     // 服务商回报的实扣金额合计（OpenRouter usage.cost）
+  reportedRequests?: number;// 带实扣金额的请求数；等于 requests 时 totalUsd 取实扣
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;

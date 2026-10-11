@@ -2877,7 +2877,8 @@ const ApiBill = {
         .map(([k, tk, uk]) => `<tr><td>${escapeHtml(T(k))}</td><td class="num">${this.tok(l[tk])}</td>` +
           `<td class="num">${l.priced || uk === 'webSearch' ? this.usd(l.usd[uk]) : '?'}</td></tr>`)
         .join('');
-      const tags = [l.extra ? T('apiExtra') : '', l.priced ? '' : T('apiUnpriced')].filter(Boolean).join(' · ');
+      const actual = l.requests > 0 && l.reportedRequests === l.requests;
+      const tags = [l.extra ? T('apiExtra') : '', actual ? T('apiActual') : '', l.priced || actual ? '' : T('apiUnpriced')].filter(Boolean).join(' · ');
       const reqs = l.requests ? ` · ${T('apiRequests').replace('{n}', l.requests)}` : '';
       return `<div class="api-cost-model"><b>${escapeHtml(l.model)}</b>${reqs}${tags ? ` · <em>${escapeHtml(tags)}</em>` : ''}` +
         `<span class="api-cost-sum">${this.usd(l.totalUsd)}</span></div>` +

@@ -17,6 +17,7 @@ interface Req {
   cw1h: number;
   web: number;
   fast: boolean;
+  reported: number | null; // 服务商在 usage.cost 里回报的本次实扣金额（OpenRouter 有）
 }
 
 type ModelUsage = Record<string, Record<string, number>>;
@@ -152,13 +153,14 @@ export class ApiCost extends ApiCostStruct {
       cw1h,
       web: stu ? num(stu.web_search_requests) : 0,
       fast: u.speed === 'fast',
+      reported: typeof u.cost === 'number' && Number.isFinite(u.cost) ? u.cost : null,
     };
   }
 
   private static _blank(provider: string, model: string, extra: boolean): ApiCostLine {
     const priced = provider === 'openrouter' ? !!OpenRouterPrices.lookup(model) : !!this._price(model);
     return {
-      model, priced, extra, requests: 0,
+      model, priced, extra, requests: 0, reportedUsd: 0, reportedRequests: 0,
       inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0, cacheWrite1hTokens: 0, webSearches: 0,
       usd: { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 },
       totalUsd: 0,
@@ -177,6 +179,10 @@ export class ApiCost extends ApiCostStruct {
     line.cacheWrite5mTokens += r.cw5m;
     line.cacheWrite1hTokens += r.cw1h;
     line.webSearches += r.web;
+    if (requests && r.reported !== null) {
+      line.reportedUsd = (line.reportedUsd || 0) + r.reported;
+      line.reportedRequests = (line.reportedRequests || 0) + requests;
+    }
     const rt = provider === 'openrouter' ? this._orRates(r) : this._officialRates(r);
     if (!rt) return;
     line.usd.input += r.input * rt.input;
@@ -240,6 +246,7 @@ export class ApiCost extends ApiCostStruct {
         cw1h: 0,
         web: Math.max(0, num(m.webSearchRequests) - sum((l) => l.webSearches)),
         fast: false,
+        reported: null,
       };
       // 消息流里见过的模型：差额是最后一帧没带全的 token，并回该模型的行；没见过的才是后台调用
       if (diff.input + diff.output + diff.cacheRead + diff.cw5m + diff.web > 0) this._add(lines, provider, seen.length === 0, diff, 0);
@@ -257,7 +264,9 @@ export class ApiCost extends ApiCostStruct {
       cacheWrite1h: this._round(u.cacheWrite1h),
       webSearch: this._round(u.webSearch),
     };
-    return { ...l, usd, totalUsd: this._round(total) };
+    // 每个请求都有服务商实扣金额时以它为准（含渠道附加费等价目表看不到的部分），分项仍按价目给出
+    const allReported = l.requests > 0 && l.reportedRequests === l.requests;
+    return { ...l, usd, totalUsd: this._round(allReported ? l.reportedUsd || 0 : total), reportedUsd: this._round(l.reportedUsd || 0) };
   }
 
   // 模型 id 归一：去掉区域/anthropic. 前缀、[1m] 标记、@版本、日期后缀

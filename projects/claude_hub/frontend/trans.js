@@ -484,6 +484,7 @@ const DICT = {
   apiUsd: { en: 'Cost', zh: '费用' },
   apiRequests: { en: '{n} requests', zh: '{n} 次请求' },
   apiExtra: { en: 'background calls', zh: '后台调用' },
+  apiActual: { en: 'total = amount actually charged by the provider', zh: '合计为服务商实扣金额' },
   apiUnpriced: { en: 'model not in price table', zh: '价目表无此模型' },
   apiTurnTotal: { en: 'Turn total', zh: '本轮合计' },
   apiSessionTotal: { en: 'running total so far', zh: '截至本轮累计' },
