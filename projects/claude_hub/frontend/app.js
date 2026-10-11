@@ -2812,12 +2812,12 @@ function renderElapsedNotes() {
   }
 }
 
-// ── Claude 官方 API（服务商 = anthropic）：每轮精确费用 + 可展开明细 + 会话列表合计 ──
-// 数据源 GET /api/session/api-cost（后端按每条消息 usage × 官方价目逐项计算，含 5m/1h 缓存写、缓存读）。
-// 只有用官方 API Key 跑的任务才会有数据；其它服务商的会话这里什么都不显示。
+// ── 每轮费用 + 可展开明细 + 会话列表合计（订阅 / OpenRouter / DeepSeek / 官方 API）──
+// 数据源 GET /api/session/api-cost（后端按每条消息 usage × 服务商价目逐项计算，含 5m/1h 缓存写、缓存读）。
+// 订阅登录跑的轮次不实扣，但同样按 Claude 价目折算成「相当于花了多少」，用「订阅」+ 黄色区分。
 const ApiBill = {
   bySession: {},     // sessionId → ApiSessionCost | 'loading'
-  totals: {},        // sessionId → 合计 USD（会话列表用）
+  totals: {},        // sessionId → { usd: 合计, sub: 其中订阅轮次的等价估价 }（会话列表用）
   asked: new Set(),  // 已请求过合计的会话
   pending: new Set(),
   open: new Set(),   // 已展开明细的 taskId
@@ -2826,13 +2826,24 @@ const ApiBill = {
     return `$${n < 1 ? n.toFixed(6) : n.toFixed(4)}`;
   },
   tok(n) { return fmtNum(Number(n) || 0); },
+  // 轮次性质：订阅登录（等价估价）/ OpenRouter / DeepSeek / 其它按量服务商
+  kind(turn) {
+    if (turn.billing === 'subscription') return 'sub';
+    const m = String((turn.lines[0] && turn.lines[0].model) || '').toLowerCase();
+    if (turn.provider === 'openrouter' || m.includes('/')) return 'or';
+    if (m.startsWith('deepseek')) return 'ds';
+    return 'api';
+  },
+  labelKey(kind) {
+    return { sub: 'apiTurnCostSub', or: 'apiTurnCostOr', ds: 'apiTurnCostDs' }[kind] || 'apiTurnCost';
+  },
   load(sid) {
     if (!sid || this.bySession[sid] === 'loading') return;
     this.bySession[sid] = 'loading';
     api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
       .then((r) => {
         this.bySession[sid] = r;
-        if (r.turns.length) { this.totals[sid] = r.totalUsd; this.paintListTag(sid); }
+        if (r.turns.length) { this.totals[sid] = { usd: r.totalUsd, sub: r.subscriptionUsd }; this.paintListTag(sid); }
         if (State.session && State.session.id === sid) renderElapsedNotes();
       })
       .catch(() => { delete this.bySession[sid]; });
@@ -2847,11 +2858,12 @@ const ApiBill = {
     const turn = data.turns.find((t) => t.taskId === taskId);
     if (!turn) return;
     const isOpen = this.open.has(taskId);
+    const kind = this.kind(turn);
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'api-cost-toggle';
-    btn.textContent = `${T(turn.provider === 'openrouter' ? 'apiTurnCostOr' : 'apiTurnCost').replace('{c}', this.usd(turn.totalUsd))} ${isOpen ? '▾' : '▸'}`;
-    btn.title = T('apiCostTip');
+    btn.className = `api-cost-toggle${kind === 'sub' ? ' sub' : ''}`;
+    btn.textContent = `${T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.usd(turn.totalUsd))} ${isOpen ? '▾' : '▸'}`;
+    btn.title = T(kind === 'sub' ? 'apiCostTipSub' : 'apiCostTip');
     btn.onclick = (ev) => {
       ev.stopPropagation();
       if (this.open.has(taskId)) this.open.delete(taskId); else this.open.add(taskId);
@@ -2886,9 +2898,11 @@ const ApiBill = {
         `<table class="api-cost-table"><tr><th>${escapeHtml(T('apiItem'))}</th><th class="num">${escapeHtml(T('apiTokens'))}</th>` +
         `<th class="num">${escapeHtml(T('apiUsd'))}</th></tr>${rows}</table>`;
     }).join('');
+    const sub = turn.billing === 'subscription'
+      ? `<div class="api-cost-note sub">${escapeHtml(T('apiSubscription'))}</div>` : '';
     const cli = turn.cliUsd !== null && turn.cliUsd !== undefined
       ? `<div class="api-cost-note">${escapeHtml(T('apiCliRef').replace('{c}', this.usd(turn.cliUsd)))}</div>` : '';
-    box.innerHTML = blocks +
+    box.innerHTML = blocks + sub +
       `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${this.usd(turn.totalUsd)}</b> · ` +
       `${escapeHtml(T('apiSessionTotal'))} <b>${this.usd(this.runningTotal(turn, data))}</b></div>${cli}`;
     box.addEventListener('click', (ev) => ev.stopPropagation());
@@ -2898,19 +2912,23 @@ const ApiBill = {
   runningTotal(turn, data) {
     return data.turns.filter((t) => t.startedAt <= turn.startedAt).reduce((n, t) => n + t.totalUsd, 0);
   },
-  // 会话列表：已知合计就出徽章；未知的攒一批去问后端
+  // 会话列表：已知合计就出徽章；有订阅轮次的话额外用黄色标出其中「订阅」的那部分
   listTag(s) {
     if (s.engine === 'codex') return '';
     if (!this.asked.has(s.id)) this.pending.add(s.id);
-    const v = this.totals[s.id];
-    return `<span class="api-cost-tag" data-api-sid="${escapeHtml(s.id)}" title="${escapeHtml(T('apiListTip'))}"${v ? '' : ' hidden'}>${v ? this.usd(v) : ''}</span>`;
+    const t = this.totals[s.id];
+    return `<span class="api-cost-tag" data-api-sid="${escapeHtml(s.id)}" title="${escapeHtml(T('apiListTip'))}"${t ? '' : ' hidden'}>${t ? this.tagHtml(t) : ''}</span>`;
+  },
+  tagHtml(t) {
+    const sub = t.sub > 0 ? `<span class="api-cost-sub">${escapeHtml(T('apiSubBadge').replace('{c}', this.usd(t.sub)))}</span>` : '';
+    return `${this.usd(t.usd)}${sub}`;
   },
   paintListTag(sid) {
     document.querySelectorAll('.api-cost-tag').forEach((tag) => {
       if (tag.dataset.apiSid !== sid) return;
-      const v = this.totals[sid];
-      tag.hidden = !v;
-      tag.textContent = v ? this.usd(v) : '';
+      const t = this.totals[sid];
+      tag.hidden = !t;
+      tag.innerHTML = t ? this.tagHtml(t) : '';
     });
   },
   flushList() {

@@ -3152,8 +3152,9 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .clootee-bal{padding:3px 9px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums;cursor:pointer}
 .clootee-bal.low{border-color:#d9534f;color:#d9534f}
 
-/* Claude 官方 API 每轮费用 + 明细 */
+/* 每轮费用 + 明细（订阅轮次按等价估价展示，用黄色与真实按量支出区分） */
 .api-cost-toggle { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.api-cost-toggle.sub { color: var(--yellow); }
 .api-cost-toggle:hover { text-decoration: underline; }
 .api-cost-detail { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel2); text-align: left; font-size: 12px; }
 .api-cost-model { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; margin-top: 6px; color: var(--text); }
@@ -3166,4 +3167,6 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .api-cost-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .api-cost-total { margin-top: 6px; text-align: right; color: var(--text); }
 .api-cost-note { margin-top: 2px; text-align: right; color: var(--muted); font-size: 11px; }
+.api-cost-note.sub { text-align: left; color: var(--yellow); }
 .api-cost-tag { font-size: 11px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--border); color: var(--accent); font-variant-numeric: tabular-nums; }
+.api-cost-sub { color: var(--yellow); margin-left: 4px; }

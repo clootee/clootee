@@ -389,9 +389,14 @@ export interface ApiCostLine {
   usd: { input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number; webSearch: number };
   totalUsd: number;
 }
+// 计费性质：subscription = 订阅登录跑的轮次（不实扣，按 API 价目给等价估价，前端标「订阅」）；
+// apikey = 按量服务商跑的轮次（真金白银）。老轨迹没记服务商时按模型推断（见 ApiCost._billing）。
+export type ApiBilling = 'subscription' | 'apikey';
+
 export interface ApiTurnCost {
   taskId: string;
-  provider: string;         // anthropic | openrouter
+  provider: string;         // 服务商 id：official/custom/anthropic/openrouter/minimax/…（老轨迹可能为空）
+  billing: ApiBilling;
   startedAt: number;
   lines: ApiCostLine[];
   totalUsd: number;
@@ -400,5 +405,11 @@ export interface ApiTurnCost {
 export interface ApiSessionCost {
   sessionId: string;
   turns: ApiTurnCost[];
-  totalUsd: number;
+  totalUsd: number;         // 全部轮次合计（订阅轮次算估价在内）
+  subscriptionUsd: number;  // 其中「订阅轮次」的等价估价，便于和真实支出区分
+}
+// 会话列表徽章：总估价 + 其中订阅部分
+export interface ApiSessionTotals {
+  usd: number;
+  sub: number;
 }
