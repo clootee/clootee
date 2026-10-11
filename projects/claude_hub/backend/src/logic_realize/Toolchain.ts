@@ -19,6 +19,7 @@ import { ClaudeBin } from '../helper/ClaudeBin';
 import { CodexBin } from '../helper/CodexBin';
 import { RegistryPicker, MIRROR_REGISTRY } from '../helper/RegistryPicker';
 import { RunDiag } from '../helper/RunDiag';
+import { RunAsUser } from '../helper/RunAsUser';
 import { Settings } from './Settings';
 import { Logger } from '../helper/Logger';
 
@@ -119,9 +120,17 @@ export class Toolchain extends ToolchainStruct {
     const isBatch = process.platform === 'win32' && /\.(cmd|bat)$/i.test(exe);
     const cmd = isBatch ? 'cmd.exe' : exe;
     const args = isBatch ? ['/c', exe, arg] : [arg];
+    // claude / codex 每次启动都会在自己的家目录里建一个 arg0 临时目录（装 PATH 同名软链）。
+    // 以 root 探测（服务是 root 起的时候）就会把 **root 属主**的残留留进目标用户的家目录，
+    // 之后真任务以 claudeuser 跑时清不掉 → 每次执行都刷
+    // `WARNING: failed to clean up stale arg0 temp dirs: Permission denied`。
+    // 所以只对这两个引擎按运行身份探测；node / git 是服务自身要用的工具，
+    // 保持当前身份（切了身份反而可能读不到内置的那一份）。
+    const isEngine = id === 'claude' || id === 'codex';
+    const run = isEngine ? RunAsUser.wrap(cmd, args, Settings.runAsUser()) : { bin: cmd, args };
     try {
       const out = String(
-        execFileSync(cmd, args, { encoding: 'utf-8', timeout: 20000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }),
+        execFileSync(run.bin, run.args, { encoding: 'utf-8', timeout: 20000, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }),
       );
       const version = out.split(/\r?\n/)[0].trim().slice(0, 60);
       return version ? { version } : { version: '', error: `执行 ${arg} 没有任何输出` };
