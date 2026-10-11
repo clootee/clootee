@@ -16,3 +16,4 @@ run/
 
 # 控制台（console.clootee.com）分配的设备令牌：真实凭据，绝不入库
 console.json
+openrouter_prices.json
