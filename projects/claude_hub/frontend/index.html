@@ -412,6 +412,9 @@
               <label class="sx-lbl" id="claudeProviderLbl">服务商</label>
               <select class="sx-input" id="claudeProviderSelect">
                 <option value="official">原版（订阅登录，未登录会引导登录）</option>
+                <!-- 官方 API：不用订阅登录，直接把 Anthropic Console 的 API Key 填进来即可 -->
+                <option value="anthropic">Claude 官方 API（填 API Key，按量付费）</option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="minimax">MiniMax（推荐，支持图片识别）</option>
                 <option value="xiaomi">小米 MiMo</option>
                 <option value="kimi">Kimi 开放平台（按量计费）</option>
@@ -476,6 +479,9 @@
               <label class="sx-lbl" id="codexProviderLbl">服务商</label>
               <select class="sx-input" id="codexProviderSelect">
                 <option value="official">原版 ChatGPT（账号登录）</option>
+                <!-- 官方 API：不用 ChatGPT 订阅，直接把 OpenAI 平台的 API Key 填进来即可 -->
+                <option value="openai">OpenAI 官方 API（填 API Key，按量付费）</option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="minimax">MiniMax</option>
                 <option value="xiaomi">小米 MiMo</option>
                 <!-- Codex 不列 Kimi Code：那是给编程 Agent 的包月订阅，OpenAI 兼容端点对客户端有限制，

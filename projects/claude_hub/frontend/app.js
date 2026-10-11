@@ -7150,6 +7150,9 @@ function applyEnginePaneText() {
 // 服务商下拉的选项文字：原版按引擎分两种说法，MiniMax 在 claude 侧带「推荐」后缀
 function providerOptionText(engine, id) {
   if (id === 'official') return T(engine === 'claude' ? 'pvOfficialClaude' : 'pvOfficialCodex');
+  // 「官方 API」与「原版订阅」是同一家的两条路：下拉里必须一眼看出这条要填 Key、按量付费
+  if (id === 'anthropic' && engine === 'claude') return T('pvAnthropic') + T('pvApiTag');
+  if (id === 'openai' && engine === 'codex') return T('pvOpenai') + T('pvApiTag');
   if (id === 'minimax' && engine === 'claude') return T('pvMinimax') + T('pvMinimaxTag');
   return providerLabel(id);
 }
@@ -7585,11 +7588,13 @@ function renderAccSummary(engine) {
 // ── 服务商 / 模型 / 强度的展示名（唯一来源：trans.js，后端只下发 id）──
 // 后端新增了前端还没加文案的 id 时，一律回落到 id 本身，绝不显示空白。
 const PROVIDER_LABEL_KEY = {
-  official: 'pvOfficial', minimax: 'pvMinimax', xiaomi: 'pvXiaomi',
+  official: 'pvOfficial', anthropic: 'pvAnthropic', openai: 'pvOpenai', openrouter: 'pvOpenrouter',
+  minimax: 'pvMinimax', xiaomi: 'pvXiaomi',
   kimi: 'pvKimi', kimicode: 'pvKimicode', custom: 'pvCustom',
 };
 const PROVIDER_NOTE_KEY = {
   official: 'pvNoteOfficial', custom: 'pvNoteCustom',
+  anthropic: 'pvNoteAnthropic', openai: 'pvNoteOpenai', openrouter: 'pvNoteOpenrouter',
   minimax: 'pvNoteMinimax', xiaomi: 'pvNoteXiaomi', kimi: 'pvNoteKimi', kimicode: 'pvNoteKimicode',
 };
 const EFFORT_LABEL_KEY = {

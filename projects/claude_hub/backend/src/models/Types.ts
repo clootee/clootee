@@ -24,11 +24,13 @@ export type Engine = 'claude' | 'codex';
 
 // 引擎服务商：official=原版订阅登录流程；其余=第三方 API（填 apiKey + 选 model）
 // xiaomi=小米 MiMo 开放平台，kimi=月之暗面开放平台（按量），kimicode=Kimi Code 包月订阅，minimax=MiniMax
+// anthropic=Claude 官方 API（按量 API Key，不走订阅登录），openai=OpenAI 官方 API（同理）
 // ⚠ kimi 与 kimicode 是**两个独立服务商**：端点、Key、模型名全不一样且 Key 不通用，
 //   而两者的 Key 都是 sk- 开头（认不出来），所以只能各占一个槽让用户明确选。
 // Runtime validation uses the bundled provider catalog (including legacy IDs).
 export type EngineProvider = keyof typeof import('../config/provider-catalog.json').providers
-  | 'official' | 'custom' | 'clootee' | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
+  | 'official' | 'custom' | 'clootee' | 'anthropic' | 'openai'
+  | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
 
 // 思考强度（effort）。**空字符串 = 自动**（不传参数，由引擎自己决定）。
 // 取值来自 claude CLI 的 `--effort <level>`；codex 走 `-c model_reasoning_effort=<level>`

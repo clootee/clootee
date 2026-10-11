@@ -963,6 +963,11 @@ const DICT = {
     zh: '原版（订阅登录，未登录会引导登录）',
   },
   pvOfficialCodex: { en: 'Official ChatGPT (account login)', zh: '原版 ChatGPT（账号登录）' },
+  // 官方 API：和上面的「原版订阅」是同一家的另一条路——不登录订阅，直接填 API Key 按量付费
+  pvAnthropic: { en: 'Claude official API', zh: 'Claude 官方 API' },
+  pvOpenai: { en: 'OpenAI official API', zh: 'OpenAI 官方 API' },
+  pvOpenrouter: { en: 'OpenRouter', zh: 'OpenRouter' },
+  pvApiTag: { en: ' (your API key, pay-as-you-go)', zh: '（填 API Key，按量付费）' },
   pvMinimax: { en: 'MiniMax', zh: 'MiniMax' },
   pvMinimaxTag: { en: ' (recommended, supports image input)', zh: '（推荐，支持图片识别）' },
   pvXiaomi: { en: 'Xiaomi MiMo', zh: '小米 MiMo' },
@@ -977,6 +982,18 @@ const DICT = {
   pvNoteCustom: {
     en: 'Fill in an OpenAI-compatible base URL, a model-list URL and an API key.',
     zh: '填写兼容 Base URL、模型列表 URL 与 API Key',
+  },
+  pvNoteAnthropic: {
+    en: 'Billed per use with an Anthropic Console API key (sk-ant-…) — no Claude subscription needed. Create the key on the Console API Keys page.',
+    zh: '用 Anthropic Console 的 API Key（sk-ant-…）按量付费，不需要 Claude 订阅；Key 在 Console 的 API Keys 页创建',
+  },
+  pvNoteOpenai: {
+    en: 'Billed per use with an OpenAI platform API key — no ChatGPT subscription needed. Create the key on the platform.openai.com API Keys page.',
+    zh: '用 OpenAI 平台的 API Key 按量付费，不需要 ChatGPT 订阅；Key 在 platform.openai.com 的 API Keys 页创建',
+  },
+  pvNoteOpenrouter: {
+    en: 'One OpenRouter key reaches many vendors (Claude, GPT, Gemini, …) and is billed by OpenRouter credits. Works with both Claude Code and Codex.',
+    zh: '一把 OpenRouter Key 就能用多家模型（Claude / GPT / Gemini…），按 OpenRouter 余额计费；Claude Code 与 Codex 都能用',
   },
   pvNoteMinimax: {
     en: 'MiniMax latest models (list fetched live). Strong at code and supports image input — the pick we recommend.',

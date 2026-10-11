@@ -18,11 +18,15 @@ does not send keys to models.dev or try them against unrelated providers.
 
 | Provider | Routing |
 | --- | --- |
+| Claude official API / OpenAI official API | The vendor's own pay-as-you-go API key, as an alternative to the subscription login in the same dropdown. `anthropic` (`https://api.anthropic.com`) is Claude Code only; `openai` (`https://api.openai.com/v1`) is Codex only. Anthropic accepts the key as `Authorization: Bearer`, which is what the managed `ANTHROPIC_AUTH_TOKEN` sends. |
 | Xiaomi MiMo | `tp-` → China Token Plan; other keys → ordinary API. Explicit Singapore/Amsterdam Token Plan entries preserve region. |
 | Tencent LKEAP / TokenHub | `sk-sp-` → Coding Plan; `sk-tp-` → Token Plan; ordinary keys retain the selected ordinary endpoint. |
 | Alibaba / Qwen | Ordinary keys → selected region's standard API. `sk-sp-` identifies a subscription but **cannot distinguish Coding Plan from Token Plan**; select the dedicated plan and region. Ambiguous configuration is rejected before storage/network access. |
 | Kimi, GLM, other shared-format keys | Select the separate API/Coding Plan provider. The key text alone is not sufficient to infer the subscription. |
 | OpenRouter | OpenRouter credits/API key; native Anthropic endpoint for Claude, Chat endpoint through the existing Codex proxy. |
+
+服务商下拉把「订阅登录 / 官方 API / OpenRouter / 国产大厂」固定排在最前（其余 models.dev 目录跟在后面），
+`anthropic` 只出现在 Claude Code 侧、`openai` 只出现在 Codex 侧——官方 API 两家各只有一半协议。
 
 订阅鉴权失败、过期、无额度或网络故障不会触发按量计费回退。不支持 `/models` 的
 服务商可按官方文档手填模型 ID；模型列表成功也不代表 Key 鉴权成功（部分列表是公开的）。
@@ -58,3 +62,4 @@ user's own provider account. Restart the hub after updating backend files.
 - [Alibaba regions and billing endpoints](https://help.aliyun.com/en/model-studio/base-url)
 - [Alibaba keys, including shared sk-sp- prefix](https://help.aliyun.com/en/model-studio/get-api-key)
 - [OpenRouter native Claude integration](https://openrouter.ai/docs/guides/coding-agents/claude-code-integration)
+- [Claude API authentication (`Authorization: Bearer` / `x-api-key`)](https://platform.claude.com/docs/en/api/overview)
