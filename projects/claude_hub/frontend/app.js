@@ -2888,9 +2888,13 @@ const ApiBill = {
       ? `<div class="api-cost-note">${escapeHtml(T('apiCliRef').replace('{c}', this.usd(turn.cliUsd)))}</div>` : '';
     box.innerHTML = blocks +
       `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${this.usd(turn.totalUsd)}</b> · ` +
-      `${escapeHtml(T('apiSessionTotal'))} <b>${this.usd(data.totalUsd)}</b></div>${cli}`;
+      `${escapeHtml(T('apiSessionTotal'))} <b>${this.usd(this.runningTotal(turn, data))}</b></div>${cli}`;
     box.addEventListener('click', (ev) => ev.stopPropagation());
     return box;
+  },
+  // 截至这一轮（含）的累计：每条消息显示的是它当时的累计，而不是会话现在的总额（总额在左侧会话列表）
+  runningTotal(turn, data) {
+    return data.turns.filter((t) => t.startedAt <= turn.startedAt).reduce((n, t) => n + t.totalUsd, 0);
   },
   // 会话列表：已知合计就出徽章；未知的攒一批去问后端
   listTag(s) {

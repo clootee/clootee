@@ -485,7 +485,7 @@ const DICT = {
   apiExtra: { en: 'background calls', zh: '后台调用' },
   apiUnpriced: { en: 'model not in price table', zh: '价目表无此模型' },
   apiTurnTotal: { en: 'Turn total', zh: '本轮合计' },
-  apiSessionTotal: { en: 'session total', zh: '会话累计' },
+  apiSessionTotal: { en: 'running total so far', zh: '截至本轮累计' },
   apiCliRef: { en: 'Claude CLI self-reported: {c} (reference only)', zh: 'Claude CLI 自报：{c}（仅供对照）' },
   apiListTip: { en: 'Total spent on the official Claude API in this session', zh: '本会话在 Claude 官方 API 上的累计花费' },
   clooteeLeft: { en: '{b} left', zh: '剩余 {b}' },
