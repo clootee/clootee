@@ -1,10 +1,10 @@
 {
-  "version": "3.0.2",
+  "version": "3.1.0",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-09-29",
+  "releasedAt": "2026-10-11",
   "notesI18n": {
-    "zh": "· 接入 models.dev 多服务商目录，新增 OpenRouter、千问、腾讯等接入选项\n· 小米、腾讯专属套餐 Key 自动分流；千问等格式相同的 Key 可明确选择套餐与区域，避免误用计费接口\n· 支持手填模型，修复 Codex 新手引导保存服务商配置的问题",
-    "en": "· Add the models.dev provider catalog, including OpenRouter, Alibaba/Qwen and Tencent\n· Route identifiable Xiaomi and Tencent plan keys automatically; select the plan and region explicitly for ambiguous keys\n· Allow manual model IDs and fix provider persistence in Codex onboarding"
+    "zh": "· 新增 Clootee 默认服务商：一键开始，自动领取设备额度，顶部显示余额，每轮显示花费\n· 设置里可直接选择 Claude / OpenAI 官方 API（填 Key 按量计费），OpenRouter 提前\n· 使用 Claude 官方 API 时，每轮回复按官方价目精确计价（含缓存读写），可展开明细，会话列表显示累计花费\n· Windows 后台隐藏运行，流式事件性能优化",
+    "en": "· New Clootee default provider: one-click start, free device credit, balance badge and per-turn cost\n· Pick the official Claude / OpenAI API (pay-as-you-go key) directly in settings; OpenRouter moved up\n· With the official Claude API, every turn shows an exact cost at official prices (including cache reads/writes) with an expandable breakdown, plus per-session totals\n· The hub runs hidden in the background on Windows; faster stream event handling"
   }
 }
