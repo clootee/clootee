@@ -2636,6 +2636,12 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .st-counts { display: flex; flex-wrap: wrap; gap: 7px; }
 .st-kc { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 4px 9px; font-size: 12px; color: var(--muted); }
 .st-kc b { color: var(--accent); font-weight: 600; margin-right: 3px; font-variant-numeric: tabular-nums; }
+.st-char-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px; }
+.st-char-head .st-h { margin-top: 0; }
+.st-char-controls { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.st-char-btn { border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; background: var(--panel2); color: var(--text); cursor: pointer; }
+.st-char-btn.active, .st-char-btn:hover { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.st-char-chart { width: 100%; height: 270px; }
 .st-chart { width: 100%; height: 300px; }
 .st-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; font-size: 12px; }
 .st-leg-i { display: flex; align-items: center; gap: 6px; }
@@ -3132,3 +3138,19 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .ob-foot button.link{background:none;border:0;padding:0;color:var(--muted,inherit);text-decoration:underline;cursor:pointer;font-size:13px;opacity:.8}
 .clootee-bal{padding:3px 9px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums;cursor:pointer}
 .clootee-bal.low{border-color:#d9534f;color:#d9534f}
+
+/* Claude 官方 API 每轮费用 + 明细 */
+.api-cost-toggle { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.api-cost-toggle:hover { text-decoration: underline; }
+.api-cost-detail { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel2); text-align: left; font-size: 12px; }
+.api-cost-model { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; margin-top: 6px; color: var(--text); }
+.api-cost-model:first-child { margin-top: 0; }
+.api-cost-model em { color: var(--muted); font-style: normal; }
+.api-cost-sum { margin-left: auto; font-weight: 600; color: var(--accent); }
+.api-cost-table { width: 100%; border-collapse: collapse; margin-top: 3px; }
+.api-cost-table th, .api-cost-table td { padding: 2px 4px; border-bottom: 1px dashed var(--border); text-align: left; font-weight: normal; }
+.api-cost-table th { color: var(--muted); }
+.api-cost-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.api-cost-total { margin-top: 6px; text-align: right; color: var(--text); }
+.api-cost-note { margin-top: 2px; text-align: right; color: var(--muted); font-size: 11px; }
+.api-cost-tag { font-size: 11px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--border); color: var(--accent); font-variant-numeric: tabular-nums; }

@@ -35,6 +35,7 @@ import { CommandsConfig } from '../config/CommandsConfig';
 import { UpdateChecker } from '../logic_realize/UpdateChecker';
 import { ExternalInbox } from '../logic_realize/ExternalInbox';
 import { ConsoleAccount } from '../logic_realize/ConsoleAccount';
+import { ApiCost } from '../logic_realize/ApiCost';
 
 export class Server {
   static start(): void {
@@ -484,6 +485,15 @@ export class Server {
         TraceStore.read(String(req.query.id), String(req.query.raw || '') === '1'),
       ),
     );
+    // GET /api/session/api-cost?id=<sessionId>      → Claude 官方 API 每轮精确费用明细
+    app.get('/api/session/api-cost', (req, res) =>
+      this._wrap(res, 'session.apiCost', () => ApiCost.session(String(req.query.id || ''))),
+    );
+    // POST /api/sessions/api-cost { ids }             → 会话列表用：各会话 API 费用合计
+    app.post('/api/sessions/api-cost', (req, res) =>
+      this._wrap(res, 'sessions.apiCost', () => ApiCost.totals(Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [])),
+    );
+
     // GET /api/session/trace-stats?id=<sessionId>    → 只要统计（慢在哪）
     app.get('/api/session/trace-stats', (req, res) =>
       this._wrap(res, 'session.traceStats', () => TraceStore.stats(String(req.query.id))),

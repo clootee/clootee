@@ -252,6 +252,7 @@ export interface TraceEvent {
   isError?: boolean;
   model?: string;
   usage?: Record<string, unknown>; // token 用量原样
+  msgId?: string;           // assistant 消息 id（同一条消息拆成多帧时共享，计费按它去重）
   costUsd?: number;
   numTurns?: number;
   raw?: unknown;            // kind=raw 时的原始事件
@@ -302,6 +303,12 @@ export interface TraceTaskStat {
   phases: TracePhaseBreakdown; // 该任务内的细分耗时
 }
 
+export interface TraceCharBucket {
+  startTs: number;
+  textChars: number;
+  thinkingChars: number;
+}
+
 // 各类「次数/数量」计数：一眼看清这个会话里 AI 到底做了多少动作、写了多少字。
 export interface TraceCounts {
   tasks: number;          // 任务数（task_start）
@@ -339,6 +346,7 @@ export interface TraceStats {
     costUsd: number;
   };
   byTask: TraceTaskStat[];
+  charTimeline: TraceCharBucket[];
 }
 
 export interface TraceResult {
@@ -363,3 +371,31 @@ export type WsEvent =
   | { kind: 'serverError'; message: string }
   // 过程轨迹事件（完整不截断）：前端"全过程"视图实时追加用
   | { kind: 'trace'; sessionId: string; taskId: string; event: TraceEvent };
+
+// ── Claude 官方 API 按量计费明细（仅服务商 = anthropic 的任务）──
+export interface ApiCostLine {
+  model: string;
+  priced: boolean;          // 价目表里找到了该模型
+  extra: boolean;           // 来自 result.modelUsage 的补差（CLI 后台调用，未出现在消息流里）
+  requests: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWrite5mTokens: number;
+  cacheWrite1hTokens: number;
+  webSearches: number;
+  usd: { input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number; webSearch: number };
+  totalUsd: number;
+}
+export interface ApiTurnCost {
+  taskId: string;
+  startedAt: number;
+  lines: ApiCostLine[];
+  totalUsd: number;
+  cliUsd: number | null;    // Claude CLI 自报的 total_cost_usd，仅供对照
+}
+export interface ApiSessionCost {
+  sessionId: string;
+  turns: ApiTurnCost[];
+  totalUsd: number;
+}

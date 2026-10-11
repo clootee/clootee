@@ -9,6 +9,7 @@ import { RootManager } from '../logic_realize/RootManager';
 import { ClaudeRunner } from '../logic_realize/ClaudeRunner';
 import { CodexRunner } from '../logic_realize/CodexRunner';
 import { TraceStore } from '../logic_realize/TraceStore';
+import { EngineConfig } from '../logic_realize/EngineConfig';
 import { ProjectPrompt } from '../logic_realize/ProjectPrompt';
 import { RunCallbacks } from './ClaudeRunnerStruct';
 import { Session, Task, Message } from '../models/Types';
@@ -103,7 +104,7 @@ export class TaskQueueStruct {
       engine: session.engine,
       name: session.engine,
       text: task.prompt,
-      raw: { cwd: root.path, claudeSessionId: session.claudeSessionId },
+      raw: { cwd: root.path, claudeSessionId: session.claudeSessionId, provider: EngineConfig.get()[session.engine === 'codex' ? 'codex' : 'claude'].provider },
     });
 
     this._markRunning(session.id, task.id);

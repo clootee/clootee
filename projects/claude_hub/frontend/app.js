@@ -98,6 +98,16 @@ function setFavoritesOnly(on) {
 // 同一套规格：24x24 视窗、单色描边（currentColor）、线宽 1.6、圆头圆角、不填充。
 // 用 currentColor 才能跟按钮/菜单项的文字颜色（含选中态高亮、暗色主题）自动一致。
 const ICONS = {
+  // 目录管理：叠放的两个文件夹
+  manageRoots: '<path d="M6.5 6.5V5.6a1.6 1.6 0 0 1 1.6-1.6h2.5l1.5 1.6h5.8a1.6 1.6 0 0 1 1.6 1.6v6.6a1.6 1.6 0 0 1-1.6 1.6h-.4"/><path d="M3.5 10a1.6 1.6 0 0 1 1.6-1.6h2.6l1.5 1.6h5.7a1.6 1.6 0 0 1 1.6 1.6v6.3a1.6 1.6 0 0 1-1.6 1.6H5.1a1.6 1.6 0 0 1-1.6-1.6V10Z"/>',
+  // 推送：云 + 上箭头
+  gitPush: '<path d="M7.2 18.5H6.6a4.1 4.1 0 0 1-.6-8.15 5.6 5.6 0 0 1 10.9-1.1 4.65 4.65 0 0 1 .6 9.25h-.7"/><path d="M12 20.5v-8"/><path d="m8.9 15.3 3.1-3.1 3.1 3.1"/>',
+  // 打开文件夹
+  openFolder: '<path d="M3.5 17.5V6.6A1.6 1.6 0 0 1 5.1 5h3.3l1.7 1.8h6.3a1.6 1.6 0 0 1 1.6 1.6v1.8"/><path d="M3.5 17.5 6 11.3a1.6 1.6 0 0 1 1.5-1h12a1.1 1.1 0 0 1 1 1.5l-2.3 5.9a1.6 1.6 0 0 1-1.5 1H5a1.5 1.5 0 0 1-1.5-1.2Z"/>',
+  // 添加
+  plus: '<path d="M12 5.5v13"/><path d="M5.5 12h13"/>',
+  // 删除：垃圾桶
+  trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5.4a1.4 1.4 0 0 1 1.4-1.4h2.2a1.4 1.4 0 0 1 1.4 1.4V7"/><path d="m6.3 7 .8 11.4a1.8 1.8 0 0 0 1.8 1.6h6.2a1.8 1.8 0 0 0 1.8-1.6L17.7 7"/><path d="M10.2 11v5"/><path d="M13.8 11v5"/>',
   // 单目录：一只文件夹
   single: '<path d="M3.2 8.1a2 2 0 0 1 2-2h3.05a2 2 0 0 1 1.5.68l1.02 1.16a2 2 0 0 0 1.5.68h6.53a2 2 0 0 1 2 2v7.7a2 2 0 0 1-2 2H5.2a2 2 0 0 1-2-2V8.1Z"/>',
   // 收藏夹：五角星
@@ -217,9 +227,11 @@ function applyText() {
   if (!$('guideMenu').hidden) renderGuideMenu();
   if (!$('guideOverlay').hidden) renderGuide();
   $('rootLabel').textContent = T('root');
-  $('addRootBtn').textContent = '＋';
+  $('addRootBtn').innerHTML = svgIcon('plus', 17);
   $('addRootBtn').title = T('addRoot');
-  $('removeRootBtn').textContent = '🗑';
+  $('removeRootBtn').innerHTML = svgIcon('trash', 17);
+  $('manageRootsBtn').innerHTML = svgIcon('manageRoots', 17);
+  $('openFolderBtn').innerHTML = svgIcon('openFolder', 17);
   $('removeRootBtn').title = T('removeRoot');
   $('manageRootsBtn').title = T('manageRoots');
   $('batchToggleBtn').title = T('batchSelect');
@@ -234,7 +246,7 @@ function applyText() {
   $('batchMarkTesting').textContent = `🧪 ${T('markTesting')}`;
   $('batchMarkActive').textContent = `🔥 ${T('markActive')}`;
   $('batchCancelBtn').textContent = T('cancel');
-  $('gitPushBtn').textContent = '⇪';
+  $('gitPushBtn').innerHTML = svgIcon('gitPush', 17);
   $('rootEditTitle').textContent = T('editRootTitle');
   $('rootEditClose').textContent = T('close');
   $('noteLabel').textContent = T('note');
@@ -1893,6 +1905,7 @@ function renderSessions() {
   if (!q && total > Page.shown) sessions = sessions.slice(0, Page.shown);
   Page.more = total - sessions.length;
   list.innerHTML = '';
+  setTimeout(() => ApiBill.flushList(), 0);
   sessions.forEach((s) => {
     const div = document.createElement('div');
     const status = s.status || 'active';
@@ -1943,7 +1956,7 @@ function renderSessions() {
         <div class="name">${escapeHtml(title)}</div>
         ${lastLine}
         <div class="meta">
-          <span class="meta-tags">${dirBadge}${favoriteTag}${pinTag}${doneTag}${testingTag}${runTag}${justFinishedTag}${engBadge}</span>
+          <span class="meta-tags">${dirBadge}${favoriteTag}${pinTag}${doneTag}${testingTag}${runTag}${justFinishedTag}${engBadge}${ApiBill.listTag(s)}</span>
           <span class="meta-time">${escapeHtml(updatedTime)}</span>
         </div>
         ${snippet}
@@ -2792,10 +2805,123 @@ function renderElapsedNotes() {
     const turnEndAt = next && next.createdAt ? next.createdAt : Date.now();
     const cost = Clootee.turnText(Clootee.taskOfTurn(lastUserTime, turnEndAt), !next, i >= msgs.length - 12);
     if (cost) el.textContent += ` · ${cost}`;
+    ApiBill.attach(el, Clootee.taskOfTurn(lastUserTime, turnEndAt));
     node.appendChild(el); // 放进气泡内部（末尾），而非气泡外部
     lastUserTime = 0; // 本轮已消费
   }
 }
+
+// ── Claude 官方 API（服务商 = anthropic）：每轮精确费用 + 可展开明细 + 会话列表合计 ──
+// 数据源 GET /api/session/api-cost（后端按每条消息 usage × 官方价目逐项计算，含 5m/1h 缓存写、缓存读）。
+// 只有用官方 API Key 跑的任务才会有数据；其它服务商的会话这里什么都不显示。
+const ApiBill = {
+  bySession: {},     // sessionId → ApiSessionCost | 'loading'
+  totals: {},        // sessionId → 合计 USD（会话列表用）
+  asked: new Set(),  // 已请求过合计的会话
+  pending: new Set(),
+  open: new Set(),   // 已展开明细的 taskId
+  usd(v) {
+    const n = Number(v) || 0;
+    return `$${n < 1 ? n.toFixed(6) : n.toFixed(4)}`;
+  },
+  tok(n) { return fmtNum(Number(n) || 0); },
+  load(sid) {
+    if (!sid || this.bySession[sid] === 'loading') return;
+    this.bySession[sid] = 'loading';
+    api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
+      .then((r) => {
+        this.bySession[sid] = r;
+        if (r.turns.length) { this.totals[sid] = r.totalUsd; this.paintListTag(sid); }
+        if (State.session && State.session.id === sid) renderElapsedNotes();
+      })
+      .catch(() => { delete this.bySession[sid]; });
+  },
+  // 在「耗时」行后追加「API 本轮 $x ▸」，点开显示按模型 × 计费项的明细
+  attach(el, taskId) {
+    const sid = State.session && State.session.id;
+    if (!sid || !taskId) return;
+    const data = this.bySession[sid];
+    if (!data) { this.load(sid); return; }
+    if (data === 'loading') return;
+    const turn = data.turns.find((t) => t.taskId === taskId);
+    if (!turn) return;
+    const isOpen = this.open.has(taskId);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'api-cost-toggle';
+    btn.textContent = `${T('apiTurnCost').replace('{c}', this.usd(turn.totalUsd))} ${isOpen ? '▾' : '▸'}`;
+    btn.title = T('apiCostTip');
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      if (this.open.has(taskId)) this.open.delete(taskId); else this.open.add(taskId);
+      renderElapsedNotes();
+    };
+    el.appendChild(document.createTextNode(' · '));
+    el.appendChild(btn);
+    if (isOpen) el.appendChild(this.detail(turn, data));
+  },
+  detail(turn, data) {
+    const box = document.createElement('div');
+    box.className = 'api-cost-detail';
+    const items = [
+      ['apiInput', 'inputTokens', 'input'],
+      ['apiOutput', 'outputTokens', 'output'],
+      ['apiCacheRead', 'cacheReadTokens', 'cacheRead'],
+      ['apiCacheWrite5m', 'cacheWrite5mTokens', 'cacheWrite5m'],
+      ['apiCacheWrite1h', 'cacheWrite1hTokens', 'cacheWrite1h'],
+      ['apiWebSearch', 'webSearches', 'webSearch'],
+    ];
+    const blocks = turn.lines.map((l) => {
+      const rows = items
+        .filter(([, tk]) => l[tk] > 0)
+        .map(([k, tk, uk]) => `<tr><td>${escapeHtml(T(k))}</td><td class="num">${this.tok(l[tk])}</td>` +
+          `<td class="num">${l.priced || uk === 'webSearch' ? this.usd(l.usd[uk]) : '?'}</td></tr>`)
+        .join('');
+      const tags = [l.extra ? T('apiExtra') : '', l.priced ? '' : T('apiUnpriced')].filter(Boolean).join(' · ');
+      const reqs = l.requests ? ` · ${T('apiRequests').replace('{n}', l.requests)}` : '';
+      return `<div class="api-cost-model"><b>${escapeHtml(l.model)}</b>${reqs}${tags ? ` · <em>${escapeHtml(tags)}</em>` : ''}` +
+        `<span class="api-cost-sum">${this.usd(l.totalUsd)}</span></div>` +
+        `<table class="api-cost-table"><tr><th>${escapeHtml(T('apiItem'))}</th><th class="num">${escapeHtml(T('apiTokens'))}</th>` +
+        `<th class="num">${escapeHtml(T('apiUsd'))}</th></tr>${rows}</table>`;
+    }).join('');
+    const cli = turn.cliUsd !== null && turn.cliUsd !== undefined
+      ? `<div class="api-cost-note">${escapeHtml(T('apiCliRef').replace('{c}', this.usd(turn.cliUsd)))}</div>` : '';
+    box.innerHTML = blocks +
+      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${this.usd(turn.totalUsd)}</b> · ` +
+      `${escapeHtml(T('apiSessionTotal'))} <b>${this.usd(data.totalUsd)}</b></div>${cli}`;
+    box.addEventListener('click', (ev) => ev.stopPropagation());
+    return box;
+  },
+  // 会话列表：已知合计就出徽章；未知的攒一批去问后端
+  listTag(s) {
+    if (s.engine === 'codex') return '';
+    if (!this.asked.has(s.id)) this.pending.add(s.id);
+    const v = this.totals[s.id];
+    return `<span class="api-cost-tag" data-api-sid="${escapeHtml(s.id)}" title="${escapeHtml(T('apiListTip'))}"${v ? '' : ' hidden'}>${v ? this.usd(v) : ''}</span>`;
+  },
+  paintListTag(sid) {
+    document.querySelectorAll('.api-cost-tag').forEach((tag) => {
+      if (tag.dataset.apiSid !== sid) return;
+      const v = this.totals[sid];
+      tag.hidden = !v;
+      tag.textContent = v ? this.usd(v) : '';
+    });
+  },
+  flushList() {
+    if (!this.pending.size) return;
+    const ids = [...this.pending].slice(0, 300);
+    ids.forEach((id) => { this.pending.delete(id); this.asked.add(id); });
+    api('/api/sessions/api-cost', { ids })
+      .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); })
+      .catch(() => { ids.forEach((id) => this.asked.delete(id)); });
+  },
+  // 任务结束：该会话缓存作废，重新取明细与合计
+  onTaskEnd(sessionId) {
+    delete this.bySession[sessionId];
+    if (State.session && State.session.id === sessionId) this.load(sessionId);
+    else { this.asked.delete(sessionId); this.pending.add(sessionId); this.flushList(); }
+  },
+};
 
 // ── Clootee 默认服务商：余额徽章 / 每轮花费 / 额度用完弹层 ──
 // 只是一个普通服务商的「账户视图」：数据都来自 console.clootee.com（经后端 /api/console/* 转述），
@@ -4779,7 +4905,7 @@ function closeTrace() {
 // ── 会话统计详情（右键 → 统计详情）：对任意会话做「时间花在哪」的细分分析 ──
 // 数据源 GET /api/session/trace-stats（后端 TraceStore 已算好 phases/activeMs/rounds）。
 // 与 trOverlay 不同：这里按传入的 sessionId 取数，不依赖当前打开的会话。
-const Stats = { sid: '', title: '', charts: [] };
+const Stats = { sid: '', title: '', charts: [], charChart: null };
 // 阶段元数据：key 对应后端 TracePhaseBreakdown 字段，label 走 i18n，color 固定配色
 const STAT_PHASES = [
   { key: 'ttft', tk: 'phTtft', color: '#f59e0b' },
@@ -4811,6 +4937,8 @@ function closeSessionStats() {
 function _disposeStatsCharts() {
   Stats.charts.forEach((c) => { try { c.dispose(); } catch { /* ignore */ } });
   Stats.charts = [];
+  if (Stats.charChart) { try { Stats.charChart.dispose(); } catch { /* ignore */ } }
+  Stats.charChart = null;
 }
 
 async function loadSessionStats() {
@@ -4914,8 +5042,13 @@ function renderSessionStats(s) {
   const countsBlock = (kchips || kchars)
     ? `<div class="st-h">${T('statsCountsTitle')}</div><div class="st-counts">${kchips}${kchars}</div>`
     : '';
+  const charBlock = `<div class="st-char-head"><div class="st-h">${T('statsCharsTitle')}</div>` +
+    `<div class="st-char-controls"><span>${T('statsCharsInterval')}</span>` +
+    [1, 2, 5].map((minutes) => `<button type="button" class="st-char-btn${minutes === 1 ? ' active' : ''}" data-minutes="${minutes}">${minutes}m</button>`).join('') +
+    `</div></div><div class="st-char-chart" id="statsCharChart"></div>`;
 
   body.innerHTML =
+    charBlock +
     summary +
     countsBlock +
     `<div class="st-h">${T('statsPhaseTitle')}</div>` +
@@ -4926,7 +5059,49 @@ function renderSessionStats(s) {
     `<div class="st-note">${T('statsNote')}</div>`;
 
   // ECharts 需要容器有尺寸：入文档后再画
-  setTimeout(() => _renderPhaseChart(rows), 0);
+  body.querySelectorAll('.st-char-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      body.querySelectorAll('.st-char-btn').forEach((item) => item.classList.toggle('active', item === button));
+      _renderCharChart(s, Number(button.dataset.minutes) || 1);
+    });
+  });
+  setTimeout(() => { _renderCharChart(s, 1); _renderPhaseChart(rows); }, 0);
+}
+
+function _renderCharChart(stats, intervalMinutes) {
+  const el = $('statsCharChart');
+  if (Stats.charChart) { try { Stats.charChart.dispose(); } catch { /* ignore */ } Stats.charChart = null; }
+  if (!el || !el.isConnected || typeof echarts === 'undefined') return;
+  const source = Array.isArray(stats.charTimeline) ? stats.charTimeline : [];
+  const size = Math.max(1, intervalMinutes) * 60000;
+  const buckets = new Map();
+  source.forEach((item) => {
+    const startTs = Math.floor(Number(item.startTs) / size) * size;
+    const current = buckets.get(startTs) || { startTs, textChars: 0, thinkingChars: 0 };
+    current.textChars += Number(item.textChars) || 0;
+    current.thinkingChars += Number(item.thinkingChars) || 0;
+    buckets.set(startTs, current);
+  });
+  const rows = [...buckets.values()].sort((a, b) => a.startTs - b.startTs);
+  if (!rows.length) return;
+  const cs = getComputedStyle(document.body);
+  const cText = (cs.getPropertyValue('--text') || '#cbd5e1').trim();
+  const cBorder = (cs.getPropertyValue('--border') || '#475569').trim();
+  const formatTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const chart = echarts.init(el);
+  chart.setOption({
+    backgroundColor: 'transparent',
+    grid: { left: 12, right: 18, top: 28, bottom: 28, containLabel: true },
+    legend: { top: 0, textStyle: { color: cText }, data: [T('statsCharsThinking'), T('statsCharsText')] },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (value) => fmtNum(value) + ' ' + T('statsCharsUnit') },
+    xAxis: { type: 'category', data: rows.map((row) => formatTime(row.startTs)), axisLabel: { color: cText }, axisLine: { lineStyle: { color: cBorder } } },
+    yAxis: { type: 'value', axisLabel: { color: cText, formatter: (value) => fmtNum(value) }, splitLine: { lineStyle: { color: cBorder, opacity: 0.4 } } },
+    series: [
+      { name: T('statsCharsThinking'), type: 'bar', stack: 'chars', data: rows.map((row) => row.thinkingChars), itemStyle: { color: '#8b5cf6' }, barMaxWidth: 42 },
+      { name: T('statsCharsText'), type: 'bar', stack: 'chars', data: rows.map((row) => row.textChars), itemStyle: { color: '#06b6d4' }, barMaxWidth: 42 },
+    ],
+  });
+  Stats.charChart = chart;
 }
 
 // 横向条形图：每个阶段一根条（秒）。跟随明暗主题取色。
@@ -5622,7 +5797,7 @@ function connectWs() {
     // 任务事件：无论是否当前会话，都据此更新侧栏"执行中"标识
     if (e.kind === 'task') {
       updateRunningFromTask(e.sessionId, e.task);
-      if (e.task.status === 'done' || e.task.status === 'error') Clootee.onTaskEnd(e.task);
+      if (e.task.status === 'done' || e.task.status === 'error') { Clootee.onTaskEnd(e.task); ApiBill.onTaskEnd(e.sessionId); }
       if (e.task.status === 'done') dropTaskNotices(e.task.id); // 跑通了就撤掉中途的告警
       // 外部系统推送来的消息：不管现在正看哪个会话都弹一下，不能让用户全靠手动刷新才发现
       if (e.task.external && e.task.status === 'pending') showExtMsgToast(e.sessionId, e.task.prompt);
