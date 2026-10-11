@@ -537,8 +537,10 @@ export class EngineConfigStruct {
       // 无论是旧版扁平脏数据还是别处写歪，读出来就被过滤掉。
       const legit = (models || []).filter((m) => m && m.source !== 'api');
       models = legit.length ? legit : undefined;
-      // 选定模型若来自第三方候选（不在剩余候选里、且这条记录带过第三方 Key）→ 一并丢弃
-      if (model && v.apiKey && !legit.some((m) => m.id === model)) model = '';
+      // 选定模型若不在原版自身的候选里 → 一并丢弃（不要求这条记录还带过第三方 Key）。
+      // 旧写法只在 `v.apiKey` 存在时才丢，漏了 Key 已被清空的情况：别的服务商的模型名
+      // （如 deepseek-flash）会残留在原版槽里，codex 拿它去打 ChatGPT 账号会直接 400 失败。
+      if (model && legit.length && !legit.some((m) => m.id === model)) model = '';
     }
     return {
       apiKey,
