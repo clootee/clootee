@@ -98,7 +98,7 @@ export class TaskQueueStruct {
     this._ensureProjectPrompt(root.path);
 
     // 轨迹：记录任务起点（含完整 prompt 与工作目录），后续引擎事件都挂在这个 taskId 下
-    TraceStore.record(session.id, {
+    TraceStore.record(this._traceSessionId(session.id), {
       kind: 'task_start',
       taskId: task.id,
       engine: session.engine,
