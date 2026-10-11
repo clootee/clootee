@@ -28,4 +28,19 @@ assert.strictEqual(opus.requests, 1);
 const haiku = t.lines.find((l) => l.extra);
 assert.ok(haiku && Math.abs(haiku.totalUsd - (200 * 1e-6 + 20 * 5e-6)) < 1e-9, 'haiku background diff');
 assert.ok(Math.abs(t.totalUsd - (exp + 0.0003)) < 1e-9);
-console.log('api_cost ok', t.totalUsd);
+
+// 订阅开局、中途切到官方 API Key：只有切换后的轮次计费，会话合计从那一轮开始累加
+const mixed = [
+  { kind: 'task_start', taskId: 'a', engine: 'claude', ts: 1, raw: { provider: 'official' } },
+  { kind: 'text', taskId: 'a', ts: 2, model: 'claude-opus-5-5', msgId: 'x1', usage: usage({ input_tokens: 1000, output_tokens: 1000 }) },
+  { kind: 'task_start', taskId: 'b', engine: 'claude', ts: 3, raw: { provider: 'anthropic' } },
+  { kind: 'text', taskId: 'b', ts: 4, model: 'claude-opus-5-5', msgId: 'x2', usage: usage({ input_tokens: 100, output_tokens: 10 }) },
+  { kind: 'result', taskId: 'b', ts: 5, raw: { model_usage: { 'claude-opus-5-5': { inputTokens: 100, outputTokens: 50 } } } },
+];
+const m = ApiCost._compute('m', mixed);
+assert.deepStrictEqual(m.turns.map((x) => x.taskId), ['b']);
+// 同模型的最终 token 差额并回原行，不算「后台调用」
+assert.strictEqual(m.turns[0].lines.length, 1);
+assert.strictEqual(m.turns[0].lines[0].outputTokens, 50);
+assert.ok(Math.abs(m.totalUsd - (100 * 4e-6 + 50 * 20e-6)) < 1e-9);
+console.log('api_cost ok', t.totalUsd, m.totalUsd);

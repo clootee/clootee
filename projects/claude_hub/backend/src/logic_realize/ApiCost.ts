@@ -159,7 +159,8 @@ export class ApiCost extends ApiCostStruct {
         web: Math.max(0, num(m.webSearchRequests) - sum((l) => l.webSearches)),
         fast: false,
       };
-      if (diff.input + diff.output + diff.cacheRead + diff.cw5m + diff.web > 0) this._add(lines, true, diff, 0);
+      // 消息流里见过的模型：差额是最后一帧没带全的 token，并回该模型的行；没见过的才是后台调用
+      if (diff.input + diff.output + diff.cacheRead + diff.cw5m + diff.web > 0) this._add(lines, seen.length === 0, diff, 0);
     }
   }
 
