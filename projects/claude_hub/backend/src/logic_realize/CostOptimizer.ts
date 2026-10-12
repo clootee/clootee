@@ -56,7 +56,7 @@ export class CostOptimizer {
     const modelChanged = !!cfg.model && !!last?.model && !['opus', 'sonnet', 'haiku'].includes(cfg.model)
       && modelKey(cfg.model) !== modelKey(last.model);
     const providerChanged = !!(started?.raw as any)?.provider && (started?.raw as any).provider !== cfg.provider;
-    const cacheState = !last ? 'unknown' : !ttl ? 'disabled' : modelChanged || providerChanged ? 'invalidated'
+    const cacheState = !last ? 'unknown' : mode === 'off' || !ttl ? 'disabled' : modelChanged || providerChanged ? 'invalidated'
       : now - lastAt > ttl + margin ? 'expired'
       : now - earliest >= ttl - margin ? 'uncertain' : 'warm';
     const model = cfg.model || last?.model || '';
@@ -119,12 +119,14 @@ export class CostOptimizer {
       raw: { provider: cfg.provider, costHelper: !compact, cacheMode: compact ? s.promptCache : '5m' } });
     return new Promise((resolve, reject) => {
       let text = '';
+      const textParts: string[] = [];
       let boundary = false;
       let usd: number | null = null;
       let done = false;
       let handle: ReturnType<typeof ClaudeRunner.execute>;
       const finish = (error?: Error) => {
         if (done) return; done = true; clearTimeout(timer);
+        if (!text.trim()) text = textParts.join('').trim();
         TraceStore.record(this.key(s), { kind: 'task_end', taskId, engine: 'claude', name: error ? 'failed' : 'completed' });
         if (error) reject(error);
         else {
@@ -139,6 +141,7 @@ export class CostOptimizer {
           onThinking: () => {}, onTool: () => {}, onOutput: () => {},
           onFinal: t => { text = t; },
           onEvent: ev => {
+            if (ev.kind === 'text' && ev.text) textParts.push(ev.text);
             // Helper CLI runs have independent cumulative counters. Keep them out of the resumed conversation's delta baseline.
             TraceStore.record(this.key(s), { ...ev, kind: !compact && ev.kind === 'result' ? 'raw' : ev.kind, taskId });
             if (ev.kind === 'system' && ev.name === 'compact_boundary') { boundary = true; onBoundary?.(); }
