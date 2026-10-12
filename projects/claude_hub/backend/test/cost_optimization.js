@@ -6,8 +6,12 @@ const { EngineConfig } = require('../dist/logic_realize/EngineConfig');
 const { SessionManager } = require('../dist/logic_realize/SessionManager');
 const { TraceStore } = require('../dist/logic_realize/TraceStore');
 const { TaskQueue } = require('../dist/logic_realize/TaskQueue');
+const { ClaudeRunner } = require('../dist/logic_realize/ClaudeRunner');
+const { RootManager } = require('../dist/logic_realize/RootManager');
+const { ApiCost } = require('../dist/logic_realize/ApiCost');
 
 async function main() {
+  const nativeAi = CostOptimizer.ai;
   const now = Date.now();
   let settings = { claudePromptCache: '1h', costOptimization: CostPolicy.defaults() };
   let provider = 'anthropic';
@@ -88,6 +92,32 @@ async function main() {
   await assert.rejects(CostOptimizer.migrate(s.id, 'Continue', () => {}, () => true), /classification_invalid/);
   assert.equal(created, count, 'failure must not create or send a new task');
   assert.equal(CostOptimizer.busy.size, 0, 'failure must release the operation lock');
+  RootManager.getRoot = () => ({ path: require('node:os').tmpdir() });
+  TraceStore.record = () => {};
+  let charges = 0;
+  ApiCost.session = () => ({ totalUsd: charges++ * 0.001 });
+  ClaudeRunner.execute = (session, _root, _prompt, cb) => {
+    assert.equal(session.costHelper.cache, '5m');
+    cb.onEvent({ kind: 'text', text: '{"independent":true}' });
+    cb.onEvent({ kind: 'result', text: '', costUsd: 0.001 });
+    cb.onDone(true);
+    return { kill() {} };
+  };
+  const fallback = await nativeAi.call(CostOptimizer, s, 'Check this message', 'claude-haiku-4-5');
+  assert.equal(fallback.text, '{"independent":true}', 'assistant body survives an empty final result');
+  assert.ok(fallback.usd > 0);
+  settings.costOptimization = { ...CostPolicy.defaults(), mode: 'manual', strict: true, thresholdTokens: 1000, minExtraUsd: 0 };
+  events[1].usage.cache_read_input_tokens = 90000;
+  CostOptimizer.compactSummary = () => 'Verified summary';
+  CostOptimizer.ai = async () => {
+    events.push({ kind: 'system', name: 'compact_boundary', taskId: 'compact', ts: Date.now() });
+    return { text: '', usd: 0.001 };
+  };
+  const compacted = await CostOptimizer.compact(s.id);
+  assert.equal(compacted.check.blocked, true, 'this fixture deliberately stays above the strict threshold');
+  assert.throws(() => CostOptimizer.approve(s.id, 'Continue', compacted.check.fingerprint), /strict_locked/);
+  const afterCompact = CostOptimizer.approve(s.id, 'Continue', compacted.check.fingerprint, compacted.compactProof);
+  assert.equal(CostOptimizer.allowed(s.id, 'Continue', afterCompact), true, 'verified compaction enables one reviewed send even in strict mode');
   process.stdout.write('cost_optimization: strict server guard, approvals, TTL, scopes, classifier and migration passed\n');
 }
 main().catch(e => { process.stderr.write(e.stack + '\n'); process.exitCode = 1; });
