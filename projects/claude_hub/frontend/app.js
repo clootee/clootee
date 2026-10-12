@@ -207,8 +207,92 @@ async function api(path, body) {
     throw new Error('unauthorized');
   }
   const json = await res.json();
-  if (!json.success) throw new Error(json.error || 'request failed');
+  if (!json.success) throw new Error(json.locked ? T('lockedHint') : (json.error || 'request failed'));
   return json.data;
+}
+
+// ── 目录私有密码：各目录解锁凭据存 localStorage，并同步成 cookie（img/下载链接也能带上） ──
+function rootKeys() {
+  try { return JSON.parse(localStorage.getItem('rootKeys') || '{}') || {}; } catch { return {}; }
+}
+function syncRootKeyCookie() {
+  document.cookie = `rootKeys=${encodeURIComponent(JSON.stringify(rootKeys()))}; path=/; max-age=31536000; SameSite=Lax`;
+}
+function setRootKey(rootId, token) {
+  const k = rootKeys();
+  if (token) k[rootId] = token; else delete k[rootId];
+  localStorage.setItem('rootKeys', JSON.stringify(k));
+  syncRootKeyCookie();
+}
+syncRootKeyCookie();
+
+async function afterRootLockChange() {
+  await loadRoots();
+  renderWorkdirBar();
+  renderRootMeta();
+  await loadSessions();
+}
+
+// 未解锁的私有目录：输入密码解锁本浏览器
+async function unlockRoot(rootId) {
+  const pw = prompt(T('lockAskPw'));
+  if (!pw) return false;
+  try {
+    const { token } = await api('/api/root/lock/unlock', { id: rootId, password: pw });
+    setRootKey(rootId, token);
+    await afterRootLockChange();
+    return true;
+  } catch (e) {
+    alert(e.message);
+    return false;
+  }
+}
+
+// 目录私有按钮 / 右键菜单入口：未私有→设置密码；已私有未解锁→解锁；已解锁→关闭或修改密码
+async function manageRootLock(rootId) {
+  const root = State.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  if (root.locked && !root.unlocked) { await unlockRoot(rootId); return; }
+  try {
+    let oldPw;
+    if (root.locked) {
+      const off = confirm(T('lockManageAsk'));
+      const cur = prompt(T('lockCurPw'));
+      if (!cur) return;
+      if (off) {
+        await api('/api/root/lock/clear', { id: rootId, password: cur });
+        setRootKey(rootId, '');
+        await afterRootLockChange();
+        return;
+      }
+      oldPw = cur;
+    }
+    const pw = prompt(T('lockNewPw'));
+    if (!pw) return;
+    if (prompt(T('lockNewPw2')) !== pw) { alert(T('lockMismatch')); return; }
+    const { token } = await api('/api/root/lock/set', { id: rootId, password: pw, oldPassword: oldPw });
+    setRootKey(rootId, token);
+    await afterRootLockChange();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function lockLabel(root) {
+  if (!root || !root.locked) return T('lockSet');
+  return root.unlocked ? T('lockManage') : T('lockUnlock');
+}
+
+// 单目录模式下的私有按钮：🔓=未私有，🔒=已私有
+function refreshLockRootBtn() {
+  const btn = $('lockRootBtn');
+  if (!btn) return;
+  const root = currentRoot();
+  btn.hidden = !root || isWorkspace() || State.favoritesOnly;
+  if (!root) return;
+  btn.textContent = root.locked ? '🔒' : '🔓';
+  btn.title = lockLabel(root);
+  btn.classList.toggle('active', !!root.locked);
 }
 
 const $ = (id) => document.getElementById(id);
@@ -668,6 +752,7 @@ function renderWorkdirBar() {
 
 // 侧栏渲染根目录的备注与链接（链接 _blank 打开）。编辑入口集成在此处的 ✎
 function renderRootMeta() {
+  refreshLockRootBtn();
   const box = $('rootMeta');
   const root = currentRoot();
   box.innerHTML = '';
@@ -1760,6 +1845,7 @@ function openDirCtxMenu(opt, x, y) {
   $('dirCtxInfo').textContent = T('dirCtxLoading');
   $('dirCtxCopy').textContent = T('dirCtxCopyPath');
   $('dirCtxOpen').textContent = T('dirCtxOpen');
+  $('dirCtxLock').textContent = '🔒 ' + lockLabel(root);
   // 「打开该目录」是服务器本机行为：只有 hub 跑在有桌面的 Windows / macOS 上才给
   $('dirCtxOpen').hidden = !['win32', 'darwin'].includes(State.settings.platform);
   const menu = $('dirCtxMenu');
@@ -1871,6 +1957,7 @@ function renderSessions() {
   const list = $('sessionList');
   syncFavoritesButton();
   renderFavDirFilter();
+  refreshLockRootBtn();
   if (State.sessions.length === 0) {
     list.innerHTML = `<div class="empty">${T(emptyListKey())}</div>`;
     Page.more = 0;
@@ -1910,6 +1997,20 @@ function renderSessions() {
   setTimeout(() => ApiBill.flushList(), 0);
   sessions.forEach((s) => {
     const div = document.createElement('div');
+    if (s.locked) {
+      // 私有目录未解锁：只露「加密」占位，点击/右键都只能走输入密码
+      div.dataset.sid = s.id;
+      div.className = 'session-item locked';
+      div.title = T('lockedHint');
+      const dn = rootName(s.rootId);
+      div.innerHTML = `<div class="si-main"><div class="name">${escapeHtml(T('lockedTitle'))}</div>
+        <div class="meta"><span class="meta-tags">${dn ? `<span class="dir-badge">📁 ${escapeHtml(dn)}</span>` : ''}</span>
+        <span class="meta-time">${escapeHtml(fmtSessionListTime(s.updatedAt))}</span></div></div>`;
+      div.addEventListener('click', () => { if (!State.batchMode) unlockRoot(s.rootId); });
+      div.addEventListener('contextmenu', (e) => e.preventDefault());
+      list.appendChild(div);
+      return;
+    }
     const status = s.status || 'active';
     const isSel = State.batchMode && State.selectedSessions.has(s.id);
     div.dataset.sid = s.id;
@@ -2265,6 +2366,8 @@ function createFavoriteDraftSession(preferredRootId = '') {
 }
 
 async function selectSession(id) {
+  const lk = id && State.sessions.find((x) => x.id === id && x.locked);
+  if (lk) { await unlockRoot(lk.rootId); return; }
   State.sessionId = id || '';
   // 用户点开查看，清除"刚执行"待读标识；若当前正处于「刚执行完」筛选，记入 seen 让它本轮仍留在列表里
   if (id) {
@@ -5851,9 +5954,11 @@ function waitForAppRestart(box) {
 }
 
 // ── WebSocket 实时事件 ──
+let hubWs = null;
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
+  hubWs = ws;
   ws.onmessage = (ev) => {
     const e = JSON.parse(ev.data);
     // 引擎/工具安装进度：没有 sessionId，必须在按会话过滤之前处理
@@ -5921,7 +6026,13 @@ function connectWs() {
     else if (e.kind === 'output') appendProcess('output', e.text);
     else if (e.kind === 'message') {
       const wasEmpty = (State.session.messages || []).length === 0;
-      State.session.messages.push(e.message);
+      // 去重：重连/回到前台时会重新拉历史，随后推送的同一条消息不能再追加一次
+      // （历史里的 id 可能与推送的不同，所以再按 角色+正文+时间相近 兜底比对）
+      const nm = e.message;
+      const dup = (State.session.messages || []).slice(-20).some((m) => m.id === nm.id
+        || (m.role === nm.role && m.text === nm.text && Math.abs((m.createdAt || 0) - (nm.createdAt || 0)) < 10000));
+      if (dup) return;
+      State.session.messages.push(nm);
       removeTypingIndicator();       // 新消息插到底部前先移除动画
       renderMessages();
       // 首条消息出现后，标题随之确定：刷新主区标题与会话列表
@@ -5940,8 +6051,26 @@ function connectWs() {
       refreshEngineControl();        // 有任务入队即已开始 → 引擎锁定
     } else if (e.kind === 'taskRemoved') removeTaskLocal(e.taskId);
   };
-  ws.onclose = () => setTimeout(connectWs, 1500);
+  ws.onclose = () => { if (hubWs === ws) setTimeout(connectWs, 1500); };
 }
+
+// 移动端切到后台后 WS 常被系统掐断，期间的任务结束事件全丢了 → 会话一直显示「进行中」。
+// 页面重新可见时：连接已断就立刻重连，并重新拉一遍会话列表（重建运行态）和当前会话内容。
+let visResyncAt = 0;
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || !TOKEN) return;
+  if (Date.now() - visResyncAt < 1000) return;
+  visResyncAt = Date.now();
+  if (!hubWs || hubWs.readyState > WebSocket.OPEN) {
+    const old = hubWs; hubWs = null;
+    try { old && old.close(); } catch {}
+    connectWs();
+  }
+  try {
+    await loadSessions();
+    if (State.sessionId && !isFavoriteDraftId(State.sessionId)) await selectSession(State.sessionId);
+  } catch {}
+});
 
 // ── 工具 ──
 // 精确到秒的日期时间：YYYY-MM-DD HH:MM:SS
@@ -6570,6 +6699,7 @@ function closeFilePreview() {
   $('fpBody').innerHTML = '';
   $('fpTabs').hidden = true;
   $('fpTabs').innerHTML = '';
+  $('fpCopy').hidden = true;
 }
 
 async function openFilePreview(f, urlFn) {
@@ -6585,6 +6715,14 @@ async function openFilePreview(f, urlFn) {
   $('fpDownload').textContent = '⬇ ' + T('download');
   $('fpTabs').hidden = true;
   $('fpTabs').innerHTML = '';
+  // 文本类（MD/代码/纯文本）可一键复制全文；拿到正文后才显示
+  const copyBtn = $('fpCopy');
+  copyBtn.hidden = true;
+  const showCopy = (raw) => {
+    copyBtn.hidden = false;
+    copyBtn.textContent = '📋 ' + T('copyAll');
+    copyBtn.onclick = () => copyText(raw, copyBtn, '📋 ' + T('copyAll'));
+  };
   const body = $('fpBody');
   $('fpOverlay').hidden = false;
 
@@ -6613,6 +6751,7 @@ async function openFilePreview(f, urlFn) {
       renderSheets(sheets);
     } else if (kind === 'md') {
       const raw = await (await fetch(url)).text();
+      showCopy(raw);
       const el = document.createElement('div');
       el.className = 'msg-body fp-md'; // 复用 .msg-body.md 排版（renderMarkdown 会补 .md）
       renderMarkdown(el, raw);
@@ -6620,6 +6759,7 @@ async function openFilePreview(f, urlFn) {
       body.appendChild(el);
     } else {
       const raw = await (await fetch(url)).text();
+      showCopy(raw);
       const mode = extToCmMode(ext);
       body.innerHTML = '';
       if (mode && window.CodeMirror) {
@@ -6863,6 +7003,12 @@ function bind() {
   $('favDirMoreBtn').addEventListener('click', toggleFavDirExpanded);
   $('dirCtxCopy').addEventListener('click', dirCtxCopyPath);
   $('dirCtxOpen').addEventListener('click', dirCtxOpenFolder);
+  $('dirCtxLock').addEventListener('click', () => {
+    const rid = dirCtxOpt && dirCtxOpt.rootId;
+    closeDirCtxMenu();
+    if (rid) manageRootLock(rid);
+  });
+  $('lockRootBtn').addEventListener('click', () => { if (State.rootId) manageRootLock(State.rootId); });
   $('statsClose').addEventListener('click', closeSessionStats);
   $('statsRefreshBtn').addEventListener('click', loadSessionStats);
   document.addEventListener('click', (e) => {

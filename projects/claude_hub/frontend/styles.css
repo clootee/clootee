@@ -2238,6 +2238,7 @@ button.sm { padding: 6px 12px; font-size: 13px; border-radius: 7px; }
 .fp-title { flex: 1; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fp-dl { font-size: 13px; text-decoration: none; background: var(--accent); color: #fff; border-radius: 7px; padding: 6px 14px; }
 .fp-dl:hover { filter: brightness(1.08); }
+.fp-copy { border: 0; cursor: pointer; font-family: inherit; }
 .fp-x { border: none; background: none; color: var(--muted); font-size: 18px; cursor: pointer; }
 .fp-x:hover { color: var(--red); }
 .fp-tabs { display: flex; gap: 4px; padding: 8px 12px 0; background: var(--panel); overflow-x: auto; }
@@ -3152,6 +3153,9 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .clootee-bal{padding:3px 9px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums;cursor:pointer}
 .clootee-bal.low{border-color:#d9534f;color:#d9534f}
 
+/* 私有目录未解锁的会话：只显示「加密」占位 */
+.session-item.locked { opacity: .65; cursor: pointer; }
+.session-item.locked .name { font-style: italic; }
 /* 每轮费用 + 明细（订阅轮次按等价估价展示，用黄色与真实按量支出区分） */
 .api-cost-toggle { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
 .api-cost-toggle.sub { color: var(--yellow); }

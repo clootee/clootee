@@ -10,6 +10,8 @@ export const Paths = {
   DATA_ROOT,
   PROJECT_ROOT,
   ROOTS_FILE: path.join(DATA_ROOT, 'roots.json'),
+  // 目录私有密码（每个根目录独立：盐 + 哈希）；有记录=该目录已设为私有
+  ROOT_LOCKS_FILE: path.join(DATA_ROOT, 'root_locks.json'),
   SETTINGS_FILE: path.join(DATA_ROOT, 'settings.json'),
   SESSION_META_FILE: path.join(DATA_ROOT, 'session_meta.json'),
   // 运行期任务队列快照：进程重启后据此恢复各会话的 pending/暂停状态，避免队列丢失

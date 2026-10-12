@@ -744,6 +744,7 @@
         <div class="root-row">
           <select id="rootSelect"></select>
           <button id="openFolderBtn" class="icon-square" title="open folder" hidden>📂</button>
+          <button id="lockRootBtn" class="icon-square" title="private" hidden>🔓</button>
           <button id="addRootBtn" class="icon-square" title="add"></button>
           <button id="removeRootBtn" class="icon-square danger" title="remove"></button>
         </div>
@@ -826,6 +827,7 @@
       <div class="ctx-sep"></div>
       <button id="dirCtxCopy" class="ctx-item"></button>
       <button id="dirCtxOpen" class="ctx-item" hidden></button>
+      <button id="dirCtxLock" class="ctx-item"></button>
     </div>
 
     <!-- 会话项右键菜单 / 长按菜单：标记状态（活跃/待测试/已完成，任意互切）/ 置顶 -->
@@ -1059,6 +1061,7 @@
     <div class="fp-drawer">
       <div class="fp-head">
         <span class="fp-title" id="fpTitle"></span>
+        <button class="fp-dl fp-copy" id="fpCopy" hidden></button>
         <a class="fp-dl" id="fpDownload" href="#"></a>
         <button class="fp-x" id="fpClose">✕</button>
       </div>
