@@ -22,7 +22,7 @@ async function main() {
       window.T = (key) => dictionary[key]?.[window.lang] || key;
       window.$ = (id) => document.getElementById(id);
       window.State = { sessionId: 'draft', session: { id: 'draft', rootId: 'root', engine: 'claude', promptCache: '1h', promptCacheConfirmed: false, tasks: [], messages: [] },
-        settings: { claudePromptCache: '1h', askClaudePromptCache: true } };
+        settings: { claudePromptCache: '1h', askClaudePromptCache: true, costOptimization: { mode: 'manual' } } };
       window.setPaneNotice = () => {};
       window.api = async (_url, data) => {
         window.lastPayload = data;

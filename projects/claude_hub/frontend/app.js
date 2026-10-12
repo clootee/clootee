@@ -5600,13 +5600,16 @@ async function addTask() {
     }
   }
   if (!(await PromptCacheUi.ensure())) return;
+  const prepared = await CostUi.prepare([applyQuickPrefix(applySlashPrefix(raw))]);
+  if (!prepared) return;
+  if (prepared.sessionId !== State.sessionId) { await loadSessions(); await selectSession(prepared.sessionId); }
   ta.value = '';
   const keepAttach = Attach.items.slice();
   Attach.items = [];
   renderAttachBar();
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
   try {
-    await api('/api/task/add', { sessionId: State.sessionId, prompts: [applyQuickPrefix(applySlashPrefix(raw))] });
+    await api('/api/task/add', prepared);
     clearSlashPrefix(); // 单次使用：发送成功后自动摘掉标记
     for (const a of keepAttach) if (a.url) URL.revokeObjectURL(a.url);
   } catch (e) {
@@ -5657,7 +5660,10 @@ async function submitTasks() {
   }
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
   if (!(await PromptCacheUi.ensure())) return;
-  await api('/api/task/add', { sessionId: State.sessionId, prompts: prompts.map(applyQuickPrefix) });
+  const prepared = await CostUi.prepare(prompts.map(applyQuickPrefix));
+  if (!prepared) return;
+  if (prepared.sessionId !== State.sessionId) { await loadSessions(); await selectSession(prepared.sessionId); }
+  await api('/api/task/add', prepared);
   closeTasksModal();
 }
 
@@ -6010,7 +6016,7 @@ function connectWs() {
       if (e.task.external && e.task.status === 'pending') showExtMsgToast(e.sessionId, e.task.prompt);
     }
     // 运行提示（引擎无响应等）：任务还没结束就要让用户看到
-    if (e.kind === 'notice') { pushNotice(e); return; }
+    if (e.kind === 'notice') { if (e.message === 'cost_send_blocked') e.message = T('costBlockedNotice'); pushNotice(e); return; }
     // Claude Code 把服务商的 402 原样写成一条助手消息（task.error 里反而没有）。额度是全局的，
     // 不管发生在哪个会话都要提示，所以放在按会话过滤之前
     if (e.kind === 'message' && e.message && e.message.role === 'assistant' && Clootee.isOutOfCredit(e.message.text)) Clootee.showOutOfCredit();
@@ -6903,6 +6909,7 @@ function bind() {
   $('wsDirPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') wsUseTypedDir(); });
   $('wsDirOverlay').addEventListener('click', (e) => { if (e.target.id === 'wsDirOverlay') closeWsDir(); });
   PromptCacheUi.bind();
+  CostUi.bind();
   $('engineSelect').addEventListener('change', onEngineChange);
   // 设置：首页只有板块列表（renderSettingsNav），点某个板块进 #settingsPaneOverlay
   $('settingsBtn').addEventListener('click', openSettings);
@@ -7073,6 +7080,7 @@ function bind() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if ($('costGuardModal').open) return;
     if ($('promptCacheModal').open) { e.preventDefault(); $('promptCacheModal').close(); return; }
     if ($('batchCostModal').open) { e.preventDefault(); $('batchCostModal').close(); return; }
     if (!$('updateModal').hidden) { UpdateModal.close(); return; } // 强制更新时 close() 是空操作，关不掉
@@ -7225,6 +7233,7 @@ async function loadSettings() {
       if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
       State.settings.claudePromptCache = s.claudePromptCache || '1h';
       State.settings.askClaudePromptCache = !!s.askClaudePromptCache;
+      State.settings.costOptimization = s.costOptimization || CostUi.defaults;
       if (typeof s.version === 'string' && s.version) State.settings.version = s.version;
       State.settings.runAsUserEnabled = !!s.runAsUserEnabled;
       State.settings.runAsUserName = typeof s.runAsUserName === 'string' ? s.runAsUserName : 'claudeuser';
@@ -7401,18 +7410,9 @@ const SETTINGS_PANES = [
     save: savePromptPane,
   },
   {
-    id: 'context',
-    icon: '🗜️',
-    title: () => T('paneContext'),
-    desc: () => T('paneContextDesc'),
-    summary: () => {
-      const ac = State.settings.autoCompact || {};
-      return ac.mode === 'custom'
-        ? T('paneContextCustom').replace('{n}', formatTokens(ac.tokens))
-        : T('paneContextAuto');
-    },
-    fill: fillContextPane,
-    save: saveContextPane,
+    id: 'cost', icon: '$', title: () => T('paneCost'), desc: () => T('paneCostDesc'),
+    summary: () => T({ auto: 'costAuto', manual: 'costManual', off: 'costOff' }[CostUi.policy().mode]),
+    fill: () => CostUi.fill(), save: () => CostUi.save(),
   },
   {
     id: 'template',
@@ -7586,6 +7586,7 @@ async function patchSettings(patch) {
     if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
       State.settings.claudePromptCache = s.claudePromptCache || '1h';
       State.settings.askClaudePromptCache = !!s.askClaudePromptCache;
+      State.settings.costOptimization = s.costOptimization || CostUi.defaults;
     renderQuick();
     return s;
   } catch (e) {
@@ -7600,6 +7601,7 @@ async function patchSettings(patch) {
 // 首屏与「切语言」都经 applyText 走这里，保证界面只出现当前语言。
 function applyEnginePaneText() {
   PromptCacheUi.applyText();
+  CostUi.applyText();
   for (const engine of ['claude', 'codex']) {
     const cap = engine === 'claude' ? 'Claude' : 'Codex';
     const u = providerUi(engine);
@@ -7673,7 +7675,6 @@ function renderEngineDirty() {
 }
 
 function fillEnginePane() {
-  PromptCacheUi.fill();
   EngineDirty.claude = false;
   EngineDirty.codex = false;
   EngineLoaded.claude = false;
@@ -7718,8 +7719,7 @@ async function saveEnginePane() {
     const err = await saveEngineProvider(e);
     if (err) fails.push({ engine: e, label, msg: err.msg });
   }
-  const savedDefault = await patchSettings({ defaultEngine: eng, claudePromptCache: $('claudePromptCache').value, askClaudePromptCache: $('askClaudePromptCache').checked });
-  if (savedDefault) PromptCacheUi.dirty = false;
+  const savedDefault = await patchSettings({ defaultEngine: eng });
   if (fails.length) {
     const f = fails[0];
     setPaneNotice('engBlockSaveFail', { block: f.label, msg: f.msg }, 'err', 0);

@@ -8,6 +8,7 @@ import { PackageInfo } from '../helper/PackageInfo';
 import { RunAsUser } from '../helper/RunAsUser';
 import { EngineStatus } from '../logic_realize/EngineStatus';
 import { PromptCache, PromptCacheMode } from '../helper/PromptCache';
+import { CostPolicy, CostPolicySettings } from '../helper/CostPolicy';
 
 // 快捷按钮：一个组内互斥（单选，可取消），组与组之间互不影响（可各选一个）
 export interface QuickTag {
@@ -38,6 +39,7 @@ export const AUTO_COMPACT_MAX = 1000000;
 export const AUTO_COMPACT_DEFAULT_TOKENS = 200000;
 
 export interface AppSettings {
+  costOptimization: CostPolicySettings;
   claudePromptCache: PromptCacheMode;
   askClaudePromptCache: boolean;
   defaultEngine: Engine;
@@ -116,6 +118,7 @@ export class SettingsStruct {
         : DEFAULT_RUN_AS_USER_NAME;
     return {
       claudePromptCache: PromptCache.valid(raw?.claudePromptCache) ? raw!.claudePromptCache : '1h',
+      costOptimization: CostPolicy.sanitize(raw?.costOptimization),
       askClaudePromptCache: !!raw?.askClaudePromptCache,
       defaultEngine: eng,
       allowLan: !!(raw && raw.allowLan),
@@ -170,6 +173,7 @@ export class SettingsStruct {
   // 批量更新（前端设置面板）；只接受已知字段
   static update(patch: Partial<AppSettings>): AppSettings {
     const next: Partial<AppSettings> = {};
+    if (patch.costOptimization !== undefined) next.costOptimization = CostPolicy.sanitize(patch.costOptimization);
     if (patch.claudePromptCache !== undefined) {
       if (!PromptCache.valid(patch.claudePromptCache)) throw new Error('Invalid Claude prompt cache mode');
       next.claudePromptCache = patch.claudePromptCache;
@@ -208,6 +212,7 @@ export class SettingsStruct {
         : cur.defaultEngine;
     const merged: AppSettings = {
       claudePromptCache: patch.claudePromptCache ?? cur.claudePromptCache,
+      costOptimization: patch.costOptimization ?? cur.costOptimization,
       askClaudePromptCache: patch.askClaudePromptCache ?? cur.askClaudePromptCache,
       defaultEngine: patch.defaultEngine ?? savedEngine,
       allowLan: patch.allowLan ?? cur.allowLan,

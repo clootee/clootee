@@ -24,7 +24,7 @@ assert.equal(Settings.get().askClaudePromptCache, false);
 const draft = SessionManager.createSession('cache-test', '', 'claude');
 assert.equal(draft.promptCache, '1h');
 assert.equal(draft.promptCacheConfirmed, true);
-Settings.update({ claudePromptCache: '5m', askClaudePromptCache: true });
+Settings.update({ claudePromptCache: '5m', askClaudePromptCache: true, costOptimization: { mode: 'manual' } });
 assert.equal(SessionManager.getSession(draft.id).promptCache, '1h', 'existing session retains snapshot');
 const short = SessionManager.createSession('cache-test', '', 'claude');
 assert.equal(short.promptCache, '5m');

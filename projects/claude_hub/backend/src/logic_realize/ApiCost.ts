@@ -43,6 +43,12 @@ const MTOK = 1_000_000;
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
 export class ApiCost extends ApiCostStruct {
+  static estimate(provider: string, model: string, tokens: number, mode: '1h' | '5m' | 'off') {
+    const rates = this._rates(provider, { model, ts: Date.now(), input: tokens, output: 0,
+      cacheRead: 0, cw5m: 0, cw1h: 0, web: 0, fast: false, reported: null });
+    return rates ? { warmUsd: this._round(tokens * rates.cacheRead),
+      coldUsd: this._round(tokens * (mode === 'off' ? rates.input : mode === '1h' ? rates.cw1h : rates.cw5m)) } : null;
+  }
   private static _cache = new Map<string, { stamp: string; value: ApiSessionCost }>();
 
   protected static _cached(id: string, stamp: string, fn: () => ApiSessionCost): ApiSessionCost {

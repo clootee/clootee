@@ -32,6 +32,7 @@ const PromptCacheUi = {
     if (State.session?.engine !== 'claude') return true;
     if (this.pending) return false;
     const s = State.session;
+    if (State.settings.costOptimization?.mode !== 'manual') return true;
     const fresh = !s.claudeSessionId && !s.tasks?.length && !s.messages?.length;
     if (fresh && State.settings.askClaudePromptCache && s.promptCacheConfirmed !== true) return this.choose(true);
     if (!s.promptCache) {
@@ -80,7 +81,7 @@ const PromptCacheUi = {
     });
   },
   bind() {
-    $('sessionPromptCache').onclick = () => this.choose(false);
+    $('sessionPromptCache').onclick = () => { if (State.settings.costOptimization?.mode === 'manual') this.choose(false); };
     $('promptCacheClose').onclick = $('promptCacheCancel').onclick = () => $('promptCacheModal').close();
     for (const id of ['claudePromptCache', 'askClaudePromptCache']) $(id).addEventListener('change', () => {
       this.dirty = true;

@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="styles.css?v=20261012d" />
+  <link rel="stylesheet" href="styles.css?v=20261012e" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -463,12 +463,7 @@
               </div>
               <div class="sx-note" id="mdlClaudeStatus"></div>
               <div class="sx-note" id="claudeProviderStatus"></div>
-              <div class="prompt-cache-settings">
-                <label class="sx-lbl" for="claudePromptCache" id="claudePromptCacheLabel"></label>
-                <select class="sx-input" id="claudePromptCache"><option value="1h"></option><option value="5m"></option><option value="off"></option></select>
-                <label class="sx-chk"><input type="checkbox" id="askClaudePromptCache" /><span id="askClaudePromptCacheLabel"></span></label>
-                <details class="prompt-cache-help"><summary id="claudePromptCacheHelpLabel"></summary><p id="claudePromptCacheHelp"></p></details>
-              </div>
+
             </div>
           </div>
 
@@ -533,6 +528,46 @@
         </div>
 
         <!-- ═══ 板块：访问与网络 ═══ -->
+        <div class="sx-pane" id="pane-cost" hidden>
+          <label class="sx-lbl" for="costMode" id="costModeLabel"></label>
+          <select class="sx-input" id="costMode"><option value="auto"></option><option value="manual"></option><option value="off"></option></select>
+          <p class="sx-note" id="costSavingsClaim"></p>
+          <label class="sx-lbl" for="costScope" id="costScopeLabel"></label>
+          <select class="sx-input" id="costScope"><option value="both"></option><option value="subscription"></option><option value="apikey"></option></select>
+          <div class="sx-note" id="costAutomaticNote"></div>
+          <div id="costManual" hidden>
+            <label class="sx-chk"><input type="checkbox" id="costGuard" /><span id="costGuardLabel"></span></label>
+            <label class="sx-chk"><input type="checkbox" id="costStrict" /><span id="costStrictLabel"></span></label>
+            <label class="sx-chk"><input type="checkbox" id="costEnhance" /><span id="costEnhanceLabel"></span></label>
+            <label class="sx-lbl" for="costTokens" id="costTokensLabel"></label><input class="sx-input" type="number" id="costTokens" min="1000" max="1000000" step="1000" />
+            <label class="sx-lbl" for="costExtra" id="costExtraLabel"></label><input class="sx-input" type="number" id="costExtra" min="0" max="100" step="0.01" />
+            <label class="sx-lbl" for="costCheapModel" id="costCheapModelLabel"></label><input class="sx-input" id="costCheapModel" spellcheck="false" />
+            <p class="sx-note" id="costClassifierNote"></p>
+              <div class="prompt-cache-settings">
+                <label class="sx-lbl" for="claudePromptCache" id="claudePromptCacheLabel"></label>
+                <select class="sx-input" id="claudePromptCache"><option value="1h"></option><option value="5m"></option><option value="off"></option></select>
+                <label class="sx-chk"><input type="checkbox" id="askClaudePromptCache" /><span id="askClaudePromptCacheLabel"></span></label>
+                <details class="prompt-cache-help"><summary id="claudePromptCacheHelpLabel"></summary><p id="claudePromptCacheHelp"></p></details>
+              </div>
+        <div class="cost-compact-settings">
+          <div class="sx-note" id="costCompactIntro"></div>
+          <label class="sx-lbl" id="costCompactWindowLabel"></label>
+          <select class="sx-input" id="autoCompactModeSelect">
+            <option value="auto">自动（推荐：跟随模型自身的上下文窗口）</option>
+            <option value="custom">自定义窗口大小</option>
+          </select>
+          <div id="autoCompactCustomBox" hidden>
+            <label class="sx-lbl" id="costCompactTokensLabel"></label>
+            <input class="sx-input" id="autoCompactTokensInput" type="number" min="100000" max="1000000" step="10000" placeholder="例如 200000" />
+            <div class="sx-note" id="costCompactWindowHelp"></div>
+          </div>
+          <div class="sx-note" id="autoCompactNote"></div>
+        </div>
+
+            <button type="button" id="sessionPromptCache" hidden></button>
+          </div>
+        </div>
+
         <div class="sx-pane" id="pane-network" hidden>
           <label class="sx-chk"><input type="checkbox" id="allowLanChk" /><span class="sx-chk-txt"><b>允许局域网访问</b><em>关闭=仅本机 localhost 可访问；更改需重启生效</em></span></label>
           <!-- 勾选「允许局域网访问」后展开：手机/其他电脑访问教程（同一 WiFi） -->
@@ -585,23 +620,6 @@
         </div>
 
         <!-- ═══ 板块：上下文自动压缩 ═══ -->
-        <div class="sx-pane" id="pane-context" hidden>
-          <div class="sx-note">
-            对话越长，塞给模型的上下文越多。逼近上限时 Claude Code 会把前面的内容<b>压缩成摘要</b>再继续，这样会话能一直聊下去而不报「上下文超长」。<br />
-            压缩发生时，过程区会出现一行 <code>[上下文自动压缩]</code> 提示。
-          </div>
-          <label class="sx-lbl">压缩窗口</label>
-          <select class="sx-input" id="autoCompactModeSelect">
-            <option value="auto">自动（推荐：跟随模型自身的上下文窗口）</option>
-            <option value="custom">自定义窗口大小</option>
-          </select>
-          <div id="autoCompactCustomBox" hidden>
-            <label class="sx-lbl">窗口大小（tokens，10 万 ~ 100 万）</label>
-            <input class="sx-input" id="autoCompactTokensInput" type="number" min="100000" max="1000000" step="10000" placeholder="例如 200000" />
-            <div class="sx-note">上下文用到这个量级就触发压缩。<b>调小</b>＝压得更早更频繁、每次请求更省；<b>调大</b>＝保留更多原文，但要求模型确实支持这么长的上下文，否则会直接报错。</div>
-          </div>
-          <div class="sx-note" id="autoCompactNote"></div>
-        </div>
 
         <!-- ═══ 板块：项目模板 ═══ -->
         <div class="sx-pane" id="pane-template" hidden>
@@ -853,7 +871,7 @@
         <span class="badge paused" id="pausedBadge" style="display:none"></span>
         <!-- 引擎：草稿(未开始)可选，开始后锁定为徽章 -->
         <select id="engineSelect" class="engine-select" style="display:none"></select>
-        <button type="button" id="sessionPromptCache" hidden></button>
+
         <span class="engine-badge" id="engineBadge" style="display:none"></span>
         <span class="spacer"></span>
         <button id="aiCollapseBtn" class="icon-btn ai-collapse-btn" aria-label="collapse AI messages" style="display:none"></button>
@@ -1102,6 +1120,15 @@
     <div class="batch-cost-heading"><h3 id="batchCostTitle"></h3><button type="button" id="batchCostClose" aria-label="Close">✕</button></div>
     <div id="batchCostBody" aria-live="polite"></div>
   </dialog>
+  <dialog id="costGuardModal" class="batch-cost-modal cost-guard-modal" aria-labelledby="costGuardTitle">
+    <div class="batch-cost-heading"><h3 id="costGuardTitle"></h3><button type="button" id="costGuardClose">&#10005;</button></div>
+    <p id="costGuardSummary"></p><p id="costGuardEstimate" class="sx-note"></p>
+    <p id="costGuardStrictNote" class="sx-note" hidden></p>
+    <div class="cost-progress" id="costProgress" hidden><progress id="costProgressBar" max="100" value="0"></progress><p id="costProgressText" aria-live="polite"></p></div>
+    <div id="costPrepared" hidden><label id="costPreparedLabel" for="costPreparedInput"></label><textarea id="costPreparedInput" rows="7"></textarea><p id="costHelperCost" class="sx-note"></p><button type="button" id="costPreparedSend"></button></div>
+    <p id="costGuardError" role="alert"></p>
+    <div class="cost-guard-actions"><button type="button" id="costContinue"></button><button type="button" id="costNew"></button><button type="button" id="costCompact"></button><button type="button" id="costCancel"></button></div>
+  </dialog>
   <dialog id="promptCacheModal" class="batch-cost-modal prompt-cache-modal" aria-labelledby="promptCacheTitle">
     <div class="batch-cost-heading"><h3 id="promptCacheTitle"></h3><button type="button" id="promptCacheClose">✕</button></div>
     <p id="promptCacheIntro"></p>
@@ -1114,7 +1141,7 @@
     <p id="promptCacheError" role="alert"></p>
     <div class="prompt-cache-actions"><button type="button" id="promptCacheCancel"></button><button type="button" id="promptCacheConfirm"></button></div>
   </dialog>
-  <script src="trans.js?v=20261012d"></script>
+  <script src="trans.js?v=20261012e"></script>
   <script src="workspace.js?v=20260825a"></script>
   <script src="rootwizard.js?v=20260804a"></script>
   <script src="health.js?v=20260911a"></script>
@@ -1130,8 +1157,9 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="helper/ErrorHandler.js?v=20261012d"></script>
-  <script src="prompt-cache.js?v=20261012d"></script>
-  <script src="app.js?v=20261012d"></script>
+  <script src="helper/ErrorHandler.js?v=20261012e"></script>
+  <script src="prompt-cache.js?v=20261012e"></script>
+  <script src="cost-optimization.js?v=20261012e"></script>
+  <script src="app.js?v=20261012e"></script>
 </body>
 </html>

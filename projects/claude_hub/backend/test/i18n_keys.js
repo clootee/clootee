@@ -19,7 +19,7 @@ const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
 let bad = 0;
 const fail = (msg) => { console.log(`✕ ${msg}`); bad++; };
 
-for (const file of ['app.js', 'onboard.js', 'health.js', 'workspace.js', 'rootwizard.js', 'prompt-cache.js']) {
+for (const file of ['app.js', 'onboard.js', 'health.js', 'workspace.js', 'rootwizard.js', 'prompt-cache.js', 'cost-optimization.js']) {
   const code = fs.readFileSync(path.join(FE, file), 'utf8');
   for (const m of code.matchAll(/\bT\('([A-Za-z0-9_]+)'\)/g)) {
     const e = DICT[m[1]];

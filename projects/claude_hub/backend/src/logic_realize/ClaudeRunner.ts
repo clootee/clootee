@@ -7,6 +7,8 @@ import { Logger } from '../helper/Logger';
 import { Session } from '../models/Types';
 import { Settings } from './Settings';
 import { PromptCache } from '../helper/PromptCache';
+import { CostPolicy } from '../helper/CostPolicy';
+import { SUBSCRIPTION_PROVIDERS } from '../config/ClaudePricing';
 
 export class ClaudeRunner extends ClaudeRunnerStruct {
   protected static _buildArgs(session: Session, rootPath: string): string[] {
@@ -24,12 +26,13 @@ export class ClaudeRunner extends ClaudeRunnerStruct {
     // 注意读的是 EngineConfig.get() 的**投影视图**——它只反映当前服务商自己那一槽，
     // 所以切回原版绝不会把第三方的模型 id 传给 CLI。
     const cfg = EngineConfig.get().claude;
-    const cacheMode = session.promptCache || Settings.get().claudePromptCache;
+    const cacheMode = session.costHelper?.cache || CostPolicy.cache(Settings.get(), session.promptCache, SUBSCRIPTION_PROVIDERS.includes(cfg.provider));
     args.push('--settings', JSON.stringify(PromptCache.settings(cacheMode)));
-    const model = (cfg.model || '').trim();
+    const model = (session.costHelper?.model || cfg.model || '').trim();
     if (model) args.push('--model', model);
     const effort = (cfg.effort || '').trim();
-    if (effort) args.push('--effort', effort);
+    if (effort && !session.costHelper) args.push('--effort', effort);
+    if (session.costHelper) args.push('--tools', '', '--no-session-persistence', '--max-turns', '1');
     // 自动压缩上下文：只有用户显式选了「自定义窗口」才传。选「自动」时一个参数都不加，
     // 让 claude 用自己的默认窗口（第三方服务商还会有 CLAUDE_CODE_AUTO_COMPACT_WINDOW，见 EngineConfig）。
     const autoCompact = Settings.autoCompactArg();

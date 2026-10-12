@@ -10,6 +10,10 @@ import { ClaudeRunner } from '../logic_realize/ClaudeRunner';
 import { CodexRunner } from '../logic_realize/CodexRunner';
 import { TraceStore } from '../logic_realize/TraceStore';
 import { EngineConfig } from '../logic_realize/EngineConfig';
+import { CostOptimizer } from '../logic_realize/CostOptimizer';
+import { CostPolicy } from '../helper/CostPolicy';
+import { Settings } from '../logic_realize/Settings';
+import { SUBSCRIPTION_PROVIDERS } from '../config/ClaudePricing';
 import { ProjectPrompt } from '../logic_realize/ProjectPrompt';
 import { RunCallbacks } from './ClaudeRunnerStruct';
 import { Session, Task, Message } from '../models/Types';
@@ -30,14 +34,15 @@ export class TaskQueueStruct {
   // 一次可提交多个任务，全部以 pending 入队；若当前正在执行则自动累计，等前一个完成再继续
   // this._appendTasks  → 把任务写入会话并落盘（realize）
   // this._tick         → 触发调度，尝试启动下一个任务
-  static addTasks(sessionId: string, prompts: string[], external = false): Task[] {
+  static addTasks(sessionId: string, prompts: string[], external = false, approvals: string[] = []): Task[] {
     if (!sessionId) throw new Error(`addTasks: invalid sessionId=${sessionId}`);
     const cleaned = prompts.map((p) => (p || '').trim()).filter((p) => p.length > 0);
     if (cleaned.length === 0) throw new Error('addTasks: no valid prompts');
 
     // 暂停整条序列期间新增 = 「补充任务」：插到冻结队列最前，并可越过暂停立即执行（视为对被暂停任务的补充）
     const supplement = SessionManager.getSession(sessionId).paused === true;
-    const tasks = cleaned.map<Task>((prompt) => ({
+    const tasks = cleaned.map<Task>((prompt, index) => ({
+      costApproval: approvals[index],
       id: Ids.short('task'),
       prompt,
       status: 'pending',
@@ -94,6 +99,16 @@ export class TaskQueueStruct {
   // 注意顺序：可能抛异常的准备动作（取根目录、落轨迹）一律排在 _markRunning 之前——
   // 一旦任务被置为 running 之后再抛，队列就会永远停在"执行中"，界面上表现为发消息没反应。
   static _startTask(session: Session, task: Task): void {
+    if (session.engine === 'claude' && !CostOptimizer.allowed(session.id, task.prompt, task.costApproval)) {
+      task.held = true;
+      task.costBlocked = true;
+      SessionManager.saveSession(session);
+      EventBus.broadcast({ kind: 'task', sessionId: session.id, task });
+      EventBus.broadcast({ kind: 'notice', sessionId: session.id, taskId: task.id, level: 'warn', message: 'cost_send_blocked' });
+      return;
+    }
+    task.costBlocked = false;
+    CostOptimizer.consume(task.costApproval);
     const root = RootManager.getRoot(session.rootId);
     this._ensureProjectPrompt(root.path);
 
@@ -104,7 +119,8 @@ export class TaskQueueStruct {
       engine: session.engine,
       name: session.engine,
       text: task.prompt,
-      raw: { cwd: root.path, claudeSessionId: session.claudeSessionId, provider: EngineConfig.get()[session.engine === 'codex' ? 'codex' : 'claude'].provider },
+      raw: { cwd: root.path, claudeSessionId: session.claudeSessionId, provider: EngineConfig.get()[session.engine === 'codex' ? 'codex' : 'claude'].provider,
+        cacheMode: CostPolicy.cache(Settings.get(), session.promptCache, SUBSCRIPTION_PROVIDERS.includes(EngineConfig.get().claude.provider)) },
     });
 
     this._markRunning(session.id, task.id);

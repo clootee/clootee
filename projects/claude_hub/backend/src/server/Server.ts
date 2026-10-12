@@ -11,6 +11,7 @@ import { EventBus } from '../helper/EventBus';
 import { RootManager } from '../logic_realize/RootManager';
 import { SessionManager } from '../logic_realize/SessionManager';
 import { TaskQueue } from '../logic_realize/TaskQueue';
+import { CostOptimizer } from '../logic_realize/CostOptimizer';
 import { AuthManager } from '../logic_realize/AuthManager';
 import { FsBrowser } from '../logic_realize/FsBrowser';
 import { TemplateManager } from '../logic_realize/TemplateManager';
@@ -637,8 +638,31 @@ export class Server {
     });
 
     // ── 任务 / 任务流 ──
+    app.post('/api/cost/check', (req, res) =>
+      this._wrap(res, 'cost.check', () => CostOptimizer.check(String(req.body.sessionId || ''), String(req.body.prompt || ''))),
+    );
+    app.post('/api/cost/approve', (req, res) =>
+      this._wrap(res, 'cost.approve', () => ({ approvals: (Array.isArray(req.body.prompts) ? req.body.prompts : [req.body.prompt]).map((p: unknown) =>
+        CostOptimizer.approve(String(req.body.sessionId || ''), String(p || ''), String(req.body.fingerprint || ''), String(req.body.compactProof || ''))) })),
+    );
+    app.post('/api/cost/compact', (req, res) =>
+      this._wrapAsync(res, 'cost.compact', () => CostOptimizer.compact(String(req.body.sessionId || ''))),
+    );
+    app.post('/api/cost/migrate', async (req, res) => {
+      res.setHeader('Content-Type', 'application/x-ndjson');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+      const emit = (stage: string, progress: number, data?: unknown) => { if (!res.destroyed) res.write(JSON.stringify({ stage, progress, data }) + '\n'); };
+      try {
+        await CostOptimizer.migrate(String(req.body.sessionId || ''), String(req.body.prompt || ''), emit, () => !res.destroyed);
+      } catch (e) {
+        const message = ErrorHandler.handle(e, 'Server.cost.migrate');
+        emit('error', 0, { message });
+      } finally { if (!res.destroyed) res.end(); }
+    });
     app.post('/api/task/add', (req, res) =>
-      this._wrap(res, 'task.add', () => TaskQueue.addTasks(req.body.sessionId, req.body.prompts)),
+      this._wrap(res, 'task.add', () => TaskQueue.addTasks(req.body.sessionId, req.body.prompts, false, Array.isArray(req.body.costApprovals) ? req.body.costApprovals.map(String) : [])),
     );
     app.post('/api/task/remove', (req, res) =>
       this._wrap(res, 'task.remove', () => {
