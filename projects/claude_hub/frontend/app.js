@@ -7619,6 +7619,11 @@ function applyEnginePaneText() {
     u.modelHint.textContent = T('engModelHintCustom');
     $(`${engine}EffortLbl`).textContent = T('engEffortLabel');
     $(`${engine}EffortNote`).textContent = T(engine === 'claude' ? 'engEffortNoteClaude' : 'engEffortNoteCodex');
+    if (u.ctxWin) {
+      $('claudeCtxWindowLbl').textContent = T('engCtxWindowLabel');
+      u.ctxWin.placeholder = T('engCtxWindowPh');
+      $('claudeCtxWindowNote').textContent = T('engCtxWindowNote');
+    }
     $(`${engine}AdvLabel`).textContent = T('advOptions');
     $(`${engine}ModelsBtn`).textContent = T('engRefetchModels');
     // 引擎块没有自己的保存按钮了，统一用板块底部那个（见 saveEnginePane）
@@ -8135,13 +8140,14 @@ function renderAccSummary(engine) {
 // 后端新增了前端还没加文案的 id 时，一律回落到 id 本身，绝不显示空白。
 const PROVIDER_LABEL_KEY = {
   official: 'pvOfficial', anthropic: 'pvAnthropic', openai: 'pvOpenai', openrouter: 'pvOpenrouter',
-  minimax: 'pvMinimax', xiaomi: 'pvXiaomi',
+  minimax: 'pvMinimax', xiaomi: 'pvXiaomi', deepseek: 'pvDeepseek',
   kimi: 'pvKimi', kimicode: 'pvKimicode', custom: 'pvCustom',
 };
 const PROVIDER_NOTE_KEY = {
   official: 'pvNoteOfficial', custom: 'pvNoteCustom',
   anthropic: 'pvNoteAnthropic', openai: 'pvNoteOpenai', openrouter: 'pvNoteOpenrouter',
-  minimax: 'pvNoteMinimax', xiaomi: 'pvNoteXiaomi', kimi: 'pvNoteKimi', kimicode: 'pvNoteKimicode',
+  minimax: 'pvNoteMinimax', xiaomi: 'pvNoteXiaomi', deepseek: 'pvNoteDeepseek',
+  kimi: 'pvNoteKimi', kimicode: 'pvNoteKimicode',
 };
 const EFFORT_LABEL_KEY = {
   low: 'effLow', medium: 'effMedium', high: 'effHigh', xhigh: 'effXhigh', max: 'effMax',
@@ -8350,6 +8356,8 @@ function providerUi(engine) {
     model: $(`${p}ModelSelect`), modelInput: $(`${p}ModelInput`), modelList: $(`${p}ModelList`),
     modelHint: $(`${p}ModelHint`), modelBox: $(`${p}ModelBox`), status: $(`${p}ProviderStatus`),
     effort: $(`${p}EffortSelect`),
+    // 上下文窗口：只有 Claude Code 侧有这一项（写 CLAUDE_CODE_MAX_CONTEXT_TOKENS）
+    ctxWin: $(`${p}CtxWindow`), ctxWinBox: $(`${p}CtxWindowBox`),
     // 账号登录卡片：claude 侧是 Claude 登录，codex 侧是 Codex 登录（原版才是订阅登录）
     login: engine === 'claude' ? $('clBox') : $('cxBox'),
   };
@@ -8412,6 +8420,8 @@ function syncProviderVisibility(engine) {
   const provider = u.select.value;
   u.cfg.hidden = provider === 'official';
   u.custom.hidden = provider !== 'custom';
+  // 原版模型自带正确窗口，不需要（也不该）手填；第三方 / 自定义才显示
+  if (u.ctxWinBox) u.ctxWinBox.hidden = provider === 'official';
   // 模型选择框始终显示，允许原版订阅也选择模型；
   // 自定义服务商换成可手填的输入框（拉不到模型列表时也能用）
   const free = modelIsFree(engine);
@@ -8443,6 +8453,7 @@ async function onEngineProviderChange(engine) {
   u.key.value = '';
   u.base.value = '';
   u.modelsUrl.value = '';
+  if (u.ctxWin) u.ctxWin.value = '';
   // clootee：Key 由本机自动领取，留空即可；占位文字直接说清楚，免得用户去找 Key
   if (!u.key.dataset.ph) u.key.dataset.ph = u.key.placeholder || '';
   u.key.placeholder = provider === 'clootee' ? T('clooteeKeyAuto') : u.key.dataset.ph;
@@ -8463,6 +8474,7 @@ async function onEngineProviderChange(engine) {
     u.key.value = slot.apiKey || '';
     u.base.value = slot.baseUrl || '';
     u.modelsUrl.value = slot.modelsUrl || '';
+    if (u.ctxWin) u.ctxWin.value = slot.contextWindow || '';
     const opts = Array.isArray(slot.models) ? slot.models : [];
     if (opts.length || slot.model) {
       fillModelChoices(engine, opts, true);
@@ -8538,6 +8550,7 @@ async function loadEngineProvider(engine) {
     u.key.value = c.apiKey || '';
     u.base.value = c.baseUrl || '';
     u.modelsUrl.value = c.modelsUrl || '';
+    if (u.ctxWin) u.ctxWin.value = c.contextWindow || '';
     clearModelChoices(engine);
     if (c.model) {
       u.model.appendChild(new Option(c.model, c.model));
@@ -8667,6 +8680,8 @@ async function saveEngineProvider(engine) {
       effort: u.effort ? u.effort.value : '',
       baseUrl: provider === 'custom' ? u.base.value.trim() : '',
       modelsUrl: provider === 'custom' ? u.modelsUrl.value.trim() : '',
+      // 留空 → 0 → 后端清洗成 undefined（不声明窗口，跟随服务商默认）
+      contextWindow: u.ctxWin ? (Number(u.ctxWin.value) || 0) : undefined,
     });
     u.status.className = 'sx-note ok';
     u.status.textContent = T('engSavedOk');

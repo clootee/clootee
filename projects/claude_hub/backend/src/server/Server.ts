@@ -191,6 +191,7 @@ export class Server {
           effort: req.body.effort || '',
           baseUrl: req.body.baseUrl || '',
           modelsUrl: req.body.modelsUrl || '',
+          contextWindow: req.body.contextWindow === undefined ? undefined : Number(req.body.contextWindow),
         }),
       ),
     );

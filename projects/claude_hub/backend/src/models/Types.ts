@@ -45,6 +45,9 @@ export interface ProviderSlot {
   effort: EffortLevel;     // 思考强度，''=自动
   baseUrl?: string;        // 仅 custom
   modelsUrl?: string;      // 仅 custom；为空时默认 baseUrl + /models
+  // 该服务商/模型真实的上下文窗口（tokens）。未设=不声明，由引擎自己猜
+  // （Claude Code 对不认识的模型名一律按 200K 处理，1M 的模型必须显式声明）。
+  contextWindow?: number;
   models?: ModelOption[];  // 「检测可用模型」结果缓存（供前端下拉）
   detected?: ModelDetect;  // 「检测当前模型」结果缓存
 }
@@ -64,6 +67,9 @@ export interface EngineProviderConfig {
   model: string;
   // 思考强度。''=自动（不传）。claude 传 `--effort`，codex 传 `-c model_reasoning_effort=`。
   effort: EffortLevel;
+  // 模型真实上下文窗口（tokens）。未设/0 = 不声明，交给引擎自己判断。
+  // 声明后会同时写入 CLAUDE_CODE_MAX_CONTEXT_TOKENS 与 CLAUDE_CODE_AUTO_COMPACT_WINDOW。
+  contextWindow?: number;
   models?: ModelOption[];  // 上次「检测可用模型」的结果缓存（供前端下拉）
   detected?: ModelDetect;  // 上次「检测当前模型」的结果缓存
 }

@@ -81,6 +81,16 @@ export const MANAGED_ENV_KEYS = [
 // 自建/测试时用环境变量 CLOOTEE_CONSOLE_BASE 指到别处。
 export const CLOOTEE_CONSOLE_BASE = String(process.env.CLOOTEE_CONSOLE_BASE || 'https://console.clootee.com').replace(/\/+$/, '');
 
+// 「上下文窗口」这一项用户能填的范围（tokens）。
+// 下限 1000：再小没有任何实际意义，只会把会话立即压死。
+// 上限 10M：CLI 自己的 AUTO_COMPACT_WINDOW 只认 100k–1M（见 AUTO_COMPACT_WINDOW_*），
+// 这里给足余量，真正写进 env 时再按 CLI 的区间夹一次。
+export const CONTEXT_WINDOW_MIN = 1000;
+export const CONTEXT_WINDOW_MAX = 10_000_000;
+// claude CLI 对 `--autocompact` / CLAUDE_CODE_AUTO_COMPACT_WINDOW 的硬性区间（二进制里写死的）。
+export const AUTO_COMPACT_WINDOW_MIN = 100_000;
+export const AUTO_COMPACT_WINDOW_MAX = 1_000_000;
+
 // 顺序即前端展示顺序：首推的服务商放最前
 export const PROVIDERS: Record<string, ProviderMeta> = {
   // 默认服务商：Key 由本机首次使用时自动领取（设备令牌），用户不用注册、不用填 Key
@@ -96,6 +106,23 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
     // 三个模型都是 1M 上下文（实测 Claude Code 不认识这些模型名时会按 200K 截断并告警）
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000' },
     preferModels: ['deepseek-flash'],
+  },
+  // DeepSeek 官方直连：Anthropic 兼容端点在 /anthropic（OpenAI 兼容端点在根路径）。
+  // 它的模型名（deepseek-flash / deepseek-v4-pro）Claude Code 一个都不认识 → 会被按 200K 处理，
+  // 于是上下文刚到 16.7 万 token 就被强制压缩（200K − 33K 的缓冲，实测吻合）。
+  // 官方文档：deepseek-flash（DeepSeek-V4.1-Flash）上下文 1M、最大输出 384K，所以照实声明。
+  deepseek: {
+    anthropicBase: 'https://api.deepseek.com/anthropic',
+    chatBase: 'https://api.deepseek.com/v1',
+    // 官方文档的模型列表端点在根路径（OpenAI SDK 的 base 可以带 /v1，列表接口不带）
+    modelsUrl: 'https://api.deepseek.com/models',
+    label: 'DeepSeek',
+    signupUrl: 'https://platform.deepseek.com/api_keys',
+    docsUrl: 'https://api-docs.deepseek.com/',
+    note: 'DeepSeek 官方直连；deepseek-flash / deepseek-v4-pro 为 1M 上下文，已按实声明，避免被误按 200K 压缩',
+    recommended: true,
+    extraEnv: { CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000' },
+    preferModels: ['deepseek-flash', 'deepseek-v4-pro'],
   },
   // Claude 官方 API（按量计费）：不存在订阅登录，把 Console 的 API Key 粘进来就能用。
   // 端点就是官方的 api.anthropic.com —— 它同时接受 `Authorization: Bearer <key>`（Claude Code 发的就是这个）
@@ -236,6 +263,7 @@ export class EngineConfigStruct {
       effort: isEffort(slot.effort) ? (slot.effort as EffortLevel) || '' : '',
       baseUrl: provider === 'custom' ? slot.baseUrl || '' : '',
       modelsUrl: provider === 'custom' ? slot.modelsUrl || '' : '',
+      contextWindow: this._cleanContextWindow(slot.contextWindow),
       models: Array.isArray(slot.models) ? slot.models : undefined,
       detected: slot.detected,
     };
@@ -283,6 +311,10 @@ export class EngineConfigStruct {
       effort: (cfg.effort || '') as EffortLevel,
       baseUrl: provider === 'custom' ? baseUrl : undefined,
       modelsUrl: provider === 'custom' && cfg.modelsUrl ? this._cleanUrl(cfg.modelsUrl) : undefined,
+      // 上下文窗口与 Key 无关（换 Key 不会改变模型窗口），所以未传时沿用该槽已存的值
+      contextWindow: cfg.contextWindow !== undefined
+        ? this._cleanContextWindow(cfg.contextWindow)
+        : this._cleanContextWindow(prevSlot.contextWindow),
       models: keyChanged ? undefined : prevSlot.models,
       detected: keyChanged ? undefined : prevSlot.detected,
     };
@@ -358,6 +390,17 @@ export class EngineConfigStruct {
       ANTHROPIC_AUTH_TOKEN: cfg.apiKey,
       ...(meta?.extraEnv || {}),
     };
+    // 用户显式填了「上下文窗口」→ 覆盖服务商 extraEnv 里写死的那个（如 clootee 的 1M）。
+    // 两个键必须一起给：CLAUDE_CODE_MAX_CONTEXT_TOKENS 是「这个模型有多大」，
+    // 而 CLAUDE_CODE_AUTO_COMPACT_WINDOW 会被 CLI 按模型窗口 `Math.min` 夹一次 ——
+    // 只给后者的话，不认识的模型名仍会被夹回它默认的 200K，等于没设。
+    const ctxWin = cfg.contextWindow;
+    if (ctxWin && ctxWin > 0) {
+      env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(ctxWin);
+      env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(
+        Math.min(AUTO_COMPACT_WINDOW_MAX, Math.max(AUTO_COMPACT_WINDOW_MIN, ctxWin)),
+      );
+    }
     // 用户显式选了思考强度 → 覆盖服务商 extraEnv 里写死的那个（如 kimi 的 max）。
     // 命令行 `--effort` 也会传同一个值，两处保持一致。
     if (cfg.effort) env.CLAUDE_CODE_EFFORT_LEVEL = cfg.effort;
@@ -456,7 +499,7 @@ export class EngineConfigStruct {
   // 顺序即展示顺序——「订阅 / 官方 API / 通用中转 / 国产大厂」是绝大多数人真正会选的，
   // 不该让它们在目录里翻找（OpenRouter 尤其：Claude 与 Codex 都能用，是通用的第二选择）。
   private static readonly FEATURED_PROVIDERS: Array<Exclude<EngineProvider, 'official' | 'custom'>> = [
-    'clootee', 'anthropic', 'openai', 'openrouter', 'minimax', 'xiaomi', 'kimi', 'kimicode',
+    'clootee', 'deepseek', 'anthropic', 'openai', 'openrouter', 'minimax', 'xiaomi', 'kimi', 'kimicode',
   ];
 
   // 供前端「新手引导 / 设置」展示的服务商清单（含开通链接与说明）
@@ -548,6 +591,7 @@ export class EngineConfigStruct {
       effort: isEffort(v.effort) ? ((v.effort || '') as EffortLevel) : '',
       baseUrl: provider === 'custom' ? String(v.baseUrl || '') : undefined,
       modelsUrl: provider === 'custom' ? String(v.modelsUrl || '') : undefined,
+      contextWindow: this._cleanContextWindow(v.contextWindow),
       models,
       detected: v.detected,
     };
@@ -579,6 +623,15 @@ export class EngineConfigStruct {
 
   private static _cleanUrl(url: string): string {
     return String(url || '').trim().replace(/\/+$/, '');
+  }
+
+  // 清洗「上下文窗口」（tokens）：非法/<=0/空 → undefined（＝不声明，交给引擎自己判断），
+  // 合法值夹到 [CONTEXT_WINDOW_MIN, CONTEXT_WINDOW_MAX]。
+  private static _cleanContextWindow(v: unknown): number | undefined {
+    if (v === undefined || v === null || v === '') return undefined;
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n <= 0) return undefined;
+    return Math.min(CONTEXT_WINDOW_MAX, Math.max(CONTEXT_WINDOW_MIN, n));
   }
 
   private static _assertUrl(url: unknown, label: string): void {

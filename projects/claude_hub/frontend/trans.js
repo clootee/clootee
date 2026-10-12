@@ -1096,6 +1096,7 @@ const DICT = {
   pvXiaomi: { en: 'Xiaomi MiMo', zh: '小米 MiMo' },
   pvKimi: { en: 'Kimi Open Platform (pay-as-you-go)', zh: 'Kimi 开放平台（按量计费）' },
   pvKimicode: { en: 'Kimi Code (monthly subscription)', zh: 'Kimi Code（包月订阅）' },
+  pvDeepseek: { en: 'DeepSeek', zh: 'DeepSeek' },
   pvCustom: { en: 'Custom provider', zh: '自定义服务商' },
   // 服务商一句话说明（新手引导的卡片；后端只给 id，文案在这里）
   pvNoteOfficial: {
@@ -1105,6 +1106,10 @@ const DICT = {
   pvNoteCustom: {
     en: 'Fill in an OpenAI-compatible base URL, a model-list URL and an API key.',
     zh: '填写兼容 Base URL、模型列表 URL 与 API Key',
+  },
+  pvNoteDeepseek: {
+    en: 'DeepSeek official endpoint (Anthropic-compatible at /anthropic). deepseek-flash / deepseek-v4-pro have a 1M context window, declared as such so it is not compacted at 200K by mistake.',
+    zh: 'DeepSeek 官方直连（Anthropic 兼容端点在 /anthropic）；deepseek-flash / deepseek-v4-pro 为 1M 上下文，已按实声明，避免被误按 200K 压缩',
   },
   pvNoteAnthropic: {
     en: 'Billed per use with an Anthropic Console API key (sk-ant-…) — no Claude subscription needed. Create the key on the Console API Keys page.',
@@ -1161,6 +1166,12 @@ const DICT = {
   engEffortNoteCodex: {
     en: 'Codex only has low/medium/high — picking “Very high/Max” runs as “High”.',
     zh: 'Codex 只有低/中/高三档，选「极高/最高」会按「高」执行。',
+  },
+  engCtxWindowLabel: { en: 'Context window (tokens)', zh: '上下文窗口（tokens）' },
+  engCtxWindowPh: { en: 'Blank = follow the provider default', zh: '留空=跟随服务商默认' },
+  engCtxWindowNote: {
+    en: 'Claude Code treats any model name it does not recognise as 200K, so a 1M model gets compacted at ~167K tokens. Fill in the model’s real window (e.g. 1000000) to fix that. Leave blank to keep the provider default. Setting it too high makes the API reject long requests instead of compacting first.',
+    zh: 'Claude Code 对不认识的模型名一律按 200K 处理，1M 的模型会在约 16.7 万 token 时就被强制压缩。填模型真实的窗口（如 1000000）即可解决。留空=跟随服务商默认。填得过大时会话会先撑爆 API 报错，而不是先压缩。',
   },
   engRefetchModels: { en: 'Re-fetch models', zh: '重新拉取模型' },
   engDetectCurrent: { en: 'Detect current model', zh: '检测当前模型' },

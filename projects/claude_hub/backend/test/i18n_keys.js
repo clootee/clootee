@@ -44,6 +44,9 @@ for (const p of ['claude', 'codex']) {
 // 「逐个真实验证」只有 claude 有
 for (const id of ['mdlClaudeVerifyChk', 'mdlClaudeVerifyTitle', 'mdlClaudeVerifyDesc'])
   if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
+// 「上下文窗口」也只有 claude 有（Codex 没有对应的窗口声明机制）
+for (const id of ['claudeCtxWindowBox', 'claudeCtxWindowLbl', 'claudeCtxWindow', 'claudeCtxWindowNote'])
+  if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
 // Both official engines now render account/login status inside their login cards.
 for (const id of ['clBox', 'cxBox']) if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
 for (const id of ['settingsPaneSave', 'claudePromptCache', 'askClaudePromptCache', 'sessionPromptCache', 'promptCacheModal'])

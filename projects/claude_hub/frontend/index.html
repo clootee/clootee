@@ -447,6 +447,14 @@
                 <label class="sx-lbl" id="claudeEffortLbl">思考强度</label>
                 <select class="sx-input" id="claudeEffortSelect"></select>
                 <div class="sx-note" id="claudeEffortNote">强度越高思考越久、消耗越多；「自动」= 交给引擎决定。</div>
+                <!-- 上下文窗口：Claude Code 对不认识的模型名一律按 200K 处理，
+                     1M 的模型（DeepSeek / Clootee / Kimi 等）必须显式声明，否则上下文一到
+                     约 16.7 万 token 就被强制压缩。留空 = 跟随服务商默认。 -->
+                <div id="claudeCtxWindowBox">
+                  <label class="sx-lbl" id="claudeCtxWindowLbl">上下文窗口（tokens）</label>
+                  <input class="sx-input" id="claudeCtxWindow" type="number" min="1000" max="10000000" step="10000" placeholder="留空=跟随服务商默认" />
+                  <div class="sx-note" id="claudeCtxWindowNote"></div>
+                </div>
                 <div class="sx-adv">
                   <button class="sx-adv-head" id="claudeAdvHead" type="button">
                     <span class="sx-adv-arrow" id="claudeAdvArrow">▸</span><span id="claudeAdvLabel"></span>

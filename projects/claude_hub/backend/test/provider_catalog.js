@@ -87,7 +87,8 @@ test('official API providers: Anthropic key on Claude Code, OpenAI key on Codex'
 test('provider list leads with subscription / official API / OpenRouter, custom stays last', () => {
   const ids = Config.providerList().map((p) => p.id);
   assert.equal(ids[0], 'official');
-  assert.deepEqual(ids.slice(1, 9), ['clootee', 'anthropic', 'openai', 'openrouter', 'minimax', 'xiaomi', 'kimi', 'kimicode']);
+  assert.deepEqual(ids.slice(1, 9), ['clootee', 'deepseek', 'anthropic', 'openai', 'openrouter', 'minimax', 'xiaomi', 'kimi']);
+  assert.equal(ids[9], 'kimicode');
   assert.equal(ids.at(-1), 'custom');
 });
 
@@ -120,4 +121,74 @@ test('auth errors do not trigger paid fallback or return catalog models as verif
     for (const base of [meta.anthropicBase, meta.chatBase])
       assert.ok(base === '' || base.startsWith('https://'), `bad base=${base}`);
   }
+});
+
+// 「上下文窗口」：用户声明的模型窗口必须同时写进两个 env 键 ——
+// CLAUDE_CODE_MAX_CONTEXT_TOKENS 是「模型有多大」，CLAUDE_CODE_AUTO_COMPACT_WINDOW
+// 会被 CLI 按模型窗口 Math.min 夹一次，只给后者等于没给（不认识的模型名仍按 200K 夹回）。
+test('context window declaration drives both CLI env keys', () => {
+  const withWindow = (provider, opts) =>
+    Config.setProvider('claude', { provider, apiKey: 'sk-test', model: 'm', effort: '', ...opts });
+
+  // 1) 自定义服务商：显式声明 1M
+  withWindow('custom', { baseUrl: 'https://api.deepseek.com/anthropic', contextWindow: 1000000 });
+  let env = Config.claudeEnv();
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '1000000');
+  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '1000000');
+  assert.equal(Config.get().claude.contextWindow, 1000000);
+
+  // 2) 留空 / 0 → 不声明（两个键都不出现，交回引擎/服务商默认）
+  withWindow('custom', { baseUrl: 'https://api.deepseek.com/anthropic', contextWindow: 0 });
+  env = Config.claudeEnv();
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
+  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+  assert.equal(Config.get().claude.contextWindow, undefined);
+
+  // 3) 用户显式值覆盖服务商 extraEnv 里写死的那个（clootee 出厂 1M）
+  withWindow('clootee', { contextWindow: 300000 });
+  env = Config.claudeEnv();
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '300000');
+  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '300000');
+
+  // 4) 低于 CLI 硬性下限时，MAX_CONTEXT_TOKENS 照实写、AUTO_COMPACT_WINDOW 夹到 100k
+  withWindow('clootee', { contextWindow: 64000 });
+  env = Config.claudeEnv();
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '64000');
+  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '100000');
+
+  // 5) 非法值当作没填；上限夹到 10M（防手抖多打几个 0）
+  withWindow('clootee', { contextWindow: -5 });
+  assert.equal(Config.get().claude.contextWindow, undefined);
+  withWindow('clootee', { contextWindow: 'abc' });
+  assert.equal(Config.get().claude.contextWindow, undefined);
+  withWindow('clootee', { contextWindow: 999999999 });
+  assert.equal(Config.get().claude.contextWindow, 10000000);
+
+  // 6) 换 Key 不清掉窗口声明（窗口是模型的属性，和 Key 无关）
+  withWindow('clootee', { contextWindow: 500000 });
+  withWindow('clootee', { apiKey: 'sk-other', contextWindow: undefined });
+  assert.equal(Config.get().claude.contextWindow, 500000);
+
+  // 7) 每个服务商各存各的：清掉一个槽的声明，不影响另一个槽
+  withWindow('custom', { baseUrl: 'https://api.deepseek.com/anthropic', contextWindow: 300000 });
+  withWindow('clootee', { contextWindow: 0 });
+  const slots = Config.slots('claude');
+  assert.equal(slots.clootee.contextWindow, undefined);
+  assert.equal(slots.custom.contextWindow, 300000);
+
+  // 8) 原版：不注入任何窗口键（官方模型自带正确窗口）
+  save('claude', 'official', '', '');
+  assert.deepEqual(Config.claudeEnv(), {});
+});
+
+// DeepSeek 官方直连：deepseek-flash 是 1M 上下文，出厂就声明，不能等用户自己填。
+test('built-in deepseek provider declares its 1M window and both endpoints', () => {
+  save('claude', 'deepseek', 'sk-test', 'deepseek-flash');
+  const env = Config.claudeEnv();
+  assert.equal(env.ANTHROPIC_BASE_URL, 'https://api.deepseek.com/anthropic');
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '1000000');
+  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '1000000');
+  save('codex', 'deepseek', 'sk-test', 'deepseek-flash');
+  assert.equal(Config.codexUpstream().baseUrl, 'https://api.deepseek.com/v1');
+  assert.equal(Config.pickDefaultModel('deepseek', ['deepseek-v4-pro', 'deepseek-flash']), 'deepseek-flash');
 });
