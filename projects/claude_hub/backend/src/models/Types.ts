@@ -394,6 +394,7 @@ export interface ApiCostLine {
 export type ApiBilling = 'subscription' | 'apikey';
 
 export interface ApiTurnCost {
+  consumedMessages: number; // 去重后费用大于零的 assistant 消息数，不含不可见后台补差
   taskId: string;
   provider: string;         // 服务商 id：official/custom/anthropic/openrouter/minimax/…（老轨迹可能为空）
   billing: ApiBilling;
@@ -412,4 +413,7 @@ export interface ApiSessionCost {
 export interface ApiSessionTotals {
   usd: number;
   sub: number;
+  consumedMessages: number;
+  breakdown: ApiCostLine['usd'];
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }

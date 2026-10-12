@@ -22,6 +22,26 @@ const r = ApiCost._compute('s', events);
 assert.strictEqual(r.turns.length, 1, 'clootee turn is not billed here');
 assert.strictEqual(r.subscriptionUsd, 0, 'anthropic API key turn is not a subscription turn');
 const t = r.turns[0];
+assert.strictEqual(t.consumedMessages, 1, 'repeated frames count once; background usage adds no message');
+const withZero = ApiCost._compute('zero', [
+  ...events,
+  { kind: 'text', taskId: 't1', ts: 3, model: 'claude-opus-5-5', msgId: 'zero', usage: usage({}) },
+]);
+assert.strictEqual(withZero.turns[0].consumedMessages, 1, 'zero-cost messages excluded');
+const reportedZero = ApiCost._compute('reported-zero', [
+  { kind: 'task_start', taskId: 'free', engine: 'claude', ts: 1, raw: { provider: 'anthropic' } },
+  { kind: 'text', taskId: 'free', ts: 2, model: 'claude-opus-5-5', msgId: 'free', usage: usage({ output_tokens: 100, cost: 0 }) },
+]);
+assert.strictEqual(reportedZero.turns[0].consumedMessages, 0, 'provider-reported zero cost is excluded');
+const originalSession = ApiCost.session;
+ApiCost.session = (id) => id === 'zero' ? withZero : r;
+try {
+  const totals = ApiCost.totals(['s']);
+  assert.strictEqual(totals.s.consumedMessages, 1);
+  assert.strictEqual(totals.s.tokens.cacheWrite, 3000);
+  assert.ok(Math.abs(totals.s.breakdown.cacheWrite5m + totals.s.breakdown.cacheWrite1h - 0.018) < 1e-9);
+  assert.strictEqual(totals.s.usd, r.totalUsd);
+} finally { ApiCost.session = originalSession; }
 const opus = t.lines.find((l) => l.model === 'claude-opus-5-5');
 // 4/MTok 输入、20 输出、0.2 缓存读、5m=5、1h=8
 const exp = 10 * 4e-6 + 500 * 20e-6 + 1000 * 0.2e-6 + 2000 * 5e-6 + 1000 * 8e-6;

@@ -2844,7 +2844,7 @@ const ApiBill = {
     api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
       .then((r) => {
         this.bySession[sid] = r;
-        if (r.turns.length) { this.totals[sid] = { usd: r.totalUsd, sub: r.subscriptionUsd }; this.paintListTag(sid); }
+        if (r.turns.length) { this.totals[sid] = { usd: r.totalUsd, sub: r.subscriptionUsd }; this.paintListTag(sid); this.paintSelection(); }
         if (State.session && State.session.id === sid) renderElapsedNotes();
       })
       .catch(() => { delete this.bySession[sid]; });
@@ -2937,14 +2937,16 @@ const ApiBill = {
     const ids = [...this.pending].slice(0, 300);
     ids.forEach((id) => { this.pending.delete(id); this.asked.add(id); });
     api('/api/sessions/api-cost', { ids })
-      .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); })
+      .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); this.paintSelection(); })
       .catch(() => { ids.forEach((id) => this.asked.delete(id)); });
   },
   // 批量勾选：工具条上即时显示已选会话的费用合计；没取过合计的会话先补取再刷新
   paintSelection() {
     const el = $('batchCost');
     const ids = [...State.selectedSessions];
-    const miss = ids.filter((id) => !this.asked.has(id));
+    $('batchCostDetails').hidden = !ids.length;
+    $('batchCostDetails').textContent = T('apiBatchDetails');
+    const miss = ids.filter((id) => !this.asked.has(id)).slice(0, 300);
     if (miss.length) {
       miss.forEach((id) => this.asked.add(id));
       api('/api/sessions/api-cost', { ids: miss.slice(0, 300) })
@@ -2954,6 +2956,63 @@ const ApiBill = {
     const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.sub += t.sub || 0; } return a; }, { usd: 0, sub: 0 });
     el.hidden = sum.usd <= 0;
     el.innerHTML = sum.usd > 0 ? this.tagHtml(sum) : '';
+  },
+  selectionStats(data) {
+    const stats = { sessions: 0, messages: 0, usd: 0, sub: 0,
+      costs: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, webSearch: 0 },
+      tokens: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } };
+    for (const t of Object.values(data)) {
+      if (!(t.usd > 0)) continue;
+      if (!t.breakdown || !t.tokens || !Number.isFinite(t.consumedMessages)) throw new Error(T('apiBatchUnavailable'));
+      stats.sessions++;
+      stats.messages += t.consumedMessages;
+      stats.usd += t.usd;
+      stats.sub += t.sub || 0;
+      for (const key of Object.keys(stats.costs)) stats.costs[key] += key === 'cacheWrite'
+        ? t.breakdown.cacheWrite5m + t.breakdown.cacheWrite1h : t.breakdown[key];
+      for (const key of Object.keys(stats.tokens)) stats.tokens[key] += t.tokens[key];
+    }
+    return stats;
+  },
+  selectionHtml(s) {
+    const text = (key) => escapeHtml(T(key));
+    const average = (v, n) => n > 0 ? this.usd(v / n) : '—';
+    const items = [['apiCacheRead', 'cacheRead'], ['apiCacheWrite', 'cacheWrite'], ['apiInput', 'input'], ['apiOutput', 'output']];
+    if (s.costs.webSearch > 0) items.push(['apiWebSearch', 'webSearch']);
+    const cells = (cost, tokens) => `<td class="num">${tokens === undefined ? '—' : this.tok(tokens)}</td>` +
+      `<td class="num">${this.usd(cost)}</td><td class="num">${average(cost, s.sessions)}</td><td class="num">${average(cost, s.messages)}</td>`;
+    const rows = items.map(([label, key]) => `<tr><td>${text(label)}</td>${cells(s.costs[key], s.tokens[key])}</tr>`).join('');
+    const categoryTotal = Object.values(s.costs).reduce((n, v) => n + v, 0);
+    const adjustment = s.usd - categoryTotal;
+    const extra = Math.abs(adjustment) > 1e-8 ? `<tr><td>${text('apiBatchAdjustment')}</td>${cells(adjustment)}</tr>` : '';
+    return `<p>${text('apiBatchSessions')}: <b>${s.sessions}</b> · ${text('apiBatchMessages')}: <b>${s.messages}</b></p>` +
+      `<div class="batch-cost-scroll"><table class="api-cost-table"><thead><tr><th>${text('apiItem')}</th><th class="num">${text('apiTokens')}</th>` +
+      `<th class="num">${text('apiBatchTotal')}</th><th class="num">${text('apiBatchSessionAvg')}</th><th class="num">${text('apiBatchMessageAvg')}</th></tr></thead>` +
+      `<tbody>${rows}${extra}<tr class="batch-cost-total"><td>${text('apiBatchTotal')}</td>${cells(s.usd)}</tr></tbody></table></div>` +
+      (s.sub > 0 ? `<p class="api-cost-note sub">${text('apiSubBadge').replace('{c}', this.usd(s.sub))} · ${text('apiSubscription')}</p>` : '') +
+      `<p class="api-cost-note batch-cost-help">${text('apiBatchRule')}</p>`;
+  },
+  async showSelection() {
+    const ids = [...State.selectedSessions];
+    if (!ids.length) return;
+    const modal = $('batchCostModal');
+    const request = this.selectionRequest = (this.selectionRequest || 0) + 1;
+    $('batchCostTitle').textContent = T('apiBatchDetails');
+    $('batchCostClose').setAttribute('aria-label', T('close'));
+    $('batchCostBody').textContent = T('loading');
+    if (!modal.open) modal.showModal();
+    try {
+      const data = {};
+      for (let i = 0; i < ids.length; i += 300) {
+        const result = await api('/api/sessions/api-cost', { ids: ids.slice(i, i + 300) });
+        Object.assign(data, result);
+        if (request !== this.selectionRequest || !modal.open) return;
+      }
+      $('batchCostBody').innerHTML = this.selectionHtml(this.selectionStats(data));
+    } catch (e) {
+      const message = ErrorHandler.handle(e, 'ApiBill.showSelection');
+      if (request === this.selectionRequest && modal.open) $('batchCostBody').textContent = `${T('apiBatchFail')} ${message}`;
+    }
   },
   // 任务结束：该会话缓存作废，重新取明细与合计
   onTaskEnd(sessionId) {
@@ -6661,6 +6720,8 @@ function bind() {
   $('batchToggleBtn').addEventListener('click', () => toggleBatchMode());
   $('batchAllChk').addEventListener('change', (e) => toggleBatchAll(e.target.checked));
   $('batchDeleteBtn').addEventListener('click', deleteSelectedSessions);
+  $('batchCostDetails').addEventListener('click', () => ApiBill.showSelection());
+  $('batchCostClose').addEventListener('click', () => $('batchCostModal').close());
   $('batchActBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleBatchMenu(); });
   $('batchMarkCompleted').addEventListener('click', () => markSelectedSessions('completed'));
   $('batchMarkTesting').addEventListener('click', () => markSelectedSessions('testing'));
@@ -6863,6 +6924,7 @@ function bind() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if ($('batchCostModal').open) { e.preventDefault(); $('batchCostModal').close(); return; }
     if (!$('updateModal').hidden) { UpdateModal.close(); return; } // 强制更新时 close() 是空操作，关不掉
     if (!$('queueModal').hidden) closeQueueModal();
     else if (!$('shotTextOverlay').hidden) closeShotText();

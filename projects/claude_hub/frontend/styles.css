@@ -3170,4 +3170,13 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .api-cost-note.sub { text-align: left; color: var(--yellow); }
 .api-cost-tag { font-size: 11px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--border); color: var(--accent); font-variant-numeric: tabular-nums; }
 .batch-cost { font-size: 12px; font-weight: 600; }
+.batch-cost-modal { width: min(760px, calc(100vw - 40px)); max-height: 80vh; overflow: auto; box-sizing: border-box; padding: 20px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 12px; }
+.batch-cost-modal::backdrop { background: rgba(0, 0, 0, .5); }
+.batch-cost-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.batch-cost-heading h3 { margin: 0; }
+.batch-cost-scroll { overflow-x: auto; }
+.batch-cost-modal .api-cost-table { min-width: 570px; }
+.batch-cost-modal .api-cost-table th, .batch-cost-modal .api-cost-table td { padding: 9px 6px; }
+.batch-cost-total td { font-weight: 600; }
+.batch-cost-help { text-align: left; line-height: 1.7; margin-top: 16px; }
 .api-cost-sub { color: var(--yellow); margin-left: 4px; }

@@ -58,7 +58,19 @@ export class ApiCost extends ApiCostStruct {
     for (const id of ids) {
       try {
         const s = this.session(String(id));
-        if (s.turns.length) out[id] = { usd: s.totalUsd, sub: s.subscriptionUsd };
+        if (s.turns.length) {
+          const breakdown: ApiCostLine['usd'] = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 };
+          const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+          for (const turn of s.turns) for (const line of turn.lines) {
+            for (const key of Object.keys(breakdown) as (keyof typeof breakdown)[]) breakdown[key] += line.usd[key];
+            tokens.input += line.inputTokens;
+            tokens.output += line.outputTokens;
+            tokens.cacheRead += line.cacheReadTokens;
+            tokens.cacheWrite += line.cacheWrite5mTokens + line.cacheWrite1hTokens;
+          }
+          out[id] = { usd: s.totalUsd, sub: s.subscriptionUsd, breakdown, tokens,
+            consumedMessages: s.turns.reduce((n, t) => n + t.consumedMessages, 0) };
+        }
       } catch (e) {
         Logger.warn('ApiCost', `totals: skip id=${id} ${(e as Error).message}`);
       }
@@ -164,11 +176,17 @@ export class ApiCost extends ApiCostStruct {
     }
 
     const lines = new Map<string, ApiCostLine>();
+    let consumedMessages = 0;
+    for (const r of byMsg.values()) {
+      const single = new Map<string, ApiCostLine>();
+      this._add(single, provider, false, r, 1);
+      if ([...single.values()].some((l) => this._finish(l).totalUsd > 0)) consumedMessages++;
+    }
     for (const r of byMsg.values()) this._add(lines, provider, false, r, 1);
     if (modelUsage) this._addMissing(lines, provider, modelUsage, startedAt);
     const list = [...lines.values()].map((l) => this._finish(l));
     return {
-      taskId, provider, billing: this._billing(provider, events), startedAt,
+      taskId, provider, billing: this._billing(provider, events), startedAt, consumedMessages,
       lines: list, totalUsd: this._round(list.reduce((n, l) => n + l.totalUsd, 0)), cliUsd,
     };
   }
