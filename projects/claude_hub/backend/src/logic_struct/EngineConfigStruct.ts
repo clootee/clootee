@@ -72,10 +72,57 @@ export const MANAGED_ENV_KEYS = [
   'CLAUDE_CODE_SUBAGENT_MODEL',
   'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
   'CLAUDE_CODE_EFFORT_LEVEL',
+  // Claude Code 不认识的模型名默认按 200K 上下文处理；1M 上下文的模型要显式告诉它
+  'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
 ];
+
+// Clootee 默认服务商的地址。它只是一个普通的 Anthropic / OpenAI 兼容服务商（松耦合），
+// 这里只有一个 URL：没有上游密钥、没有价格、没有商户信息——那些全在 console.clootee.com 自己那边。
+// 自建/测试时用环境变量 CLOOTEE_CONSOLE_BASE 指到别处。
+export const CLOOTEE_CONSOLE_BASE = String(process.env.CLOOTEE_CONSOLE_BASE || 'https://console.clootee.com').replace(/\/+$/, '');
 
 // 顺序即前端展示顺序：首推的服务商放最前
 export const PROVIDERS: Record<string, ProviderMeta> = {
+  // 默认服务商：Key 由本机首次使用时自动领取（设备令牌），用户不用注册、不用填 Key
+  clootee: {
+    anthropicBase: CLOOTEE_CONSOLE_BASE,
+    chatBase: `${CLOOTEE_CONSOLE_BASE}/v1`,
+    modelsUrl: `${CLOOTEE_CONSOLE_BASE}/v1/models`,
+    label: 'Clootee（默认，免注册）',
+    signupUrl: CLOOTEE_CONSOLE_BASE,
+    docsUrl: CLOOTEE_CONSOLE_BASE,
+    note: '开箱即用：DeepSeek Flash / Pro、MiniMax M3，按上游原价计费，新用户送体验额度',
+    recommended: true,
+    // 三个模型都是 1M 上下文（实测 Claude Code 不认识这些模型名时会按 200K 截断并告警）
+    extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000' },
+    preferModels: ['deepseek-flash'],
+  },
+  // Claude 官方 API（按量计费）：不存在订阅登录，把 Console 的 API Key 粘进来就能用。
+  // 端点就是官方的 api.anthropic.com —— 它同时接受 `Authorization: Bearer <key>`（Claude Code 发的就是这个）
+  // 与 x-api-key，所以走和其它第三方服务商一模一样的托管环境变量路径，不需要任何特例。
+  // chatBase 留空：官方只有 Anthropic 协议，没有 OpenAI 兼容端点 → 它只出现在 Claude Code 的服务商列表里。
+  anthropic: {
+    anthropicBase: 'https://api.anthropic.com',
+    chatBase: '',
+    modelsUrl: 'https://api.anthropic.com/v1/models',
+    label: 'Claude 官方 API',
+    signupUrl: 'https://platform.claude.com/settings/keys',
+    docsUrl: 'https://platform.claude.com/docs/en/api/overview',
+    note: '用 Anthropic Console 的 API Key（sk-ant-…）按量付费，不需要 Claude 订阅；Key 在 Console 的 API Keys 页创建',
+    preferModels: ['sonnet'],
+  },
+  // OpenAI 官方 API（按量计费）：对应 Codex 侧「不用 ChatGPT 订阅、直接填 Key」那条路。
+  // anthropicBase 留空 → 只出现在 Codex 的服务商列表里（它没有 Anthropic 接口）。
+  openai: {
+    anthropicBase: '',
+    chatBase: 'https://api.openai.com/v1',
+    modelsUrl: 'https://api.openai.com/v1/models',
+    label: 'OpenAI 官方 API',
+    signupUrl: 'https://platform.openai.com/api-keys',
+    docsUrl: 'https://platform.openai.com/docs/api-reference',
+    note: '用 OpenAI 平台的 API Key 按量付费，不需要 ChatGPT 订阅；Key 在 platform.openai.com 的 API Keys 页创建',
+    preferModels: ['gpt-5'],
+  },
   minimax: {
     anthropicBase: 'https://api.minimaxi.com/anthropic',
     chatBase: 'https://api.minimaxi.com/v1',
@@ -212,6 +259,8 @@ export class EngineConfigStruct {
     const resolved = this._bases(provider, cfg.apiKey || '');
     if (engine === 'claude' && resolved && !resolved.anthropicBase)
       throw new Error('此服务商未配置 Anthropic 接口，请使用 Codex / This provider supports Codex; no native Anthropic endpoint is configured.');
+    if (engine === 'codex' && resolved && !resolved.chatBase)
+      throw new Error('此服务商未配置 OpenAI 兼容接口，请使用 Claude Code / This provider has no OpenAI-compatible endpoint; use it with Claude Code.');
     // Third-party models may be fetched or manually supplied from provider documentation.
     if (engine === 'claude' && provider !== 'official' && !(cfg.model || '').trim())
       throw new Error(`setProvider: ${provider} 需要选择或填写模型 / Select or enter a model ID`);
@@ -341,7 +390,8 @@ export class EngineConfigStruct {
     if (!baseUrl || !cfg.apiKey || !cfg.model)
       throw new Error('Codex 第三方服务商缺少 Base URL、API Key 或模型');
     return {
-      baseUrl: this._cleanUrl(baseUrl),
+      // 用户常把完整端点（…/chat/completions）当 base 填进来；代理还会再拼一次，这里截回 base
+      baseUrl: this._cleanUrl(baseUrl).replace(/\/chat\/completions$/i, ''),
       apiKey: cfg.apiKey,
       model: cfg.model,
       label: meta?.label || '自定义服务商',
@@ -402,8 +452,17 @@ export class EngineConfigStruct {
     return ids[0];
   }
 
+  // 服务商下拉里固定排在最前面的几个：其余 180 多条 models.dev 目录跟在后面。
+  // 顺序即展示顺序——「订阅 / 官方 API / 通用中转 / 国产大厂」是绝大多数人真正会选的，
+  // 不该让它们在目录里翻找（OpenRouter 尤其：Claude 与 Codex 都能用，是通用的第二选择）。
+  private static readonly FEATURED_PROVIDERS: Array<Exclude<EngineProvider, 'official' | 'custom'>> = [
+    'clootee', 'anthropic', 'openai', 'openrouter', 'minimax', 'xiaomi', 'kimi', 'kimicode',
+  ];
+
   // 供前端「新手引导 / 设置」展示的服务商清单（含开通链接与说明）
   static providerList(): Array<{ id: EngineProvider; engines?: string[] } & Partial<ProviderMeta>> {
+    const featured = this.FEATURED_PROVIDERS.filter((id) => THIRD_PARTY_PROVIDERS.indexOf(id) >= 0);
+    const rest = THIRD_PARTY_PROVIDERS.filter((id) => featured.indexOf(id) < 0);
     return [
       {
         id: 'official' as EngineProvider,
@@ -412,9 +471,9 @@ export class EngineConfigStruct {
         signupUrl: 'https://claude.com/claude-code',
         docsUrl: 'https://docs.claude.com/en/docs/claude-code/overview',
       },
-      ...THIRD_PARTY_PROVIDERS.map((id) => ({
+      ...[...featured, ...rest].map((id) => ({
         id, ...PROVIDERS[id],
-        engines: PROVIDERS[id].anthropicBase ? ['claude', 'codex'] : ['codex'],
+        engines: this._enginesOf(PROVIDERS[id]),
       })),
       {
         id: 'custom' as EngineProvider,
@@ -422,6 +481,16 @@ export class EngineConfigStruct {
         note: '填写兼容 Base URL、模型列表 URL 与 API Key',
       },
     ];
+  }
+
+  // 某服务商能被哪个引擎用：有 Anthropic 兼容端点 → Claude Code；有 OpenAI 兼容端点 → Codex。
+  // 官方 API 两家各只有一半：anthropic 只有 Anthropic 协议、openai 只有 OpenAI 协议，
+  // 所以不能再用「有没有 anthropicBase」一刀切成 claude+codex（会把选不了的引擎也列出来）。
+  private static _enginesOf(meta: ProviderMeta): string[] {
+    const engines: string[] = [];
+    if (meta.anthropicBase) engines.push('claude');
+    if (meta.chatBase) engines.push('codex');
+    return engines.length ? engines : ['codex'];
   }
 
   // 读盘并归一化成分槽结构（兼容旧版扁平格式）
@@ -468,8 +537,10 @@ export class EngineConfigStruct {
       // 无论是旧版扁平脏数据还是别处写歪，读出来就被过滤掉。
       const legit = (models || []).filter((m) => m && m.source !== 'api');
       models = legit.length ? legit : undefined;
-      // 选定模型若来自第三方候选（不在剩余候选里、且这条记录带过第三方 Key）→ 一并丢弃
-      if (model && v.apiKey && !legit.some((m) => m.id === model)) model = '';
+      // 选定模型若不在原版自身的候选里 → 一并丢弃（不要求这条记录还带过第三方 Key）。
+      // 旧写法只在 `v.apiKey` 存在时才丢，漏了 Key 已被清空的情况：别的服务商的模型名
+      // （如 deepseek-flash）会残留在原版槽里，codex 拿它去打 ChatGPT 账号会直接 400 失败。
+      if (model && legit.length && !legit.some((m) => m.id === model)) model = '';
     }
     return {
       apiKey,

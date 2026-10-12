@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="styles.css?v=20260917d" />
+  <link rel="stylesheet" href="styles.css?v=20261012b" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -412,6 +412,9 @@
               <label class="sx-lbl" id="claudeProviderLbl">服务商</label>
               <select class="sx-input" id="claudeProviderSelect">
                 <option value="official">原版（订阅登录，未登录会引导登录）</option>
+                <!-- 官方 API：不用订阅登录，直接把 Anthropic Console 的 API Key 填进来即可 -->
+                <option value="anthropic">Claude 官方 API（填 API Key，按量付费）</option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="minimax">MiniMax（推荐，支持图片识别）</option>
                 <option value="xiaomi">小米 MiMo</option>
                 <option value="kimi">Kimi 开放平台（按量计费）</option>
@@ -459,9 +462,6 @@
                 </div>
               </div>
               <div class="sx-note" id="mdlClaudeStatus"></div>
-              <div class="sx-row sx-right">
-                <button class="sx-btn sx-btn-primary" id="claudeSaveBtn">保存 Claude Code 设置</button>
-              </div>
               <div class="sx-note" id="claudeProviderStatus"></div>
             </div>
           </div>
@@ -476,6 +476,9 @@
               <label class="sx-lbl" id="codexProviderLbl">服务商</label>
               <select class="sx-input" id="codexProviderSelect">
                 <option value="official">原版 ChatGPT（账号登录）</option>
+                <!-- 官方 API：不用 ChatGPT 订阅，直接把 OpenAI 平台的 API Key 填进来即可 -->
+                <option value="openai">OpenAI 官方 API（填 API Key，按量付费）</option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="minimax">MiniMax</option>
                 <option value="xiaomi">小米 MiMo</option>
                 <!-- Codex 不列 Kimi Code：那是给编程 Agent 的包月订阅，OpenAI 兼容端点对客户端有限制，
@@ -518,9 +521,6 @@
                 </div>
               </div>
               <div class="sx-note" id="mdlCodexStatus"></div>
-              <div class="sx-row sx-right">
-                <button class="sx-btn sx-btn-primary" id="codexSaveBtn">保存 Codex 设置</button>
-              </div>
               <div class="sx-note sx-pre" id="codexProviderStatus"></div>
             </div>
           </div>
@@ -660,6 +660,9 @@
 
       </div>
       <div class="sx-foot">
+        <!-- 状态条：保存中/已保存/未保存改动/失败原因都写在这里，紧挨保存按钮，
+             用户不用滚回出错的板块去看（长内容换行显示，见 .sx-foot-status） -->
+        <span class="sx-foot-status" id="settingsPaneStatus"></span>
         <button class="sx-btn sx-btn-primary" id="settingsPaneSave"></button>
       </div>
     </div>
@@ -713,6 +716,8 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center;flex:1;min-width:0">
           <!-- 版本号：放在齿轮按钮左边，跟随按钮组一起排布 -->
           <span id="appVersion" class="version-badge"></span>
+          <!-- Clootee 默认服务商余额：只有正在用 clootee 时才显示，点开去充值 / 看账单 -->
+          <button id="clooteeBal" class="clootee-bal" hidden style="flex:none"></button>
           <button id="settingsBtn" title="settings" style="flex:none;padding:4px 9px;position:relative">⚙<span id="settingsUpdateDot" class="update-dot" hidden></span></button>
           <button id="themeBtn" title="theme" style="flex:none;padding:4px 9px"></button>
           <button id="langBtn" style="flex:none;padding:4px 10px"></button>
@@ -790,6 +795,7 @@
       <div class="batch-bar" id="batchBar" hidden>
         <label class="batch-all"><input type="checkbox" id="batchAllChk" /> <span id="batchAllLabel"></span></label>
         <span class="batch-count" id="batchCount"></span>
+        <span class="api-cost-tag batch-cost" id="batchCost" hidden></span>
         <span class="spacer"></span>
         <div class="batch-actions">
           <button id="batchActBtn" class="sm primary"></button>
@@ -1097,6 +1103,6 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="app.js?v=20260929a"></script>
+  <script src="app.js?v=20261012b"></script>
 </body>
 </html>

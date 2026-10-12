@@ -1,6 +1,7 @@
 // Claude 执行器（调度骨架）：对单个任务调用本地 claude CLI，流式解析事件
 // 不负责排队/调度，只负责"运行一个任务并把事件吐出去"
 import { ProcessSpawner, SpawnHandle } from '../helper/ProcessSpawner';
+import { ConsoleAccount } from '../logic_realize/ConsoleAccount';
 import { ClaudeBin } from '../helper/ClaudeBin';
 import { RunAsUser } from '../helper/RunAsUser';
 import { EngineAccess } from '../helper/EngineAccess';
@@ -170,7 +171,11 @@ export class ClaudeRunnerStruct {
       prompt,
       useShell,
       AppConfig.ENGINE_SILENCE_WARN_MS,
-      ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
+      {
+        ...ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
+        // 默认服务商 clootee：给请求带上本轮任务的标签，供「本次花了多少」精确汇总（别家服务商时为空）
+        ...ConsoleAccount.runEnv(session),
+      },
     );
   }
 

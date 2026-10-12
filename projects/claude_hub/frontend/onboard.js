@@ -1,4 +1,7 @@
-// 新手引导（首次进入）五步：
+// 新手引导（首次进入）。默认是「一键开始」一屏：
+//   本机随机密码（免设）→ 领 Clootee 默认服务商的体验额度 → 后台装 Claude Code → 进主界面。
+//   不问网络、不问引擎、不问服务商；想用自己账号/别家服务商的点「高级」走下面的五步引导。
+// 高级引导五步：
 //   ① 语言 + 明暗主题  ② 网络体检  ③ 选执行引擎  ④ 选模型服务商
 //   ⑤ 原版（Claude / Codex）→ 登录账号；第三方 → 填 API Key 并选模型
 // 「网络体检」排在最前面是有意的：国内用户十有八九卡在「连不上 Claude」，
@@ -13,6 +16,8 @@ const OB_STEPS = 5;
 
 // 强制引导：新用户必须逐项显式选择（语言/主题/引擎/服务商/模型），不提供「以后再说」。
 const Onboard = {
+  mode: 'quick',         // 'quick' = 一键开始；'advanced' = 五步引导
+  quick: null,           // 一键开始的进度：{ stage, error, grantedMicro }
   step: 1,
   langSet: false,        // 语言是否已显式选择（浏览器默认值不算）
   themeSet: false,       // 主题是否已显式选择
@@ -31,6 +36,8 @@ const Onboard = {
 };
 
 async function showOnboard() {
+  Onboard.mode = 'quick';
+  Onboard.quick = null;
   Onboard.step = 1;
   Onboard.busy = false;
   Onboard.installing = '';
@@ -72,6 +79,8 @@ function obCard(selected, dataAttr, headHtml, descHtml, noteHtml) {
 }
 
 function renderOnboard() {
+  if (Onboard.mode === 'quick') { renderOnboardQuick(); return; }
+  $('onboardSteps').hidden = false;
   let html = '';
   for (let n = 1; n <= OB_STEPS; n++) {
     const cls = n === Onboard.step ? 'ob-dot on' : n < Onboard.step ? 'ob-dot done' : 'ob-dot';
@@ -79,7 +88,7 @@ function renderOnboard() {
   }
   $('onboardSteps').innerHTML = html;
 
-  $('onboardSkip').hidden = true; // 强制引导：不允许跳过
+  $('onboardSkip').hidden = true; // 高级引导：进来了就逐项选完，不提供跳过
   $('onboardBack').textContent = T('obBack');
 
   if (Onboard.step === 1) renderOnboardLocale();
@@ -94,6 +103,122 @@ function renderOnboard() {
 // 原版 Claude 用的是账号登录，第三方服务商用的是 API Key，两者互斥。
 function onboardNeedsLogin() {
   return Onboard.provider === 'official';
+}
+
+
+// ── 一键开始 ──
+// 四个阶段逐个打勾；失败停在出错的那一步，原地给「重试」和「改用自己的服务商」两条路。
+const QUICK_STAGES = ['obQuickS1', 'obQuickS2', 'obQuickS3', 'obQuickS4'];
+
+function renderOnboardQuick() {
+  const q = Onboard.quick;
+  $('onboardSteps').hidden = true;
+  $('onboardTitle').textContent = T('obQuickTitle');
+  $('onboardSub').textContent = T('obQuickSub');
+  const lang = currentLang();
+  const langRow =
+    `<div class="ob-quick-lang">` +
+    `<button type="button" class="ob-chip${lang === 'zh' ? ' on' : ''}" data-lang="zh">简体中文</button>` +
+    `<button type="button" class="ob-chip${lang === 'en' ? ' on' : ''}" data-lang="en">English</button>` +
+    `</div>`;
+  let stages = '';
+  if (q) {
+    stages = '<ol class="ob-quick-stages">' + QUICK_STAGES.map((k, i) => {
+      const st = i < q.stage ? 'done' : i === q.stage ? (q.error ? 'err' : 'run') : 'todo';
+      const icon = st === 'done' ? '✓' : st === 'err' ? '✕' : st === 'run' ? '<span class="ob-spin"></span>' : '·';
+      let extra = '';
+      if (i === 1 && q.grantedMicro) extra = ` <span class="ob-badge ok">${T('obQuickGranted').replace('{v}', formatUsd(q.grantedMicro))}</span>`;
+      return `<li class="${st}"><span class="ob-qi">${icon}</span>${T(k)}${extra}</li>`;
+    }).join('') + '</ol>';
+    if (q.stage === 2 && !q.error) stages += `<div class="ob-note">${T('obQuickInstallNote')}</div>`;
+    stages += `<div class="ob-inst-msg ob-pre" id="obQuickLog"${q.stage === 2 || q.error ? '' : ' hidden'}></div>`;
+    if (q.error) stages += `<div class="ob-quick-err">${escapeHtml(q.error)}</div>`;
+  }
+  $('onboardBody').innerHTML = langRow + stages;
+  $('onboardBody').querySelectorAll('[data-lang]').forEach((el) => {
+    el.onclick = () => { if (Onboard.busy) return; setLang(el.dataset.lang); renderOnboard(); };
+  });
+  // 「以后再说」按钮在一键模式下改作「高级」入口：始终可见，失败时它就是那条免费的替代路
+  const adv = $('onboardSkip');
+  adv.hidden = false;
+  adv.className = 'link';
+  adv.textContent = T('obQuickAdvanced');
+  adv.disabled = Onboard.busy;
+  adv.onclick = () => {
+    if (Onboard.busy) return;
+    Onboard.mode = 'advanced';
+    Onboard.step = 1;
+    adv.onclick = null;
+    adv.className = '';
+    renderOnboard();
+  };
+  $('onboardBack').hidden = true;
+  const next = $('onboardNext');
+  next.disabled = Onboard.busy;
+  next.textContent = q && q.error ? T('obQuickRetry') : T('obQuickStart');
+}
+
+function formatUsd(micro) {
+  const usd = Number(micro || 0) / 1e6;
+  return currentLang() === 'zh' ? `$${usd.toFixed(2)}（约 ¥${(usd * 7.2).toFixed(2)}）` : `$${usd.toFixed(2)}`;
+}
+
+async function runQuickStart() {
+  Onboard.busy = true;
+  // 失败重试时从出错的那一步继续，已完成的不再重做
+  const q = Onboard.quick && Onboard.quick.error ? Onboard.quick : { stage: 0, error: '', grantedMicro: 0 };
+  q.error = '';
+  Onboard.quick = q;
+  renderOnboard();
+  const stageDone = () => { q.stage += 1; renderOnboard(); };
+  try {
+    // ① 本机访问凭据：还没设密码就生成随机密码并直接登录（浏览器记住 token）
+    if (q.stage === 0) {
+      if (NEEDS_SETUP) {
+        const r = await api('/api/auth/quickstart', {});
+        TOKEN = r.token;
+        localStorage.setItem('token', TOKEN);
+        NEEDS_SETUP = false;
+      }
+      stageDone();
+    }
+    // ② 领体验额度 + 两个引擎都切到 clootee
+    if (q.stage === 1) {
+      let st;
+      try { st = await api('/api/console/activate', {}); }
+      catch (e) { throw new Error(`${T('obQuickFailNet')}\n${e.message || ''}`); }
+      q.grantedMicro = st && st.balanceMicro;
+      stageDone();
+    }
+    // ③ 装 Claude Code（已装就跳过）
+    if (q.stage === 2) {
+      const status = await api('/api/engine/status?refresh=1');
+      if (!(status && status.claude && status.claude.ready)) {
+        const log = $('obQuickLog');
+        const stop = startEngineInstallProgress(log, T('obQuickS3'));
+        try { await api('/api/engine/update', { engine: 'claude' }); }
+        catch (e) { stop(); throw new Error(`${T('obInstallFail')}${e.message || ''}\n${T('obInstallManual')}\n  npm install -g @anthropic-ai/claude-code`); }
+        stop();
+        const after = await api('/api/engine/status?refresh=1');
+        if (!(after && after.claude && after.claude.ready)) throw new Error(T('obInstallFail'));
+      }
+      stageDone();
+    }
+    // ④ 记下默认引擎、引导完成，进主界面
+    await api('/api/settings', { defaultEngine: 'claude', onboarded: true, setupDone: true });
+    q.stage = QUICK_STAGES.length;
+    renderOnboard();
+    Onboard.busy = false;
+    hideOnboard();
+    applyText();
+    await startApp();
+  } catch (e) {
+    q.error = e.message || String(e);
+    Onboard.busy = false;
+    renderOnboard();
+  } finally {
+    Onboard.busy = false;
+  }
 }
 
 // ── 第 1 步：语言 + 主题 ──
@@ -399,6 +524,7 @@ function onboardBack() {
 
 async function onboardNext() {
   if (Onboard.busy) return;
+  if (Onboard.mode === 'quick') { await runQuickStart(); return; }
   // 引擎没装好不放行（按钮本身也是禁用的，这里兜底防止回车/脚本触发）
   if (Onboard.step === 3 && !engineReady(Onboard.engine)) return;
   if (Onboard.step === 1 || Onboard.step === 2 || Onboard.step === 3) {

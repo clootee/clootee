@@ -1,6 +1,7 @@
 // 过程轨迹存储（实现）：落盘位置、jsonl 反推、合并去重、耗时计算与统计聚合。
 // 落盘：data/traces/<rootId>/<claudeSessionId>.jsonl，一行一个 TraceEvent（不截断任何字段）。
 // 跨平台：全部走 path.join + fs，无 shell 依赖。
+import * as fs from 'fs';
 import * as path from 'path';
 import { TraceStoreStruct, TraceInput } from '../logic_struct/TraceStoreStruct';
 import { JsonlStore } from '../helper/JsonlStore';
@@ -8,7 +9,8 @@ import { ClaudeStoreHelper } from '../helper/ClaudeStoreHelper';
 import { Paths } from '../paths';
 import { RootManager } from './RootManager';
 import { Settings } from './Settings';
-import { TraceEvent, TraceStats, TraceToolStat, TraceSlow, TraceTaskStat, TracePhaseBreakdown, TraceCounts } from '../models/Types';
+import { SessionManager } from './SessionManager';
+import { TraceEvent, TraceStats, TraceToolStat, TraceSlow, TraceTaskStat, TracePhaseBreakdown, TraceCounts, TraceCharBucket } from '../models/Types';
 
 interface RawFrame {
   type?: string;
@@ -21,6 +23,38 @@ interface RawFrame {
 export class TraceStore extends TraceStoreStruct {
   // 每会话的自增序号（进程内）。重启后从已落盘的最大 seq 续接，保证单调。
   private static _seq = new Map<string, number>();
+
+  static read(sessionId: string, includeRaw = false) {
+    return super.read(this._resolveSessionId(sessionId), includeRaw);
+  }
+
+  static stats(sessionId: string): TraceStats {
+    return super.read(this._resolveSessionId(sessionId)).stats;
+  }
+
+  // 只读 hub 实时捕获的事件（计费用：带 taskId / msgId / 服务商标记），附文件戳供调用方做缓存
+  static liveEvents(sessionId: string): { stamp: string; events: TraceEvent[] } {
+    const id = this._resolveSessionId(sessionId);
+    const file = this.file(id);
+    let stamp = '';
+    try {
+      const st = fs.statSync(file);
+      stamp = `${st.mtimeMs}:${st.size}`;
+    } catch {
+      return { stamp: 'none', events: [] };
+    }
+    return { stamp, events: this._readLive(id) };
+  }
+
+  private static _resolveSessionId(sessionId: string): string {
+    try {
+      const session = SessionManager.getSession(sessionId);
+      if (session.claudeSessionId) return `${session.rootId}:${session.claudeSessionId}`;
+    } catch {
+      // Keep the caller id for old sessions that are no longer in the live map.
+    }
+    return sessionId;
+  }
 
   static file(sessionId: string): string {
     if (!sessionId) throw new Error(`TraceStore.file: invalid sessionId=${sessionId}`);
@@ -196,6 +230,7 @@ export class TraceStore extends TraceStoreStruct {
       slowest: slow.sort((a, b) => b.ms - a.ms).slice(0, 10),
       usage,
       byTask: this._byTask(events),
+      charTimeline: this._charTimeline(events),
     };
   }
 
@@ -319,6 +354,20 @@ export class TraceStore extends TraceStoreStruct {
       else if (e.kind === 'system' && e.name === 'task_started') c.bgTasks++;
     }
     return c;
+  }
+
+  private static _charTimeline(events: TraceEvent[]): TraceCharBucket[] {
+    const buckets = new Map<number, TraceCharBucket>();
+    for (const e of events) {
+      if (e.kind !== 'text' && e.kind !== 'thinking') continue;
+      const startTs = Math.floor(e.ts / 60000) * 60000;
+      const bucket = buckets.get(startTs) || { startTs, textChars: 0, thinkingChars: 0 };
+      const chars = (e.text || '').length;
+      if (e.kind === 'text') bucket.textChars += chars;
+      else bucket.thinkingChars += chars;
+      buckets.set(startTs, bucket);
+    }
+    return [...buckets.values()].sort((a, b) => a.startTs - b.startTs);
   }
 
   // 模型请求轮数：每次「工具结果/任务开始」之后模型重新吐出第一个 token 算一轮。

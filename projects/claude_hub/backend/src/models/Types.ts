@@ -24,11 +24,13 @@ export type Engine = 'claude' | 'codex';
 
 // 引擎服务商：official=原版订阅登录流程；其余=第三方 API（填 apiKey + 选 model）
 // xiaomi=小米 MiMo 开放平台，kimi=月之暗面开放平台（按量），kimicode=Kimi Code 包月订阅，minimax=MiniMax
+// anthropic=Claude 官方 API（按量 API Key，不走订阅登录），openai=OpenAI 官方 API（同理）
 // ⚠ kimi 与 kimicode 是**两个独立服务商**：端点、Key、模型名全不一样且 Key 不通用，
 //   而两者的 Key 都是 sk- 开头（认不出来），所以只能各占一个槽让用户明确选。
 // Runtime validation uses the bundled provider catalog (including legacy IDs).
 export type EngineProvider = keyof typeof import('../config/provider-catalog.json').providers
-  | 'official' | 'custom' | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
+  | 'official' | 'custom' | 'clootee' | 'anthropic' | 'openai'
+  | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
 
 // 思考强度（effort）。**空字符串 = 自动**（不传参数，由引擎自己决定）。
 // 取值来自 claude CLI 的 `--effort <level>`；codex 走 `-c model_reasoning_effort=<level>`
@@ -250,6 +252,7 @@ export interface TraceEvent {
   isError?: boolean;
   model?: string;
   usage?: Record<string, unknown>; // token 用量原样
+  msgId?: string;           // assistant 消息 id（同一条消息拆成多帧时共享，计费按它去重）
   costUsd?: number;
   numTurns?: number;
   raw?: unknown;            // kind=raw 时的原始事件
@@ -300,6 +303,12 @@ export interface TraceTaskStat {
   phases: TracePhaseBreakdown; // 该任务内的细分耗时
 }
 
+export interface TraceCharBucket {
+  startTs: number;
+  textChars: number;
+  thinkingChars: number;
+}
+
 // 各类「次数/数量」计数：一眼看清这个会话里 AI 到底做了多少动作、写了多少字。
 export interface TraceCounts {
   tasks: number;          // 任务数（task_start）
@@ -337,6 +346,7 @@ export interface TraceStats {
     costUsd: number;
   };
   byTask: TraceTaskStat[];
+  charTimeline: TraceCharBucket[];
 }
 
 export interface TraceResult {
@@ -361,3 +371,45 @@ export type WsEvent =
   | { kind: 'serverError'; message: string }
   // 过程轨迹事件（完整不截断）：前端"全过程"视图实时追加用
   | { kind: 'trace'; sessionId: string; taskId: string; event: TraceEvent };
+
+// ── Claude 官方 API 按量计费明细（仅服务商 = anthropic 的任务）──
+export interface ApiCostLine {
+  model: string;
+  priced: boolean;          // 价目表里找到了该模型
+  extra: boolean;           // 来自 result.modelUsage 的补差（CLI 后台调用，未出现在消息流里）
+  requests: number;
+  reportedUsd?: number;     // 服务商回报的实扣金额合计（OpenRouter usage.cost）
+  reportedRequests?: number;// 带实扣金额的请求数；等于 requests 时 totalUsd 取实扣
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWrite5mTokens: number;
+  cacheWrite1hTokens: number;
+  webSearches: number;
+  usd: { input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number; webSearch: number };
+  totalUsd: number;
+}
+// 计费性质：subscription = 订阅登录跑的轮次（不实扣，按 API 价目给等价估价，前端标「订阅」）；
+// apikey = 按量服务商跑的轮次（真金白银）。老轨迹没记服务商时按模型推断（见 ApiCost._billing）。
+export type ApiBilling = 'subscription' | 'apikey';
+
+export interface ApiTurnCost {
+  taskId: string;
+  provider: string;         // 服务商 id：official/custom/anthropic/openrouter/minimax/…（老轨迹可能为空）
+  billing: ApiBilling;
+  startedAt: number;
+  lines: ApiCostLine[];
+  totalUsd: number;
+  cliUsd: number | null;    // Claude CLI 自报的 total_cost_usd，仅供对照
+}
+export interface ApiSessionCost {
+  sessionId: string;
+  turns: ApiTurnCost[];
+  totalUsd: number;         // 全部轮次合计（订阅轮次算估价在内）
+  subscriptionUsd: number;  // 其中「订阅轮次」的等价估价，便于和真实支出区分
+}
+// 会话列表徽章：总估价 + 其中订阅部分
+export interface ApiSessionTotals {
+  usd: number;
+  sub: number;
+}

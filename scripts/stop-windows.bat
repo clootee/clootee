@@ -1,81 +1,110 @@
 @echo off
-setlocal enabledelayedexpansion
+chcp 65001 >nul
+setlocal
 title claude-hub - stop
 
 REM ============================================================================
 REM  claude-hub stopper - Windows implementation
 REM  Do not run this directly: double-click Windows_Stop.bat in the repo root.
+REM
+REM    1) pm2 first - killing the port holder alone is not enough, pm2 respawns it
+REM       and a saved process list (pm2 save) brings it back on the next boot
+REM    2) then scripts\win-service.ps1: pid file -> install path -> port owner
+REM       Every candidate is verified to belong to THIS install before it is
+REM       killed - a stranger holding port 8970 is reported, never killed.
 REM ============================================================================
 
-set PORT=8970
+for %%i in ("%~dp0..") do set "ROOT=%%~fi\"
+set "HUB=%ROOT%projects\claude_hub"
+set "BACKEND=%HUB%\backend"
+set "RUNDIR=%HUB%\data\run"
+set "PORT=8970"
 set "APP=claude-hub"
+set "PS1=%~dp0win-service.ps1"
 
 REM  --no-pause : run non-interactively (used by Windows_Start.bat when it frees the port itself)
 set "NOPAUSE="
 if /i "%~1"=="--no-pause" set "NOPAUSE=1"
 
-REM ============================================================
-REM  Step 1: stop pm2 first. Killing the port holder alone is not
-REM  enough - pm2 respawns it, and a saved process list (pm2 save)
-REM  brings it back on the next resurrect/boot.
-REM ============================================================
+REM ============================================================================
+REM  Step 1: pm2
+REM ============================================================================
 where pm2 >nul 2>nul
-if not errorlevel 1 (
+if errorlevel 1 (
+  echo ==^> pm2 not installed, skipping pm2 step
+) else (
   call pm2 describe "%APP%" >nul 2>&1
-  if not errorlevel 1 (
+  if errorlevel 1 (
+    echo ==^> pm2: app %APP% is not registered, skipping
+  ) else (
     echo ==^> pm2: deleting app %APP% ...
     call pm2 delete "%APP%" >nul 2>&1
     REM persist the empty/updated list so pm2 resurrect won't restart it
     call pm2 save --force >nul 2>&1
     echo     [OK] pm2 app removed and process list saved
-  ) else (
-    echo ==^> pm2: app %APP% is not registered, skipping
-  )
-) else (
-  echo ==^> pm2 not installed, skipping pm2 step
-)
-
-echo.
-echo ==^> Looking for the process listening on port %PORT% ...
-
-set "FOUND="
-for /f "tokens=5" %%p in ('netstat -ano -p TCP ^| findstr /R /C:"LISTENING" ^| findstr /C:":%PORT% "') do (
-  if not "%%p"=="0" (
-    set "FOUND=1"
-    echo.
-    echo     PID %%p
-    for /f "tokens=1 delims=," %%a in ('tasklist /fi "PID eq %%p" /fo csv /nh 2^>nul') do echo     image = %%~a
-    taskkill /F /T /PID %%p
-    if errorlevel 1 (
-      echo     [ERROR] failed to kill PID %%p - administrator rights may be required
-    ) else (
-      echo     [OK] killed PID %%p
-    )
   )
 )
 
+REM ============================================================================
+REM  Step 2: the background service itself (verified kills only)
+REM ============================================================================
 echo.
-if not defined FOUND (
-  echo ==^> Nothing was listening on port %PORT%
+echo ==^> Stopping the background service ...
+if not exist "%PS1%" (
+  echo     [ERROR] missing "%PS1%" - falling back to a port-only kill
+  call :killport
+  goto :verify
+)
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -Action stop ^
+  -WorkDir "%BACKEND%" -Entry "%BACKEND%\dist\index.js" -Port %PORT% -RunDir "%RUNDIR%"
+
+REM ============================================================================
+REM  Step 3: verify. If something is listening again, a supervisor is respawning it.
+REM ============================================================================
+:verify
+ping -n 3 127.0.0.1 >nul
+call :checkport
+if defined PORTPID (
+  echo.
+  echo [ERROR] Port %PORT% is listening again ^(PID %PORTPID%^) - something is respawning it.
+  for /f "tokens=1,2 delims=," %%a in ('tasklist /fi "PID eq %PORTPID%" /fo csv /nh 2^>nul') do echo         image = %%~a
+  echo         Check:  pm2 list      ^(then: pm2 delete all ^&^& pm2 save --force^)
+  echo         Also close any other open Windows_Start.bat window, then run Windows_Stop.bat again.
   if not defined NOPAUSE pause
+  exit /b 1
+)
+
+echo.
+echo ==^> claude-hub 已停止 / stopped, port %PORT% is free
+if not defined NOPAUSE pause
+exit /b 0
+
+REM ============================================================================
+REM  Fallback used only when win-service.ps1 is missing.
+REM ============================================================================
+:killport
+call :checkport
+if not defined PORTPID (
+  echo     nothing is listening on port %PORT%
   exit /b 0
 )
-
-REM ============================================================
-REM  Step 3: verify. If something is listening again, a supervisor
-REM  (pm2 / a leftover Windows_Start.bat window) is respawning it.
-REM ============================================================
-ping -n 3 127.0.0.1 >nul
-set "STILL="
-for /f "tokens=5" %%p in ('netstat -ano -p TCP ^| findstr /R /C:"LISTENING" ^| findstr /C:":%PORT% "') do (
-  if not defined STILL set "STILL=%%p"
-)
-if defined STILL (
-  echo [ERROR] Port %PORT% is listening again ^(PID %STILL%^) - something is respawning it.
-  echo         Check:  pm2 list      ^(then: pm2 delete claude-hub ^&^& pm2 save --force^)
-  echo         Also close any open Windows_Start.bat window, then run Windows_Stop.bat again.
+echo     PID %PORTPID%
+for /f "tokens=1,2 delims=," %%a in ('tasklist /fi "PID eq %PORTPID%" /fo csv /nh 2^>nul') do echo     image = %%~a
+taskkill /F /T /PID %PORTPID%
+if errorlevel 1 (
+  echo     [ERROR] failed to kill PID %PORTPID% - administrator rights may be required
 ) else (
-  echo ==^> claude-hub stopped, port %PORT% is free
+  echo     [OK] killed PID %PORTPID%
 )
+exit /b 0
 
-if not defined NOPAUSE pause
+REM ---------------------------------------------------------------------------
+REM  :checkport - sets PORTPID to the first PID listening on %PORT%, or clears it
+REM ---------------------------------------------------------------------------
+:checkport
+set "PORTPID="
+for /f "tokens=5" %%p in ('netstat -ano -p TCP ^| findstr /R /C:"LISTENING" ^| findstr /C:":%PORT% "') do (
+  if not defined PORTPID if not "%%p"=="0" set "PORTPID=%%p"
+)
+exit /b 0

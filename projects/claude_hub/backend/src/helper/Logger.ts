@@ -24,8 +24,10 @@ export class Logger {
   static life(message: string, data?: unknown): void {
     const line = `[${new Date().toISOString()}] [LIFE] ${message}` +
       (data === undefined ? '' : ' ' + this._safe(data));
-    // eslint-disable-next-line no-console
-    console.log(line);
+    if (LogConfig.CONSOLE_ENABLED) {
+      // eslint-disable-next-line no-console
+      console.log(line);
+    }
     this._append(LogConfig.LIFECYCLE_PATH, line);
     if (LogConfig.FILE_ENABLED) this._append(LogConfig.FILE_PATH, line);
   }
@@ -38,8 +40,10 @@ export class Logger {
     const ts = new Date().toISOString();
     const extra = data === undefined ? '' : ' ' + this._safe(data);
     const line = `[${ts}] [${level}] [${module}] ${message}${extra}`;
-    // eslint-disable-next-line no-console
-    console.log(line);
+    if (LogConfig.CONSOLE_ENABLED) {
+      // eslint-disable-next-line no-console
+      console.log(line);
+    }
     if (LogConfig.FILE_ENABLED) this._toFile(line);
   }
 

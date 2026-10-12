@@ -2334,9 +2334,18 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 /* 只允许纵向滚动 */
 .sx-body { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 14px 16px 4px; }
 .sx-foot {
-  flex: none; display: flex; justify-content: flex-end;
+  flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 11px 16px; border-top: 1px solid var(--border, #333);
 }
+/* 保存按钮左侧的状态条：所有保存反馈（保存中/已保存/未保存改动/失败）只在这里出现。
+   失败原因可能较长，允许换行——宁可 footer 高一点，也不能把原因截断成省略号。 */
+.sx-foot-status {
+  flex: 1 1 auto; min-width: 0; font-size: 12px; line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sx-foot-status.ok { color: #66bb6a; }
+.sx-foot-status.warn { color: var(--yellow, #d9a441); }
+.sx-foot-status.err { color: #e57373; white-space: normal; word-break: break-word; }
 
 .sx-sec {
   margin: 20px 0 8px; padding-top: 14px; border-top: 1px solid var(--border, #333);
@@ -2354,6 +2363,10 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
   color: var(--muted, #8b8f96); overflow-wrap: anywhere;
 }
 .sx-note:empty { display: none; margin: 0; }
+/* 折叠块标题右侧的「未保存」小圆点：折叠状态下也能一眼看到该块动过 */
+.eng-acc-head.eng-dirty .eng-acc-title::after {
+  content: '●'; margin-left: 6px; font-size: 9px; vertical-align: 2px; color: var(--yellow, #d9a441);
+}
 .sx-note.err { color: #e57373; }
 .sx-note.ok { color: #66bb6a; }
 .sx-pre { white-space: pre-wrap; }
@@ -2636,6 +2649,12 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .st-counts { display: flex; flex-wrap: wrap; gap: 7px; }
 .st-kc { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 4px 9px; font-size: 12px; color: var(--muted); }
 .st-kc b { color: var(--accent); font-weight: 600; margin-right: 3px; font-variant-numeric: tabular-nums; }
+.st-char-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 2px; }
+.st-char-head .st-h { margin-top: 0; }
+.st-char-controls { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 12px; }
+.st-char-btn { border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; background: var(--panel2); color: var(--text); cursor: pointer; }
+.st-char-btn.active, .st-char-btn:hover { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.st-char-chart { width: 100%; height: 270px; }
 .st-chart { width: 100%; height: 300px; }
 .st-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 6px; font-size: 12px; }
 .st-leg-i { display: flex; align-items: center; gap: 6px; }
@@ -3114,3 +3133,41 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
   padding: 10px 8px 14px;
 }
 .session-more span { font-size: 11px; opacity: .55; }
+
+/* ── 一键开始（默认引导） ── */
+.ob-quick-lang{display:flex;gap:8px;margin:4px 0 14px}
+.ob-chip{padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:transparent;color:inherit;cursor:pointer;font-size:13px}
+.ob-chip.on{border-color:var(--accent);color:var(--accent);font-weight:600}
+.ob-quick-stages{list-style:none;margin:6px 0 10px;padding:0}
+.ob-quick-stages li{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:14px;opacity:.55}
+.ob-quick-stages li.done,.ob-quick-stages li.run,.ob-quick-stages li.err{opacity:1}
+.ob-quick-stages li.err{color:#d9534f}
+.ob-qi{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-size:12px;border:1px solid var(--line)}
+.ob-quick-stages li.done .ob-qi{background:#2e9e5b;border-color:#2e9e5b;color:#fff}
+.ob-quick-stages li.err .ob-qi{background:#d9534f;border-color:#d9534f;color:#fff}
+.ob-spin{width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:obspin .8s linear infinite}
+@keyframes obspin{to{transform:rotate(360deg)}}
+.ob-quick-err{white-space:pre-wrap;color:#d9534f;font-size:13px;margin-top:8px}
+.ob-foot button.link{background:none;border:0;padding:0;color:var(--muted,inherit);text-decoration:underline;cursor:pointer;font-size:13px;opacity:.8}
+.clootee-bal{padding:3px 9px;border-radius:999px;font-size:12px;font-variant-numeric:tabular-nums;cursor:pointer}
+.clootee-bal.low{border-color:#d9534f;color:#d9534f}
+
+/* 每轮费用 + 明细（订阅轮次按等价估价展示，用黄色与真实按量支出区分） */
+.api-cost-toggle { background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.api-cost-toggle.sub { color: var(--yellow); }
+.api-cost-toggle:hover { text-decoration: underline; }
+.api-cost-detail { margin-top: 6px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel2); text-align: left; font-size: 12px; }
+.api-cost-model { display: flex; flex-wrap: wrap; gap: 4px; align-items: baseline; margin-top: 6px; color: var(--text); }
+.api-cost-model:first-child { margin-top: 0; }
+.api-cost-model em { color: var(--muted); font-style: normal; }
+.api-cost-sum { margin-left: auto; font-weight: 600; color: var(--accent); }
+.api-cost-table { width: 100%; border-collapse: collapse; margin-top: 3px; }
+.api-cost-table th, .api-cost-table td { padding: 2px 4px; border-bottom: 1px dashed var(--border); text-align: left; font-weight: normal; }
+.api-cost-table th { color: var(--muted); }
+.api-cost-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.api-cost-total { margin-top: 6px; text-align: right; color: var(--text); }
+.api-cost-note { margin-top: 2px; text-align: right; color: var(--muted); font-size: 11px; }
+.api-cost-note.sub { text-align: left; color: var(--yellow); }
+.api-cost-tag { font-size: 11px; padding: 0 5px; border-radius: 6px; border: 1px solid var(--border); color: var(--accent); font-variant-numeric: tabular-nums; }
+.batch-cost { font-size: 12px; font-weight: 600; }
+.api-cost-sub { color: var(--yellow); margin-left: 4px; }

@@ -66,6 +66,31 @@ test('OpenAI-only catalog provider is usable with Codex, not silently configured
   assert.deepEqual(Config.providerList().find((p) => p.id === 'siliconflow-cn').engines, ['codex']);
 });
 
+test('official API providers: Anthropic key on Claude Code, OpenAI key on Codex', async () => {
+  save('claude', 'anthropic', 'sk-ant-test');
+  assert.equal(Config.claudeEnv().ANTHROPIC_BASE_URL, 'https://api.anthropic.com');
+  assert.equal(Config.claudeEnv().ANTHROPIC_AUTH_TOKEN, 'sk-ant-test');
+  await Config.listModels('anthropic', 'sk-ant-test');
+  assert.deepEqual(Config.calls.at(-1), { url: 'https://api.anthropic.com/v1/models', key: 'sk-ant-test' });
+  assert.throws(() => save('codex', 'anthropic', 'sk-ant-test'), /OpenAI/);
+  assert.deepEqual(Config.providerList().find((p) => p.id === 'anthropic').engines, ['claude']);
+
+  save('codex', 'openai', 'sk-openai-test');
+  assert.equal(Config.codexUpstream().baseUrl, 'https://api.openai.com/v1');
+  assert.equal(Config.codexUpstream().model, 'test-model');
+  await Config.listModels('openai', 'sk-openai-test');
+  assert.deepEqual(Config.calls.at(-1), { url: 'https://api.openai.com/v1/models', key: 'sk-openai-test' });
+  assert.throws(() => save('claude', 'openai', 'sk-openai-test'), /Anthropic/);
+  assert.deepEqual(Config.providerList().find((p) => p.id === 'openai').engines, ['codex']);
+});
+
+test('provider list leads with subscription / official API / OpenRouter, custom stays last', () => {
+  const ids = Config.providerList().map((p) => p.id);
+  assert.equal(ids[0], 'official');
+  assert.deepEqual(ids.slice(1, 9), ['clootee', 'anthropic', 'openai', 'openrouter', 'minimax', 'xiaomi', 'kimi', 'kimicode']);
+  assert.equal(ids.at(-1), 'custom');
+});
+
 test('provider isolation, changed-key cache invalidation and official login remain intact', () => {
   save('codex', 'openrouter', 'sk-or-one');
   Config.setCache('codex', { models: [{ id: 'old-model', source: 'api' }] });
@@ -88,5 +113,11 @@ test('auth errors do not trigger paid fallback or return catalog models as verif
   Failed.calls = [];
   await assert.rejects(Failed.listModels('tencent', 'sk-tp-test'), /401/);
   assert.deepEqual(Failed.calls, ['https://api.lkeap.cloud.tencent.com/plan/v3/models']);
-  for (const meta of Object.values(PROVIDERS)) assert.ok(meta.chatBase.startsWith('https://'));
+  // Every provider needs at least one usable endpoint；官方 API 两家各只有一半
+  // （anthropic 只有 Anthropic 协议、openai 只有 OpenAI 协议），空的那个不算数。
+  for (const meta of Object.values(PROVIDERS)) {
+    assert.ok(meta.anthropicBase || meta.chatBase, 'provider needs at least one endpoint');
+    for (const base of [meta.anthropicBase, meta.chatBase])
+      assert.ok(base === '' || base.startsWith('https://'), `bad base=${base}`);
+  }
 });

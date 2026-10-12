@@ -8,6 +8,7 @@ import { EngineConfig } from './logic_realize/EngineConfig';
 import { TaskQueue } from './logic_realize/TaskQueue';
 import { Toolchain } from './logic_realize/Toolchain';
 import { LifeGuard } from './logic_realize/LifeGuard';
+import { OpenRouterPrices } from './logic_realize/OpenRouterPrices';
 
 // 后端级异常：既写日志，也推到界面。否则用户只看到"点了没反应"，日志在服务器上没人会去翻。
 function reportFatal(kind: string, e: unknown): void {
@@ -40,6 +41,7 @@ try {
 } catch (e) {
   Logger.warn('Process', 'engine config applyEnv on boot failed', e);
 }
+OpenRouterPrices.warm(); // 计费用的 OpenRouter 价目：后台拉取，不阻塞启动
 
 // 启动 Kimi 转译代理（codex kimi provider 指向它；始终运行，仅在 kimi 档位下被使用）。
 try {

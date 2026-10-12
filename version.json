@@ -1,10 +1,10 @@
 {
-  "version": "3.0.2",
+  "version": "3.1.1",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-09-29",
+  "releasedAt": "2026-10-11",
   "notesI18n": {
-    "zh": "· 接入 models.dev 多服务商目录，新增 OpenRouter、千问、腾讯等接入选项\n· 小米、腾讯专属套餐 Key 自动分流；千问等格式相同的 Key 可明确选择套餐与区域，避免误用计费接口\n· 支持手填模型，修复 Codex 新手引导保存服务商配置的问题",
-    "en": "· Add the models.dev provider catalog, including OpenRouter, Alibaba/Qwen and Tencent\n· Route identifiable Xiaomi and Tencent plan keys automatically; select the plan and region explicitly for ambiguous keys\n· Allow manual model IDs and fix provider persistence in Codex onboarding"
+    "zh": "· 修复：设置 → AI 引擎里改了服务商或模型后，点整个弹窗底部的「保存」却没生效（那个按钮只存了默认引擎）\n· 整个板块现在只有一个保存按钮，保存结果与「有未保存的改动」都显示在按钮旁边，不用再进折叠块里找\n· 服务商/模型保存失败时不再静默丢弃改动：会说明是哪一块、为什么，并展开那一块",
+    "en": "· Fix: after changing the provider or model under Settings → AI engine, clicking the dialog's bottom Save did nothing — that button only wrote the default engine\n· The pane now has a single Save button, and both the result and an “unsaved changes” hint appear right next to it, so there is no inner button to hunt for\n· A failed provider/model save is no longer silent: it names the block that failed and why, and expands it"
   }
 }

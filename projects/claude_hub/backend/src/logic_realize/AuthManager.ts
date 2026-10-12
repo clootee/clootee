@@ -26,6 +26,10 @@ export class AuthManager extends AuthManagerStruct {
     return crypto.randomBytes(16).toString('hex');
   }
 
+  protected static _randomPassword(): string {
+    return crypto.randomBytes(24).toString('base64url');
+  }
+
   protected static _delete(): void {
     if (fs.existsSync(Paths.AUTH_FILE)) fs.unlinkSync(Paths.AUTH_FILE);
   }
