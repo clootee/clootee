@@ -32,13 +32,17 @@ export class ClaudeRunner extends ClaudeRunnerStruct {
     if (model) args.push('--model', model);
     const effort = (cfg.effort || '').trim();
     if (effort && !session.costHelper) args.push('--effort', effort);
-    if (session.costHelper) args.push('--tools', '', '--no-session-persistence', '--max-turns', '1');
+    if (session.costHelper) {
+      args.push('--tools', '', '--no-session-persistence', '--max-turns', '1',
+        '--system-prompt', 'You classify message independence or prepare a self-contained handoff. Use only supplied text and context. Do not execute the task or use tools.',
+        cfg.apiKey ? '--bare' : '--safe-mode');
+    }
     // 自动压缩上下文：只有用户显式选了「自定义窗口」才传。选「自动」时一个参数都不加，
     // 让 claude 用自己的默认窗口（第三方服务商还会有 CLAUDE_CODE_AUTO_COMPACT_WINDOW，见 EngineConfig）。
     const autoCompact = Settings.autoCompactArg();
     if (autoCompact) args.push('--autocompact', autoCompact);
     // 追加图表能力提示：让 AI 在合适时输出 <chart> 数据块（前端 ECharts 渲染）
-    if (AppConfig.CHART_SYSTEM_PROMPT) {
+    if (AppConfig.CHART_SYSTEM_PROMPT && !session.costHelper) {
       args.push('--append-system-prompt', AppConfig.CHART_SYSTEM_PROMPT);
     }
     // 续接策略（绝不 --fork-session，绝不自造 id）：

@@ -180,6 +180,10 @@ export class ClaudeRunnerStruct {
         // 默认服务商 clootee：给请求带上本轮任务的标签，供「本次花了多少」精确汇总（别家服务商时为空）
         ...ConsoleAccount.runEnv(session),
         ...(session.costHelper ? { CLAUDE_CODE_MAX_OUTPUT_TOKENS: '3000' } : {}),
+        ...(session.costHelper && EngineConfig.get().claude.apiKey ? {
+          ANTHROPIC_API_KEY: EngineConfig.get().claude.apiKey,
+          ANTHROPIC_AUTH_TOKEN: EngineConfig.get().claude.apiKey,
+        } : {}),
         ...PromptCache.env(session.costHelper?.cache || CostPolicy.cache(Settings.get(), session.promptCache,
           SUBSCRIPTION_PROVIDERS.includes(EngineConfig.get().claude.provider))),
       },
