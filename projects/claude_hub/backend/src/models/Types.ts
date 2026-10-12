@@ -192,6 +192,8 @@ export interface Message {
 // 会话 = Claude Code 自己的会话（~/.claude/projects 下的 jsonl）。hub 不再持久化任何会话/消息，
 // 唯一数据源就是 claude 的 jsonl。这里的 Session 只是把 jsonl 元信息 + 运行期队列状态拼到一起的"视图"。
 export interface Session {
+  promptCache?: '1h' | '5m' | 'off';
+  promptCacheConfirmed?: boolean;
   // 会话 id = `<rootId>:<claude uuid>`（自描述：含根目录，便于无状态定位 jsonl）。
   // 尚未开始的"新会话草稿"为 `<rootId>:draft-<rand>`，纯运行期、不落盘、发首条消息后由 claude 生成真实 uuid。
   id: string;

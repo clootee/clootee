@@ -434,6 +434,9 @@ export class Server {
         SessionManager.setEngine(req.body.id, req.body.engine),
       ),
     );
+    app.post('/api/session/prompt-cache', (req, res) =>
+      this._wrap(res, 'session.promptCache', () => SessionManager.setPromptCache(String(req.body.id || ''), req.body.mode)),
+    );
     app.get('/api/session/get', (req, res) =>
       this._wrap(res, 'session.get', () => SessionManager.getSessionFull(String(req.query.id))),
     );

@@ -4,6 +4,8 @@ const STATUSES: SessionStatus[] = ['active', 'testing', 'completed'];
 const MAX_PINNED = 3;
 
 export interface SessionMetaEntry {
+  promptCache?: '1h' | '5m' | 'off';
+  promptCacheConfirmed?: boolean;
   pinned: boolean;
   pinnedAt: number;
   favorite?: boolean;
@@ -15,6 +17,12 @@ export interface SessionMetaEntry {
 }
 
 export class SessionMetaStruct {
+  static setPromptCache(id: string, mode: '1h' | '5m' | 'off', confirmed: boolean): void {
+    if (!id) throw new Error('Invalid session id');
+    const all = this._read();
+    all[id] = { ...(all[id] || this._blank()), promptCache: mode, promptCacheConfirmed: confirmed };
+    this._write(all);
+  }
   static getAll(): Record<string, SessionMetaEntry> {
     return this._read();
   }

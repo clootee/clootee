@@ -19,7 +19,7 @@ const ids = new Set([...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
 let bad = 0;
 const fail = (msg) => { console.log(`✕ ${msg}`); bad++; };
 
-for (const file of ['app.js', 'onboard.js', 'health.js', 'workspace.js', 'rootwizard.js']) {
+for (const file of ['app.js', 'onboard.js', 'health.js', 'workspace.js', 'rootwizard.js', 'prompt-cache.js']) {
   const code = fs.readFileSync(path.join(FE, file), 'utf8');
   for (const m of code.matchAll(/\bT\('([A-Za-z0-9_]+)'\)/g)) {
     const e = DICT[m[1]];
@@ -36,7 +36,7 @@ for (const p of ['claude', 'codex']) {
     `${p}BaseUrlLbl`, `${p}BaseUrl`, `${p}ModelsUrlLbl`, `${p}ModelsUrl`,
     `${p}ApiKeyLbl`, `${p}ApiKey`, `${p}ModelLbl`, `${p}ModelSelect`, `${p}ModelInput`,
     `${p}ModelList`, `${p}ModelHint`, `${p}ModelBox`, `${p}EffortLbl`, `${p}EffortSelect`,
-    `${p}EffortNote`, `${p}AdvLabel`, `${p}ModelsBtn`, `${p}SaveBtn`, `${p}ProviderStatus`,
+    `${p}EffortNote`, `${p}AdvLabel`, `${p}ModelsBtn`, `${p}ProviderStatus`,
     `mdl${cap}Provider`, `mdl${cap}DetectBtn`, `mdl${cap}ListBtn`, `mdl${cap}Status`,
   ];
   for (const id of need) if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
@@ -46,6 +46,8 @@ for (const id of ['mdlClaudeVerifyChk', 'mdlClaudeVerifyTitle', 'mdlClaudeVerify
   if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
 // Both official engines now render account/login status inside their login cards.
 for (const id of ['clBox', 'cxBox']) if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
+for (const id of ['settingsPaneSave', 'claudePromptCache', 'askClaudePromptCache', 'sessionPromptCache', 'promptCacheModal'])
+  if (!ids.has(id)) fail(`index.html 缺 id=${id}`);
 
 console.log(bad ? `\n${bad} 处不通过` : '全部通过');
 process.exit(bad ? 1 : 0);

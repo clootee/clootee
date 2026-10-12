@@ -6,6 +6,8 @@ import { Ids } from '../helper/Ids';
 import { Logger } from '../helper/Logger';
 import { EventBus } from '../helper/EventBus';
 import { AppConfig } from '../config/AppConfig';
+import { Settings } from '../logic_realize/Settings';
+import { PromptCache } from '../helper/PromptCache';
 import { SessionMeta } from '../logic_realize/SessionMeta';
 import { SessionStatus, SessionMetaEntry } from './SessionMetaStruct';
 import { Session, Task, Message, Engine, SessionSearchHit } from '../models/Types';
@@ -91,6 +93,8 @@ export class SessionManagerStruct {
       const e = meta[this._canonicalKey(s)] || meta[s.id];
       return {
         ...s,
+        promptCache: e?.promptCache || s.promptCache,
+        promptCacheConfirmed: e?.promptCacheConfirmed ?? s.promptCacheConfirmed,
         pinned: !!e?.pinned,
         favorite: !!e?.favorite,
         status: e?.status || 'active',
@@ -189,16 +193,32 @@ export class SessionManagerStruct {
     return this.getSession(id);
   }
 
+  static setPromptCache(id: string, mode: unknown): Session {
+    if (!PromptCache.valid(mode)) throw new Error('Invalid Claude prompt cache mode');
+    const s = this.getSession(id);
+    if (s.engine !== 'claude') throw new Error('Prompt cache selection requires Claude Code');
+    // Existing runners already received their launch settings; the next launch gets this choice.
+    s.promptCache = mode;
+    s.promptCacheConfirmed = true;
+    this.saveSession(s);
+    SessionMeta.setPromptCache(this._canonicalKey(s), mode, true);
+    EventBus.broadcast({ kind: 'session', session: s });
+    return s;
+  }
+
   // 新建会话：仅创建一个内存草稿（不落盘、不自造 claude id）。
   // 发首条任务时不传 --session-id，让 claude 生成 uuid 后由 _reconcileSessionId 回写。
   static createSession(rootId: string, _name: string, engine?: Engine): Session {
     if (!rootId) throw new Error(`createSession: invalid rootId=${rootId}`);
     const eng: Engine = engine === 'codex' ? 'codex' : engine === 'claude' ? 'claude' : AppConfig.DEFAULT_ENGINE;
+    const cache = Settings.get();
     const now = Date.now();
     const session: Session = {
       id: `${rootId}:draft-${Ids.short()}`,
       rootId,
       engine: eng,
+      promptCache: cache.claudePromptCache,
+      promptCacheConfirmed: !cache.askClaudePromptCache,
       name: '',
       claudeSessionId: '', // 草稿：尚无 claude 会话
       paused: false,
@@ -210,6 +230,7 @@ export class SessionManagerStruct {
     };
     this._put(session);
     this.markIndexed(session.id); // 本版本起：新会话建立之初就进索引，「全部目录」视图据此取数
+    SessionMeta.setPromptCache(session.id, cache.claudePromptCache, !cache.askClaudePromptCache);
     // 前端会话列表靠这个事件才知道"多了一个会话"（不是改已有会话状态那种 'session' 广播场景，
     // 比如原会话已删、外部推送兜底新建的场景，用户不刷新页面也得看见）
     EventBus.broadcast({ kind: 'session', session });

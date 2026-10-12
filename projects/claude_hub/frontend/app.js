@@ -5496,6 +5496,7 @@ async function addTask() {
       return;
     }
   }
+  if (!(await PromptCacheUi.ensure())) return;
   ta.value = '';
   const keepAttach = Attach.items.slice();
   Attach.items = [];
@@ -5552,6 +5553,7 @@ async function submitTasks() {
     }
   }
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
+  if (!(await PromptCacheUi.ensure())) return;
   await api('/api/task/add', { sessionId: State.sessionId, prompts: prompts.map(applyQuickPrefix) });
   closeTasksModal();
 }
@@ -6760,6 +6762,7 @@ function bind() {
   $('wsDirUse').addEventListener('click', wsUseTypedDir);
   $('wsDirPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') wsUseTypedDir(); });
   $('wsDirOverlay').addEventListener('click', (e) => { if (e.target.id === 'wsDirOverlay') closeWsDir(); });
+  PromptCacheUi.bind();
   $('engineSelect').addEventListener('change', onEngineChange);
   // 设置：首页只有板块列表（renderSettingsNav），点某个板块进 #settingsPaneOverlay
   $('settingsBtn').addEventListener('click', openSettings);
@@ -6924,6 +6927,7 @@ function bind() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    if ($('promptCacheModal').open) { e.preventDefault(); $('promptCacheModal').close(); return; }
     if ($('batchCostModal').open) { e.preventDefault(); $('batchCostModal').close(); return; }
     if (!$('updateModal').hidden) { UpdateModal.close(); return; } // 强制更新时 close() 是空操作，关不掉
     if (!$('queueModal').hidden) closeQueueModal();
@@ -7073,6 +7077,8 @@ async function loadSettings() {
       State.settings.templateCollectionPath = typeof s.templateCollectionPath === 'string' ? s.templateCollectionPath : '';
       State.settings.quickGroups = Array.isArray(s.quickGroups) ? s.quickGroups : [];
       if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
+      State.settings.claudePromptCache = s.claudePromptCache || '1h';
+      State.settings.askClaudePromptCache = !!s.askClaudePromptCache;
       if (typeof s.version === 'string' && s.version) State.settings.version = s.version;
       State.settings.runAsUserEnabled = !!s.runAsUserEnabled;
       State.settings.runAsUserName = typeof s.runAsUserName === 'string' ? s.runAsUserName : 'claudeuser';
@@ -7361,7 +7367,7 @@ function renderPaneStatus() {
     show(s, PaneNotice.kind);
     return;
   }
-  if (CurrentPane === 'engine' && (EngineDirty.claude || EngineDirty.codex)) return show(T('engDirty'), 'warn');
+  if (CurrentPane === 'engine' && (EngineDirty.claude || EngineDirty.codex || PromptCacheUi.dirty)) return show(T('engDirty'), 'warn');
   show('', '');
 }
 
@@ -7432,6 +7438,8 @@ async function patchSettings(patch) {
       typeof s.templateCollectionPath === 'string' ? s.templateCollectionPath : '';
     State.settings.quickGroups = Array.isArray(s.quickGroups) ? s.quickGroups : [];
     if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
+      State.settings.claudePromptCache = s.claudePromptCache || '1h';
+      State.settings.askClaudePromptCache = !!s.askClaudePromptCache;
     renderQuick();
     return s;
   } catch (e) {
@@ -7445,6 +7453,7 @@ async function patchSettings(patch) {
 // 引擎板块的静态文案：标签、服务商下拉选项、按钮、占位符。
 // 首屏与「切语言」都经 applyText 走这里，保证界面只出现当前语言。
 function applyEnginePaneText() {
+  PromptCacheUi.applyText();
   for (const engine of ['claude', 'codex']) {
     const cap = engine === 'claude' ? 'Claude' : 'Codex';
     const u = providerUi(engine);
@@ -7518,6 +7527,7 @@ function renderEngineDirty() {
 }
 
 function fillEnginePane() {
+  PromptCacheUi.fill();
   EngineDirty.claude = false;
   EngineDirty.codex = false;
   EngineLoaded.claude = false;
@@ -7562,7 +7572,8 @@ async function saveEnginePane() {
     const err = await saveEngineProvider(e);
     if (err) fails.push({ engine: e, label, msg: err.msg });
   }
-  const savedDefault = await patchSettings({ defaultEngine: eng });
+  const savedDefault = await patchSettings({ defaultEngine: eng, claudePromptCache: $('claudePromptCache').value, askClaudePromptCache: $('askClaudePromptCache').checked });
+  if (savedDefault) PromptCacheUi.dirty = false;
   if (fails.length) {
     const f = fails[0];
     setPaneNotice('engBlockSaveFail', { block: f.label, msg: f.msg }, 'err', 0);
@@ -8646,6 +8657,7 @@ async function saveSettings() {
 
 // 主区标题旁的引擎控件：草稿(未开始)显示可选下拉，已开始显示锁定徽章，无会话则都隐藏
 function refreshEngineControl() {
+  PromptCacheUi.render();
   const sel = $('engineSelect');
   const badge = $('engineBadge');
   const s = State.session;

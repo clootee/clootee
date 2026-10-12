@@ -3179,4 +3179,14 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .batch-cost-modal .api-cost-table th, .batch-cost-modal .api-cost-table td { padding: 9px 6px; }
 .batch-cost-total td { font-weight: 600; }
 .batch-cost-help { text-align: left; line-height: 1.7; margin-top: 16px; }
+.prompt-cache-settings { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+.prompt-cache-help { margin: 12px 0; line-height: 1.7; color: var(--muted); font-size: 12px; }
+.prompt-cache-help summary { cursor: pointer; color: var(--accent); }
+.prompt-cache-modal { width: min(560px, calc(100vw - 32px)); }
+.prompt-cache-choice { display: flex; gap: 12px; padding: 12px; margin: 10px 0; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.prompt-cache-choice:has(input:checked) { border-color: var(--accent); }
+.prompt-cache-choice small { display: block; margin-top: 6px; color: var(--muted); line-height: 1.6; }
+.prompt-cache-actions { display: flex; justify-content: flex-end; gap: 10px; }
+#promptCacheError { color: var(--red); }
+#sessionPromptCache { font-size: 11px; padding: 3px 7px; }
 .api-cost-sub { color: var(--yellow); margin-left: 4px; }

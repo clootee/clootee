@@ -7,6 +7,7 @@ import { NetHelper } from '../helper/NetHelper';
 import { PackageInfo } from '../helper/PackageInfo';
 import { RunAsUser } from '../helper/RunAsUser';
 import { EngineStatus } from '../logic_realize/EngineStatus';
+import { PromptCache, PromptCacheMode } from '../helper/PromptCache';
 
 // 快捷按钮：一个组内互斥（单选，可取消），组与组之间互不影响（可各选一个）
 export interface QuickTag {
@@ -37,6 +38,8 @@ export const AUTO_COMPACT_MAX = 1000000;
 export const AUTO_COMPACT_DEFAULT_TOKENS = 200000;
 
 export interface AppSettings {
+  claudePromptCache: PromptCacheMode;
+  askClaudePromptCache: boolean;
   defaultEngine: Engine;
   allowLan: boolean;      // false=仅 localhost；true=允许局域网(0.0.0.0)访问（需重启生效）
   preferBundled: boolean; // 旧字段：true=优先内置。新代码请用 toolPrefs，这里仅作迁移来源
@@ -112,6 +115,8 @@ export class SettingsStruct {
         ? raw.runAsUserName.trim()
         : DEFAULT_RUN_AS_USER_NAME;
     return {
+      claudePromptCache: PromptCache.valid(raw?.claudePromptCache) ? raw!.claudePromptCache : '1h',
+      askClaudePromptCache: !!raw?.askClaudePromptCache,
       defaultEngine: eng,
       allowLan: !!(raw && raw.allowLan),
       preferBundled: !!(raw && raw.preferBundled),
@@ -165,6 +170,11 @@ export class SettingsStruct {
   // 批量更新（前端设置面板）；只接受已知字段
   static update(patch: Partial<AppSettings>): AppSettings {
     const next: Partial<AppSettings> = {};
+    if (patch.claudePromptCache !== undefined) {
+      if (!PromptCache.valid(patch.claudePromptCache)) throw new Error('Invalid Claude prompt cache mode');
+      next.claudePromptCache = patch.claudePromptCache;
+    }
+    if (typeof patch.askClaudePromptCache === 'boolean') next.askClaudePromptCache = patch.askClaudePromptCache;
     if (patch.defaultEngine === 'claude' || patch.defaultEngine === 'codex')
       next.defaultEngine = patch.defaultEngine;
     if (typeof patch.allowLan === 'boolean') next.allowLan = patch.allowLan;
@@ -197,6 +207,8 @@ export class SettingsStruct {
         ? raw.defaultEngine
         : cur.defaultEngine;
     const merged: AppSettings = {
+      claudePromptCache: patch.claudePromptCache ?? cur.claudePromptCache,
+      askClaudePromptCache: patch.askClaudePromptCache ?? cur.askClaudePromptCache,
       defaultEngine: patch.defaultEngine ?? savedEngine,
       allowLan: patch.allowLan ?? cur.allowLan,
       preferBundled: patch.preferBundled ?? cur.preferBundled,

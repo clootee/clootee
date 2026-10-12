@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="styles.css?v=20261012c" />
+  <link rel="stylesheet" href="styles.css?v=20261012d" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -463,6 +463,12 @@
               </div>
               <div class="sx-note" id="mdlClaudeStatus"></div>
               <div class="sx-note" id="claudeProviderStatus"></div>
+              <div class="prompt-cache-settings">
+                <label class="sx-lbl" for="claudePromptCache" id="claudePromptCacheLabel"></label>
+                <select class="sx-input" id="claudePromptCache"><option value="1h"></option><option value="5m"></option><option value="off"></option></select>
+                <label class="sx-chk"><input type="checkbox" id="askClaudePromptCache" /><span id="askClaudePromptCacheLabel"></span></label>
+                <details class="prompt-cache-help"><summary id="claudePromptCacheHelpLabel"></summary><p id="claudePromptCacheHelp"></p></details>
+              </div>
             </div>
           </div>
 
@@ -845,6 +851,7 @@
         <span class="badge paused" id="pausedBadge" style="display:none"></span>
         <!-- 引擎：草稿(未开始)可选，开始后锁定为徽章 -->
         <select id="engineSelect" class="engine-select" style="display:none"></select>
+        <button type="button" id="sessionPromptCache" hidden></button>
         <span class="engine-badge" id="engineBadge" style="display:none"></span>
         <span class="spacer"></span>
         <button id="aiCollapseBtn" class="icon-btn ai-collapse-btn" aria-label="collapse AI messages" style="display:none"></button>
@@ -1092,7 +1099,19 @@
     <div class="batch-cost-heading"><h3 id="batchCostTitle"></h3><button type="button" id="batchCostClose" aria-label="Close">✕</button></div>
     <div id="batchCostBody" aria-live="polite"></div>
   </dialog>
-  <script src="trans.js?v=20261012c"></script>
+  <dialog id="promptCacheModal" class="batch-cost-modal prompt-cache-modal" aria-labelledby="promptCacheTitle">
+    <div class="batch-cost-heading"><h3 id="promptCacheTitle"></h3><button type="button" id="promptCacheClose">✕</button></div>
+    <p id="promptCacheIntro"></p>
+    <label class="prompt-cache-choice"><input type="radio" name="promptCacheChoice" value="1h" /><span><b id="promptCacheLong"></b><small id="promptCacheLongNote"></small></span></label>
+    <label class="prompt-cache-choice"><input type="radio" name="promptCacheChoice" value="5m" /><span><b id="promptCacheShort"></b><small id="promptCacheShortNote"></small></span></label>
+    <details class="prompt-cache-help"><summary id="promptCacheAdvanced"></summary>
+      <label class="prompt-cache-choice"><input type="radio" name="promptCacheChoice" value="off" /><span><b id="promptCacheOff"></b><small id="promptCacheOffNote"></small></span></label>
+    </details>
+    <details class="prompt-cache-help"><summary id="promptCacheHelpLabel"></summary><p id="promptCacheHelp"></p></details>
+    <p id="promptCacheError" role="alert"></p>
+    <div class="prompt-cache-actions"><button type="button" id="promptCacheCancel"></button><button type="button" id="promptCacheConfirm"></button></div>
+  </dialog>
+  <script src="trans.js?v=20261012d"></script>
   <script src="workspace.js?v=20260825a"></script>
   <script src="rootwizard.js?v=20260804a"></script>
   <script src="health.js?v=20260911a"></script>
@@ -1108,7 +1127,8 @@
   <script src="cat.js?v=20260801q"></script>
   <script src="rabbit.js?v=20260801z"></script>
   <script src="mecha.js?v=20260802a"></script>
-  <script src="helper/ErrorHandler.js?v=20261012c"></script>
-  <script src="app.js?v=20261012c"></script>
+  <script src="helper/ErrorHandler.js?v=20261012d"></script>
+  <script src="prompt-cache.js?v=20261012d"></script>
+  <script src="app.js?v=20261012d"></script>
 </body>
 </html>

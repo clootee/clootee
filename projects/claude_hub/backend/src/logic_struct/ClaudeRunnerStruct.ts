@@ -13,6 +13,7 @@ import { Settings } from '../logic_realize/Settings';
 import { Toolchain } from '../logic_realize/Toolchain';
 import { RootManager } from '../logic_realize/RootManager';
 import { ExternalEnv } from '../helper/ExternalEnv';
+import { PromptCache } from '../helper/PromptCache';
 import { TraceInput } from './TraceStoreStruct';
 
 // 执行器上报的轨迹事件：taskId 由队列侧补（执行器不关心任务编号）
@@ -175,6 +176,7 @@ export class ClaudeRunnerStruct {
         ...ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
         // 默认服务商 clootee：给请求带上本轮任务的标签，供「本次花了多少」精确汇总（别家服务商时为空）
         ...ConsoleAccount.runEnv(session),
+        ...PromptCache.env(session.promptCache || Settings.get().claudePromptCache),
       },
     );
   }

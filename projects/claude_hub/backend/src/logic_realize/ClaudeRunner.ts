@@ -6,6 +6,7 @@ import { EngineConfig } from './EngineConfig';
 import { Logger } from '../helper/Logger';
 import { Session } from '../models/Types';
 import { Settings } from './Settings';
+import { PromptCache } from '../helper/PromptCache';
 
 export class ClaudeRunner extends ClaudeRunnerStruct {
   protected static _buildArgs(session: Session, rootPath: string): string[] {
@@ -23,6 +24,8 @@ export class ClaudeRunner extends ClaudeRunnerStruct {
     // 注意读的是 EngineConfig.get() 的**投影视图**——它只反映当前服务商自己那一槽，
     // 所以切回原版绝不会把第三方的模型 id 传给 CLI。
     const cfg = EngineConfig.get().claude;
+    const cacheMode = session.promptCache || Settings.get().claudePromptCache;
+    args.push('--settings', JSON.stringify(PromptCache.settings(cacheMode)));
     const model = (cfg.model || '').trim();
     if (model) args.push('--model', model);
     const effort = (cfg.effort || '').trim();

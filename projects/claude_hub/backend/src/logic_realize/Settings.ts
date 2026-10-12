@@ -13,6 +13,8 @@ import {
 } from '../logic_struct/SettingsStruct';
 import type { ToolId } from '../logic_struct/ToolchainStruct';
 import { Paths } from '../paths';
+import { PromptCache } from '../helper/PromptCache';
+import { RunAsUser } from '../helper/RunAsUser';
 
 // 运行环境面板里可选来源的工具（与 ToolchainStruct.ToolId 一致；type-only 导入不产生运行时循环依赖）
 const TOOL_IDS: ToolId[] = ['node', 'git', 'claude', 'codex'];
@@ -28,6 +30,8 @@ export class Settings extends SettingsStruct {
   }
 
   protected static _write(s: AppSettings): void {
+    const cfg = { enabled: s.runAsUserEnabled, user: s.runAsUserName };
+    PromptCache.sync(s.claudePromptCache, RunAsUser.isActive(cfg) ? RunAsUser.homeDirFor(cfg.user) : undefined);
     fs.writeFileSync(Paths.SETTINGS_FILE, JSON.stringify(s, null, 2), 'utf8');
   }
 
