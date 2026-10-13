@@ -15,7 +15,7 @@ export interface CostPolicySettings {
 export class CostPolicy {
   static defaults(): CostPolicySettings {
     return { mode: 'auto', scope: 'both', guard: true, strict: false, enhance: true,
-      thresholdTokens: 50000, minExtraUsd: 0.1, cheapModel: '' };
+      thresholdTokens: 50000, minExtraUsd: 0.5, cheapModel: '' };
   }
   static sanitize(raw: unknown): CostPolicySettings {
     const r = raw && typeof raw === 'object' ? raw as Partial<CostPolicySettings> : {};

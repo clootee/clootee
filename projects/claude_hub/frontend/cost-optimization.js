@@ -1,6 +1,6 @@
 const CostUi = {
   pending: false,
-  defaults: { mode: 'auto', scope: 'both', guard: true, strict: false, enhance: true, thresholdTokens: 50000, minExtraUsd: 0.1, cheapModel: '' },
+  defaults: { mode: 'auto', scope: 'both', guard: true, strict: false, enhance: true, thresholdTokens: 50000, minExtraUsd: 0.5, cheapModel: '' },
   policy() { return { ...this.defaults, ...(State.settings.costOptimization || {}) }; },
   applyText() {
     const labels = { costModeLabel: 'costMode', costScopeLabel: 'costScope', costSavingsClaim: 'costSavings',
