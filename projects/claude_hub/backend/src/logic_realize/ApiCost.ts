@@ -6,13 +6,14 @@ import {
   CLAUDE_PRICES, ModelPrice, DEEPSEEK_PRICES, DeepSeekPrice, DEEPSEEK_OFFPEAK_MULT, isDeepSeekPeak,
   CACHE_WRITE_5M_MULT, CACHE_WRITE_1H_MULT, CACHE_READ_DEFAULT_MULT,
   LONG_CONTEXT_THRESHOLD, LONG_CONTEXT_INPUT_MULT, LONG_CONTEXT_OUTPUT_MULT, WEB_SEARCH_USD,
-  SUBSCRIPTION_PROVIDERS, CLOOTEE_PROVIDER,
+  SUBSCRIPTION_PROVIDERS, CLOOTEE_PROVIDER, OPENAI_PRICES, OpenAiPrice,
 } from '../config/ClaudePricing';
 import { OpenRouterPrices } from './OpenRouterPrices';
+import { CodexRunner } from './CodexRunner';
 import { ApiBilling, ApiCostLine, ApiSessionCost, ApiSessionTotals, ApiTurnCost, TraceEvent } from '../models/Types';
 
 // 价目来源：Claude 官方 / OpenRouter 公开价目 / DeepSeek 官方价目
-type Source = 'official' | 'openrouter' | 'deepseek';
+type Source = 'official' | 'openrouter' | 'deepseek' | 'openai';
 
 interface Req {
   model: string;
@@ -87,17 +88,24 @@ export class ApiCost extends ApiCostStruct {
   // 会话内所有 claude 轮次都计价：订阅轮次给等价估价（billing=subscription），按量轮次是真实支出。
   // Clootee 自有服务商的轮次由 ConsoleAccount 单独记账，这里跳过，免得同一笔钱算两次。
   protected static _compute(sessionId: string, events: TraceEvent[]): ApiSessionCost {
-    const tasks = new Map<string, { ts: number; provider: string }>();
+    const tasks = new Map<string, { ts: number; provider: string; codex: { model: string; codexAuth: string } | null }>();
     for (const e of events) {
-      if (e.kind !== 'task_start' || e.engine === 'codex') continue;
-      const provider = String((e.raw as { provider?: string } | undefined)?.provider || '');
+      if (e.kind !== 'task_start') continue;
+      const raw = (e.raw || {}) as { provider?: string; model?: string; codexAuth?: string };
+      const provider = String(raw.provider || '');
       if (provider === CLOOTEE_PROVIDER) continue;
-      tasks.set(e.taskId, { ts: e.ts, provider });
+      // 老 codex 轨迹没记模型/登录方式 → 按当前配置推断
+      const codex = e.engine === 'codex'
+        ? (raw.model ? { model: String(raw.model), codexAuth: String(raw.codexAuth || '') } : CodexRunner.billingMeta())
+        : null;
+      tasks.set(e.taskId, { ts: e.ts, provider: codex && !provider ? 'official' : provider, codex });
     }
     const deltas = this._resultDeltas(events);
     const turns: ApiTurnCost[] = [];
     for (const [taskId, t] of tasks) {
-      turns.push(this._turn(taskId, t.ts, t.provider, events.filter((e) => e.taskId === taskId), deltas.get(taskId)));
+      const own = events.filter((e) => e.taskId === taskId);
+      turns.push(t.codex ? this._codexTurn(taskId, t.ts, t.provider, t.codex, own)
+        : this._turn(taskId, t.ts, t.provider, own, deltas.get(taskId)));
     }
     turns.sort((a, b) => a.startedAt - b.startedAt);
     return {
@@ -105,6 +113,31 @@ export class ApiCost extends ApiCostStruct {
       turns,
       totalUsd: this._round(turns.reduce((n, t) => n + t.totalUsd, 0)),
       subscriptionUsd: this._round(turns.filter((t) => t.billing === 'subscription').reduce((n, t) => n + t.totalUsd, 0)),
+    };
+  }
+
+  // Codex 轮次：turn.completed 的 usage 是本轮（非累计）合计，input_tokens 含缓存命中部分。
+  // 原版 + ChatGPT 登录 = 订阅（等价估价）；原版 + API Key 登录或第三方服务商 = 按量。
+  private static _codexTurn(
+    taskId: string, startedAt: number, provider: string, meta: { model: string; codexAuth: string }, events: TraceEvent[],
+  ): ApiTurnCost {
+    const lines = new Map<string, ApiCostLine>();
+    let consumedMessages = 0;
+    for (const e of events) {
+      if (e.name !== 'turn.completed' || !e.usage) continue;
+      const u = e.usage as Record<string, unknown>;
+      const cached = num(u.cached_input_tokens);
+      this._add(lines, provider, false, {
+        model: meta.model, ts: e.ts, input: Math.max(0, num(u.input_tokens) - cached), output: num(u.output_tokens),
+        cacheRead: cached, cw5m: 0, cw1h: num(u.cache_write_input_tokens), web: 0, fast: false, reported: null,
+      }, 1);
+      consumedMessages++;
+    }
+    const list = [...lines.values()].map((l) => this._finish(l));
+    const billing: ApiBilling = provider === 'official' && meta.codexAuth !== 'apikey' ? 'subscription' : 'apikey';
+    return {
+      taskId, provider, billing, startedAt, consumedMessages,
+      lines: list, totalUsd: this._round(list.reduce((n, l) => n + l.totalUsd, 0)), cliUsd: null,
     };
   }
 
@@ -122,6 +155,7 @@ export class ApiCost extends ApiCostStruct {
     const id = String(model || '').toLowerCase();
     if (id.includes('/')) return 'openrouter'; // 带命名空间的 id（anthropic/…）只有 OpenRouter 会这么报
     if (id.startsWith('deepseek')) return 'deepseek';
+    if (/^(gpt-|o\d)/.test(id)) return 'openai';
     return 'official';
   }
 
@@ -257,6 +291,7 @@ export class ApiCost extends ApiCostStruct {
     switch (this._source(provider, model)) {
       case 'openrouter': return !!OpenRouterPrices.lookup(model);
       case 'deepseek': return !!this._dsPrice(model);
+      case 'openai': return !!this._oaPrice(model) || !!OpenRouterPrices.lookup(`openai/${model}`);
       default: return !!this._price(model);
     }
   }
@@ -265,6 +300,7 @@ export class ApiCost extends ApiCostStruct {
     switch (this._source(provider, r.model)) {
       case 'openrouter': return this._orRates(r);
       case 'deepseek': return this._dsRates(r);
+      case 'openai': return this._oaRates(r);
       default: return this._officialRates(r);
     }
   }
@@ -301,6 +337,24 @@ export class ApiCost extends ApiCostStruct {
       cw1h: input,
       web: 0,
     };
+  }
+
+  // OpenAI 官方价目：无缓存写加价，写入按输入价计
+  private static _oaRates(r: Req): Rates | null {
+    const p = this._oaPrice(r.model);
+    // 内置价目没收录的新模型：退到 OpenRouter 公开价目里的同名 openai/ 模型
+    if (!p) return this._orRates({ ...r, model: `openai/${r.model}` });
+    const input = p.input / MTOK;
+    return { input, output: p.output / MTOK, cacheRead: p.cacheRead / MTOK, cw5m: input, cw1h: input, web: 0 };
+  }
+
+  private static _oaPrice(model: string): OpenAiPrice | null {
+    const id = String(model || '').toLowerCase().replace(/^openai\//, '').replace(/-\d{4}-\d{2}-\d{2}$/, '').trim();
+    let best = '';
+    for (const k of Object.keys(OPENAI_PRICES)) {
+      if ((id === k || id.startsWith(`${k}-`)) && k.length > best.length) best = k;
+    }
+    return best ? OPENAI_PRICES[best] : null;
   }
 
   // OpenRouter 公开价目（每 token 美元）：按本次请求的输入总量套用最高一档 overrides；

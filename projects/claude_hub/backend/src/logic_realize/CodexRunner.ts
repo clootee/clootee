@@ -6,8 +6,29 @@ import { Settings } from './Settings';
 import { Logger } from '../helper/Logger';
 import { Session } from '../models/Types';
 import { EngineConfig } from './EngineConfig';
+import { CODEX_DEFAULT_MODEL } from '../config/ClaudePricing';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export class CodexRunner extends CodexRunnerStruct {
+  // 模型：设置里选定的 > ~/.codex/config.toml 顶层 model > CLI 默认；登录方式读 ~/.codex/auth.json 的 auth_mode
+  protected static _billingMeta(): { model: string; codexAuth: string } {
+    const home = CodexStoreHelper.codexHome(Settings.effectiveHomeDir());
+    let model = (EngineConfig.get().codex.model || '').trim();
+    if (!model) {
+      try {
+        const toml = fs.readFileSync(path.join(home, 'config.toml'), 'utf8').split(/\r?\n\s*\[/)[0];
+        model = (toml.match(/^\s*model\s*=\s*"([^"]+)"/m) || [])[1] || '';
+      } catch { /* 没有 config.toml */ }
+    }
+    let codexAuth = '';
+    try {
+      const auth = JSON.parse(fs.readFileSync(path.join(home, 'auth.json'), 'utf8'));
+      codexAuth = String(auth.auth_mode || (auth.tokens ? 'chatgpt' : auth.OPENAI_API_KEY ? 'apikey' : '')).toLowerCase();
+    } catch { /* 未登录 */ }
+    return { model: model || CODEX_DEFAULT_MODEL, codexAuth };
+  }
+
   protected static _buildArgs(session: Session, _rootPath: string): string[] {
     // 无人值守：跳过 git 仓库检查 + 跳过审批与沙箱（等价 claude 的 bypassPermissions）。
     const common = [

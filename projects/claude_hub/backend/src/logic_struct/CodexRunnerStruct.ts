@@ -139,6 +139,15 @@ export class CodexRunnerStruct {
   }
 
   // 组装 codex 参数：已有会话 id 且其 rollout 存在 → resume 续接；否则首跑（codex 生成新 id 并经 --json 回报）
+  // 计费元信息：本轮实际用的模型 + 登录方式（chatgpt=订阅 / apikey=按量），写进 task_start 供 ApiCost 计价
+  static billingMeta(): { model: string; codexAuth: string } {
+    return this._billingMeta();
+  }
+
+  protected static _billingMeta(): { model: string; codexAuth: string } {
+    throw new Error('CodexRunner._billingMeta: not implemented');
+  }
+
   protected static _buildArgs(_session: Session, _rootPath: string): string[] {
     throw new Error('Not implemented');
   }

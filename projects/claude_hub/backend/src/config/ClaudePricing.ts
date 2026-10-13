@@ -74,6 +74,31 @@ export function isDeepSeekPeak(ts: number): boolean {
   return (h >= 1 && h < 4) || (h >= 6 && h < 10);
 }
 
+// OpenAI 官方价目（美元 / 百万 token），给 Codex 轮次计价：codex 的 input_tokens 含缓存命中部分，
+// 未命中按 input、命中按 cacheRead；没有「缓存写」加价。reasoning 已含在 output_tokens 里。
+export interface OpenAiPrice { input: number; cacheRead: number; output: number }
+export const OPENAI_PRICES: Record<string, OpenAiPrice> = {
+  'gpt-5': { input: 1.25, cacheRead: 0.125, output: 10 },
+  'gpt-5-codex': { input: 1.25, cacheRead: 0.125, output: 10 },
+  'gpt-5-mini': { input: 0.25, cacheRead: 0.025, output: 2 },
+  'gpt-5-nano': { input: 0.05, cacheRead: 0.005, output: 0.4 },
+  'gpt-5.1': { input: 1.25, cacheRead: 0.125, output: 10 },
+  'gpt-5.1-codex': { input: 1.25, cacheRead: 0.125, output: 10 },
+  'gpt-5.1-codex-max': { input: 1.25, cacheRead: 0.125, output: 10 },
+  'gpt-5.1-codex-mini': { input: 0.25, cacheRead: 0.025, output: 2 },
+  'gpt-5.2': { input: 1.75, cacheRead: 0.175, output: 14 },
+  'gpt-5.2-codex': { input: 1.75, cacheRead: 0.175, output: 14 },
+  'gpt-5.3-codex': { input: 1.75, cacheRead: 0.175, output: 14 },
+  'gpt-5.4': { input: 2.5, cacheRead: 0.25, output: 15 },
+  'gpt-5.4-mini': { input: 0.75, cacheRead: 0.075, output: 4.5 },
+  'gpt-5.5': { input: 5, cacheRead: 0.5, output: 30 },
+  'o3': { input: 2, cacheRead: 0.5, output: 8 },
+  'o4-mini': { input: 1.1, cacheRead: 0.275, output: 4.4 },
+  'gpt-4.1': { input: 2, cacheRead: 0.5, output: 8 },
+};
+// codex 未指定模型、config.toml 也没写时 CLI 的默认模型（只用于计价兜底）
+export const CODEX_DEFAULT_MODEL = 'gpt-5.5';
+
 // 订阅登录（没有 API Key，不发生按量扣费）——只给它算「相当于多少钱」的估价，前端标「订阅」。
 export const SUBSCRIPTION_PROVIDERS = ['official'];
 // 由 Clootee 自有服务商（console.clootee.com）计费的轮次：本模块不重复统计。

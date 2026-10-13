@@ -120,7 +120,8 @@ export class TaskQueueStruct {
       name: session.engine,
       text: task.prompt,
       raw: { cwd: root.path, claudeSessionId: session.claudeSessionId, provider: EngineConfig.get()[session.engine === 'codex' ? 'codex' : 'claude'].provider,
-        cacheMode: CostPolicy.cache(Settings.get(), session.promptCache, SUBSCRIPTION_PROVIDERS.includes(EngineConfig.get().claude.provider)) },
+        cacheMode: CostPolicy.cache(Settings.get(), session.promptCache, SUBSCRIPTION_PROVIDERS.includes(EngineConfig.get().claude.provider)),
+        ...(session.engine === 'codex' ? CodexRunner.billingMeta() : {}) },
     });
 
     this._markRunning(session.id, task.id);

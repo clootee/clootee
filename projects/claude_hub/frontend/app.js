@@ -3018,7 +3018,6 @@ const ApiBill = {
   },
   // 会话列表：已知合计就出徽章；有订阅轮次的话额外用黄色标出其中「订阅」的那部分
   listTag(s) {
-    if (s.engine === 'codex') return '';
     if (!this.asked.has(s.id)) this.pending.add(s.id);
     const t = this.totals[s.id];
     return `<span class="api-cost-tag" data-api-sid="${escapeHtml(s.id)}" title="${escapeHtml(T('apiListTip'))}"${t ? '' : ' hidden'}>${t ? this.tagHtml(t) : ''}</span>`;
