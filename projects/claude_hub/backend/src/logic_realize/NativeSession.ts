@@ -1,6 +1,8 @@
 // 原生会话解析实现：填充 NativeSessionStruct 的钩子（解析 JSONL 帧、归一纯文本）。
 import { NativeSessionStruct } from '../logic_struct/NativeSessionStruct';
 import { ClaudeStoreHelper } from '../helper/ClaudeStoreHelper';
+import { FsHelper } from '../helper/FsHelper';
+import { AppConfig } from '../config/AppConfig';
 import { Session, Message, MessageRole } from '../models/Types';
 
 interface RawFrame {
@@ -12,46 +14,46 @@ interface RawFrame {
   message?: { role?: string; content?: unknown };
 }
 
+// 一段行（文件头或文件尾）扫描出的元信息；头尾各扫一遍再合并
+interface ScanResult {
+  title: string; // 摘要帧 / 首条提问
+  firstUser: string;
+  lastUser: string;
+  createdAt: number;
+  frames: number; // user/assistant 帧数（仅用于判「空会话」）
+  hasTyped: boolean;
+  hasSdk: boolean;
+}
+
 export class NativeSession extends NativeSessionStruct {
-  protected static _meta(rootId: string, uuid: string, file: string, mtimeMs: number): Session {
-    let title = '';
-    let lastUser = '';
-    let count = 0;
-    let createdAt = 0;
-    let hasTyped = false;
-    let hasSdk = false;
+  protected static _meta(rootId: string, uuid: string, file: string, mtimeMs: number, _size: number): Session {
+    // 只读文件头尾：标题、来源、首条时间在头部，最近一条提问在尾部。
+    // 最大的会话文件已超 30MB，全文逐行解析会让列表慢到十几秒；头尾各 256KB 足够。
+    let headLines: string[] = [];
+    let tailLines: string[] = [];
     try {
-      for (const ln of ClaudeStoreHelper.readLines(file)) {
-        const o = this._parse(ln);
-        if (!o) continue;
-        // typed=终端手动；queued/system=经 hub 队列等人为发起，一并归为「手动」
-        if (o.promptSource === 'typed' || o.promptSource === 'queued' || o.promptSource === 'system')
-          hasTyped = true;
-        if (o.promptSource === 'sdk') hasSdk = true;
-        if (o.type === 'user' || o.type === 'assistant') count++;
-        if (!createdAt && o.timestamp) {
-          const ts = Date.parse(o.timestamp);
-          if (!isNaN(ts)) createdAt = ts;
-        }
-        if (!title && o.type === 'summary' && o.summary) title = String(o.summary).slice(0, 60);
-        if (o.type === 'user' && o.message && !this._isToolEcho(o.message.content)) {
-          const t = this._plainText(o.message.content);
-          if (t) {
-            const clean = t.replace(/\s+/g, ' ');
-            if (!title) title = clean.slice(0, 60);
-            lastUser = clean.slice(0, 120); // 持续覆盖 → 循环结束即最近一条用户消息
-          }
-        }
-      }
+      const edge = FsHelper.readEdgeLines(
+        file,
+        AppConfig.SESSION_META_HEAD_BYTES,
+        AppConfig.SESSION_META_TAIL_BYTES,
+      );
+      headLines = edge.head;
+      tailLines = edge.tail;
     } catch {
-      // 文件损坏：保持空标题、count=0
+      // 文件读不到：保持空标题、frames=0（与旧实现一致，损坏文件不阻断列表）
     }
+    const head = this._scan(headLines);
+    const tail = this._scan(tailLines);
+    const frames = head.frames + tail.frames;
+    // 尾部窗口有提问就直接用；没有则说明最近一条提问离文件尾部太远（助手长篇输出会在其之后），
+    // 从末尾向前回溯找它——绝不能退回 head（那是最早的一条，预览会严重失真）。
+    const lastUser = tail.lastUser || this._lastUserBackward(file) || head.lastUser;
     // 来源判定：手动输入 > sdk 脚本 > 空会话(无对话) > 其它
-    const source: Session['source'] = hasTyped
+    const source: Session['source'] = head.hasTyped || tail.hasTyped
       ? 'typed'
-      : hasSdk
+      : head.hasSdk || tail.hasSdk
         ? 'sdk'
-        : count === 0
+        : frames === 0
           ? 'empty'
           : 'other';
 
@@ -59,16 +61,72 @@ export class NativeSession extends NativeSessionStruct {
       id: `${rootId}:${uuid}`, // 自描述 id：含根目录 + claude uuid
       rootId,
       engine: 'claude',
-      name: title || '(未命名会话)',
+      name: head.title || tail.title || '(未命名会话)',
       claudeSessionId: uuid, // 发消息一律走 --resume
       paused: false,
-      createdAt: createdAt || mtimeMs,
+      createdAt: head.createdAt || tail.createdAt || mtimeMs,
       updatedAt: mtimeMs,
       tasks: [],
       messages: [],
       source,
       lastUser,
     };
+  }
+
+  // 从文件末尾向前找最近一条真实用户提问（跳过工具结果回灌的空帧）
+  private static _lastUserBackward(file: string): string {
+    let found = '';
+    FsHelper.tailBatches(
+      file,
+      AppConfig.SESSION_META_SCAN_CHUNK_BYTES,
+      AppConfig.SESSION_META_SCAN_BYTES,
+      (lines) => {
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const o = this._parse(lines[i]);
+          if (!o || o.type !== 'user' || !o.message) continue;
+          if (this._isToolEcho(o.message.content)) continue;
+          const t = this._plainText(o.message.content);
+          if (!t) continue;
+          found = t.replace(/\s+/g, ' ').slice(0, 120);
+          return true;
+        }
+        return false;
+      },
+    );
+    return found;
+  }
+
+  // 扫一段 JSONL 行，取出标题、首/末条提问、时间与来源标记
+  private static _scan(lines: string[]): ScanResult {
+    let title = '';
+    let firstUser = '';
+    let lastUser = '';
+    let createdAt = 0;
+    let frames = 0;
+    let hasTyped = false;
+    let hasSdk = false;
+    for (const ln of lines) {
+      const o = this._parse(ln);
+      if (!o) continue;
+      // typed=终端手动；queued/system=经 hub 队列等人为发起，一并归为「手动」
+      if (o.promptSource === 'typed' || o.promptSource === 'queued' || o.promptSource === 'system') hasTyped = true;
+      if (o.promptSource === 'sdk') hasSdk = true;
+      if (o.type === 'user' || o.type === 'assistant') frames++;
+      if (!createdAt && o.timestamp) {
+        const ts = Date.parse(o.timestamp);
+        if (!isNaN(ts)) createdAt = ts;
+      }
+      if (!title && o.type === 'summary' && o.summary) title = String(o.summary).slice(0, 60);
+      if (o.type === 'user' && o.message && !this._isToolEcho(o.message.content)) {
+        const t = this._plainText(o.message.content);
+        if (t) {
+          const clean = t.replace(/\s+/g, ' ');
+          if (!firstUser) firstUser = clean.slice(0, 120);
+          lastUser = clean.slice(0, 120); // 持续覆盖 → 本段扫完即最近一条用户消息
+        }
+      }
+    }
+    return { title: title || firstUser.slice(0, 60), firstUser, lastUser, createdAt, frames, hasTyped, hasSdk };
   }
 
   protected static _parseMessages(lines: string[], uuid: string): Message[] {

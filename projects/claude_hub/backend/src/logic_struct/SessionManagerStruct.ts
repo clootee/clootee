@@ -5,6 +5,7 @@
 import { Ids } from '../helper/Ids';
 import { Logger } from '../helper/Logger';
 import { EventBus } from '../helper/EventBus';
+import { SignatureCache } from '../helper/SignatureCache';
 import { AppConfig } from '../config/AppConfig';
 import { Settings } from '../logic_realize/Settings';
 import { PromptCache } from '../helper/PromptCache';
@@ -13,6 +14,10 @@ import { SessionStatus, SessionMetaEntry } from './SessionMetaStruct';
 import { Session, Task, Message, Engine, SessionSearchHit } from '../models/Types';
 
 export class SessionManagerStruct {
+  // 正文缓存：键=会话存储文件（claude jsonl / codex rollout）绝对路径，签名=mtime+大小。
+  // 只缓存正文（几十到几百 KB 的解析结果），不缓存运行态——「是否还在工作」永远以任务队列为准。
+  private static _msgCache = new SignatureCache<Message[]>(200);
+
   // 列出某根目录下的会话 = claude jsonl 会话 + 内存中的运行期会话（草稿 / 带队列的）。
   // 已开始的会话以 jsonl 元信息为准（标题/时间），叠加内存里的队列与暂停状态；草稿单独列出。
   static listSessions(rootId: string): Session[] {
@@ -287,8 +292,21 @@ export class SessionManagerStruct {
   // 读取会话 + 正文（正文实时从 claude jsonl 解析，单一数据源）。供前端展示使用。
   static getSessionFull(id: string): Session {
     const session = this.getSession(id);
-    session.messages = this._loadMessages(session);
+    session.messages = this._messagesCached(session);
     return session;
+  }
+
+  // 会话正文：按存储文件签名（mtime+大小）缓存，同一会话反复打开 / 来回切换不再重扫整个文件。
+  // AI 写了新内容签名即变 → 自动失效重读，所以「缓存」不会让人看到过期的正文。
+  protected static _messagesCached(session: Session): Message[] {
+    const file = this._sessionFile(session);
+    if (!file) return this._loadMessages(session); // 草稿等无文件：直接走实现
+    const sig = SignatureCache.fileSignature(file);
+    if (!sig) return this._loadMessages(session); // 文件读不到（已删等）：不缓存
+    const hit = this._msgCache.get(file, sig);
+    if (hit) return [...hit]; // 浅拷贝：调用方就地改数组不会污染缓存
+    // 未命中同样拷贝一份返回，缓存里那份只用于下次复用
+    return [...this._msgCache.set(file, sig, this._loadMessages(session))];
   }
 
   // 保存会话 = 写入内存运行期表（不落盘）。任何获得运行期状态（入队/暂停/回写 uuid）的会话都经此进入 _live。
@@ -405,6 +423,10 @@ export class SessionManagerStruct {
   }
   // 从 claude jsonl 读取该会话正文（草稿 / 无文件返回 []）
   protected static _loadMessages(_session: Session): Message[] {
+    throw new Error('Not implemented');
+  }
+  // 会话对应的原生存储文件绝对路径（claude jsonl / codex rollout）；草稿等无文件返回 null
+  protected static _sessionFile(_session: Session): string | null {
     throw new Error('Not implemented');
   }
   // 单个会话是否命中关键词（标题或正文）；命中返回 {id, snippet}，否则 null

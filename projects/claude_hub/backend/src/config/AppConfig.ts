@@ -37,6 +37,18 @@ export const AppConfig = {
     '③ 网络或代理不通。可到「设置 → 运行环境」把工具切换为「本机版」后重试，' +
     '或点「重新检测」确认各工具是否可用；完整日志见 data/logs/app.log。',
 
+  // 会话元信息（标题 / 最近一条提问 / 首条时间）只需文件头尾，不必读整个 jsonl：
+  // 最大的会话文件已超过 30MB，全文读取 + 逐行解析会让会话列表耗时到十几秒。
+  // 头若干字节足以覆盖标题与首条提问，尾若干字节足以覆盖最近一条提问。
+  SESSION_META_HEAD_BYTES: Number(process.env.SESSION_META_HEAD_BYTES) || 256 * 1024,
+  SESSION_META_TAIL_BYTES: Number(process.env.SESSION_META_TAIL_BYTES) || 256 * 1024,
+
+  // 尾部窗口内找不到「最近一条提问」时，从文件末尾向前逐段回溯的字节上限。
+  // 一轮长时间的工具调用可能让最近一条提问离文件尾部很远（实测有 300KB+），
+  // 固定窗口会漏掉它并退回最早的提问；回溯到该上限仍找不到才放弃。
+  SESSION_META_SCAN_BYTES: Number(process.env.SESSION_META_SCAN_BYTES) || 16 * 1024 * 1024,
+  SESSION_META_SCAN_CHUNK_BYTES: Number(process.env.SESSION_META_SCAN_CHUNK_BYTES) || 128 * 1024,
+
   // 会话工具命令（/usage 等斜杠命令）最大运行时长（毫秒），超时则强制结束
   COMMAND_TIMEOUT_MS: Number(process.env.COMMAND_TIMEOUT_MS) || 1000 * 60,
 

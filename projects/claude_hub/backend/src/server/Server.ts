@@ -40,6 +40,9 @@ import { RootLock } from '../logic_realize/RootLock';
 import { ApiCost } from '../logic_realize/ApiCost';
 
 export class Server {
+  // 慢请求阈值（毫秒）：超过就在日志里留一条 WARN
+  private static readonly SLOW_REQUEST_MS = 500;
+
   static start(): void {
     const app = express();
     app.use(express.json({ limit: '4mb' }));
@@ -809,8 +812,11 @@ export class Server {
 
   // 统一异常包装
   private static _wrap(res: Response, ctx: string, fn: () => unknown): void {
+    const t0 = Date.now();
     try {
-      this._ok(res, fn());
+      const data = fn();
+      this._logSlow(ctx, t0);
+      this._ok(res, data);
     } catch (e: unknown) {
       res.status(500).json({ success: false, error: ErrorHandler.handle(e, `Server.${ctx}`) });
     }
@@ -818,10 +824,22 @@ export class Server {
 
   // 异步异常包装
   private static _wrapAsync(res: Response, ctx: string, fn: () => Promise<unknown>): void {
+    const t0 = Date.now();
     fn()
-      .then((data) => this._ok(res, data))
+      .then((data) => {
+        this._logSlow(ctx, t0);
+        this._ok(res, data);
+      })
       .catch((e: unknown) =>
         res.status(500).json({ success: false, error: ErrorHandler.handle(e, `Server.${ctx}`) }),
       );
+  }
+
+  // 慢请求留痕：接口耗时 >= 500ms 记一条 WARN。
+  // 后端是单线程同步处理，一个慢接口会把所有其它请求（包括点开会话）一起堵住，
+  // 所以这类问题必须能在 data/logs/app.log 里一眼看到是哪个接口、慢了多少。
+  private static _logSlow(ctx: string, t0: number): void {
+    const ms = Date.now() - t0;
+    if (ms >= Server.SLOW_REQUEST_MS) Logger.warn('Server', 'slow request', { ctx, ms });
   }
 }

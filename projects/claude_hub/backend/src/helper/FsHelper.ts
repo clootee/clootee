@@ -198,6 +198,113 @@ export class FsHelper {
     fs.writeFileSync(full, content, 'utf-8');
   }
 
+  // 只读一个文本文件的头/尾各若干字节并按行切分（大文件免于全文读取）。
+  // 返回 { head, tail }：head 自文件开头、tail 至文件结尾。两端都不能留残行——
+  // 半截 JSON 帧解析出垃圾，尤其 tail 若把「最近一帧」的残行当首行丢掉，会静默退回更旧的帧。
+  // 故 head 丢掉末尾残行，tail 把起点向前推到最近的换行之后（必要时多读若干段）。
+  // 头尾区间重叠（文件不大）时只读一次，两边都拿到全量行。
+  static readEdgeLines(full: string, headBytes: number, tailBytes: number): { head: string[]; tail: string[] } {
+    const hb = Math.max(0, Math.floor(headBytes));
+    const tb = Math.max(0, Math.floor(tailBytes));
+    const fd = fs.openSync(full, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      if (size <= hb + tb) {
+        const all = this._readAt(fd, 0, size);
+        const lines = this._splitLines(all);
+        return { head: lines, tail: lines };
+      }
+      const headText = this._readAt(fd, 0, hb);
+      const head = this._splitLines(headText);
+      if (head.length > 0 && !/\n$/.test(headText)) head.pop(); // 窗口末行被截断，丢弃
+      return { head, tail: this._tailLines(fd, size, tb) };
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  // 从文件末尾取「若干完整行」（起点对齐到换行，绝不截断帧）。
+  private static _tailLines(fd: number, size: number, wanted: number): string[] {
+    const start = this._alignLineStart(fd, size - Math.max(0, Math.floor(wanted)));
+    return this._splitLines(this._readAt(fd, start, size - start));
+  }
+
+  // 从文件末尾向前分段读取，供「从后往前找第一条满足某条件的行」用（免于全文读取）。
+  // 每段内部保持正序，段起点对齐到换行；onBatch 返回 true 即刻停止。
+  // 返回是否被 onBatch 终止；maxBytes 为向前回溯的总字节上限（超出即放弃）。
+  static tailBatches(
+    full: string,
+    chunkBytes: number,
+    maxBytes: number,
+    onBatch: (lines: string[]) => boolean,
+  ): boolean {
+    const chunk = Math.max(1, Math.floor(chunkBytes));
+    const cap = Math.max(chunk, Math.floor(maxBytes));
+    const fd = fs.openSync(full, 'r');
+    try {
+      const size = fs.fstatSync(fd).size;
+      let end = size;
+      let scanned = 0;
+      while (end > 0 && scanned < cap) {
+        const start = this._alignLineStart(fd, end - Math.min(chunk, end, cap - scanned));
+        const text = this._readAt(fd, start, end - start);
+        scanned += end - start;
+        if (onBatch(this._splitLines(text))) return true;
+        end = start;
+      }
+      return false;
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  // 把字节位置向前对齐到行首（返回 0 或「前一个字节是换行」的位置）
+  private static _alignLineStart(fd: number, pos: number): number {
+    const SCAN = 64 * 1024;
+    let start = Math.max(0, pos);
+    while (start > 0) {
+      const len = Math.min(start, SCAN);
+      const from = start - len;
+      const nl = this._lastNewlineByte(fd, from, len);
+      if (nl >= 0) return from + nl + 1;
+      start = from;
+    }
+    return 0;
+  }
+
+  // 文件 mtime + 大小；读不到返回 null
+  static stat(full: string): { mtimeMs: number; size: number } | null {
+    try {
+      const st = fs.statSync(full);
+      return { mtimeMs: st.mtimeMs, size: st.size };
+    } catch {
+      return null;
+    }
+  }
+
+  // ── 内部：按字节区间读取 + 切行 ──
+  private static _readBufAt(fd: number, position: number, length: number): Buffer {
+    const len = Math.max(0, Math.floor(length));
+    if (len <= 0) return Buffer.alloc(0);
+    const buf = Buffer.allocUnsafe(len);
+    const read = fs.readSync(fd, buf, 0, len, position);
+    return buf.subarray(0, read);
+  }
+
+  private static _readAt(fd: number, position: number, length: number): string {
+    return this._readBufAt(fd, position, length).toString('utf8');
+  }
+
+  // 找最近的前一个换行「字节」。必须按字节找：解码后按字符下标定位会因多字节字符（中文 3 字节）错位，
+  // 切出半截行导致帧解析失败。
+  private static _lastNewlineByte(fd: number, from: number, length: number): number {
+    return this._readBufAt(fd, from, length).lastIndexOf(0x0a);
+  }
+
+  private static _splitLines(text: string): string[] {
+    return text.split(/\r?\n/).filter(Boolean);
+  }
+
   // 把相对路径安全解析到 base 之内：越界（路径穿越）返回 null
   static safeResolve(base: string, rel: string): string | null {
     if (!rel || rel.includes('\0')) return null;

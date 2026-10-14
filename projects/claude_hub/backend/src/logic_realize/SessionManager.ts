@@ -127,7 +127,7 @@ export class SessionManager extends SessionManagerStruct {
 
   // 全文命中判定：先比标题/预览（免读 jsonl），未中再对整个 jsonl 做一次异步原文子串预筛
   // （命中率低时免于逐行 JSON.parse，且用 fs.promises 避免同步读大文件阻塞事件循环），
-  // 预筛命中才落到 _loadMessages 逐条解析取正文片段。
+  // 预筛命中才落到 _messagesCached 逐条解析取正文片段。
   protected static async _matchSessionText(session: Session, q: string): Promise<SessionSearchHit | null> {
     const titleHit =
       (session.customTitle || '').toLowerCase().includes(q) ||
@@ -135,7 +135,7 @@ export class SessionManager extends SessionManagerStruct {
       (session.lastUser || '').toLowerCase().includes(q);
     if (titleHit) return { id: session.id, snippet: '' };
     if (!(await this._fileMayContain(session, q))) return null;
-    for (const m of this._loadMessages(session)) {
+    for (const m of this._messagesCached(session)) {
       const body = (m.text || '').toLowerCase();
       const idx = body.indexOf(q);
       if (idx >= 0) return { id: session.id, snippet: this._snippetAround(m.text, idx, q.length) };
@@ -146,7 +146,7 @@ export class SessionManager extends SessionManagerStruct {
   // 会话原始 jsonl 是否可能包含关键词（原文子串检查，异步读取不阻塞事件循环）。
   // 只用于快速排除明显不含关键词的文件；文件不存在/读取失败一律放行给 _loadMessages 兜底判定。
   private static async _fileMayContain(session: Session, q: string): Promise<boolean> {
-    const file = this._sessionFilePath(session);
+    const file = this._sessionFile(session);
     if (!file) return true;
     try {
       const raw = await fsp.readFile(file, 'utf8');
@@ -157,7 +157,7 @@ export class SessionManager extends SessionManagerStruct {
   }
 
   // 定位会话对应的原生存储文件绝对路径（按引擎）；无法定位返回 null（草稿等）
-  private static _sessionFilePath(session: Session): string | null {
+  protected static _sessionFile(session: Session): string | null {
     if (!session.claudeSessionId) return null;
     try {
       if (session.engine === 'codex') {

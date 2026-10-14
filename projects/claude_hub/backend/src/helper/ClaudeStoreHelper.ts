@@ -4,6 +4,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { FsHelper } from './FsHelper';
 
 export interface NativeSessionFile {
   sessionId: string;  // 文件名去掉 .jsonl，即 claude session uuid
@@ -93,5 +94,10 @@ export class ClaudeStoreHelper {
     } catch {
       return 0;
     }
+  }
+
+  // 文件 mtime + 大小；不存在返回 null
+  static stat(file: string): { mtimeMs: number; size: number } | null {
+    return FsHelper.stat(file);
   }
 }

@@ -9,6 +9,8 @@ import { RunAsUser } from '../helper/RunAsUser';
 import { EngineStatus } from '../logic_realize/EngineStatus';
 import { PromptCache, PromptCacheMode } from '../helper/PromptCache';
 import { CostPolicy, CostPolicySettings } from '../helper/CostPolicy';
+import { SignatureCache } from '../helper/SignatureCache';
+import { Paths } from '../paths';
 
 // 快捷按钮：一个组内互斥（单选，可取消），组与组之间互不影响（可各选一个）
 export interface QuickTag {
@@ -98,6 +100,9 @@ function isRoot(): boolean {
 }
 
 export class SettingsStruct {
+  // 生效家目录缓存（见 effectiveHomeDir）
+  private static _effectiveHomeDirCache = new SignatureCache<string>(4);
+
   static get(): AppSettings {
     const raw = this._read();
     const wanted: Engine =
@@ -154,7 +159,18 @@ export class SettingsStruct {
   // claude/codex 子进程实际落地的家目录：仅当 runAsUser 真会切换身份（root + 已启用）时才不同于
   // 当前进程自己的 home——此时找会话 jsonl / claude 自身 settings.json 等必须去这个目录，否则永远读到空。
   // 未触发切换时返回 undefined，调用方按 os.homedir() 原样处理即可。
+  //
+  // 按 settings.json 的签名缓存：这个值在「列会话 / 解析正文」的热路径上被每个会话取用好几次，
+  // 而每次真算都要走一遍 Settings.get()（读设置 + 探测内置工具 + 枚举网卡，实测 3–6ms）。
+  // 用户改了运行身份 → 设置文件签名变 → 自动重算；设置文件读不到时不缓存。
   static effectiveHomeDir(): string | undefined {
+    const sig = SignatureCache.fileSignature(Paths.SETTINGS_FILE);
+    if (!sig) return this._resolveHomeDir();
+    // 缓存空串代表「undefined」——undefined 会被缓存层当成未命中，那样在 Windows 上等于没缓存
+    return this._effectiveHomeDirCache.memo('effectiveHomeDir', sig, () => this._resolveHomeDir() || '') || undefined;
+  }
+
+  private static _resolveHomeDir(): string | undefined {
     const cfg = this.runAsUser();
     return RunAsUser.isActive(cfg) ? RunAsUser.homeDirFor(cfg.user) : undefined;
   }

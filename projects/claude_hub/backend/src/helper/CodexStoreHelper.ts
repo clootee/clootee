@@ -6,16 +6,22 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { SignatureCache } from './SignatureCache';
+import { FsHelper } from './FsHelper';
 
 export interface CodexSessionFile {
   sessionId: string; // session_meta.payload.id（uuid）
   file: string;      // 绝对路径
   cwd: string;       // 该会话的工作目录（首行 session_meta.payload.cwd）
   mtimeMs: number;
+  size: number;      // 字节数（与 mtime 一起作为缓存签名）
   createdAt: number; // 首行 timestamp（毫秒）
 }
 
 export class CodexStoreHelper {
+  // 首行元信息缓存：键=rollout 文件路径，签名=mtime+大小（见 index）
+  private static _metaCache = new SignatureCache<{ id: string; cwd: string; createdAt: number } | null>(1000);
+
   // ~/.codex（可用 CODEX_HOME 覆盖）
   // homeDir：调用方按「真正跑 codex 的用户身份」传入的家目录覆盖值（如 RunAsUser 切了用户）。
   // 不传就退回当前进程的 home —— 服务跑在 root、codex 跑在 claudeuser 时，两边的 ~/.codex 不是同一个，
@@ -86,20 +92,25 @@ export class CodexStoreHelper {
   }
 
   // 全量索引：扫描所有 rollout 文件，解析首行拿 id/cwd（按 mtime 倒序）
+  // 首行元信息按「文件签名（mtime+大小）」缓存：rollout 文件不再写就完全不变，
+  // 而 index 会被每个根目录、每个会话反复调用（findFile 也走它）——不缓存时会话列表/打开会话都要几秒。
   static index(homeDir?: string): CodexSessionFile[] {
     const files: string[] = [];
     this._walkFiles(this.sessionsRoot(homeDir), files);
     const out: CodexSessionFile[] = [];
     for (const file of files) {
-      const meta = this._readMeta(file);
+      const st = FsHelper.stat(file);
+      if (!st) continue;
+      const meta = this._metaCache.memo(file, `${st.mtimeMs}:${st.size}`, () => this._readMeta(file));
       if (!meta) continue;
-      let mtimeMs = 0;
-      try {
-        mtimeMs = fs.statSync(file).mtimeMs;
-      } catch {
-        continue;
-      }
-      out.push({ sessionId: meta.id, file, cwd: meta.cwd, mtimeMs, createdAt: meta.createdAt || mtimeMs });
+      out.push({
+        sessionId: meta.id,
+        file,
+        cwd: meta.cwd,
+        mtimeMs: st.mtimeMs,
+        size: st.size,
+        createdAt: meta.createdAt || st.mtimeMs,
+      });
     }
     return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
   }

@@ -6,6 +6,8 @@
 // 需过滤：developer 角色（权限说明）、以 <environment_context>/<permissions 开头的注入型 user 帧。
 import { CodexSessionStruct } from '../logic_struct/CodexSessionStruct';
 import { CodexStoreHelper } from '../helper/CodexStoreHelper';
+import { FsHelper } from '../helper/FsHelper';
+import { AppConfig } from '../config/AppConfig';
 import { Session, Message, MessageRole } from '../models/Types';
 
 interface RawFrame {
@@ -25,40 +27,81 @@ export class CodexSession extends CodexSessionStruct {
     uuid: string,
     file: string,
     mtimeMs: number,
+    _size: number,
     createdAt: number,
   ): Session {
-    let title = '';
-    let lastUser = '';
-    let count = 0;
+    // 只读文件头尾：标题取首条用户消息、预览取最近一条用户消息，都在两端。
+    // rollout 文件同样可能很大，全文逐行解析会让列表与打开会话都慢到不可用。
+    let headLines: string[] = [];
+    let tailLines: string[] = [];
     try {
-      for (const ln of CodexStoreHelper.readLines(file)) {
-        const o = this._parse(ln);
-        const msg = this._asMessage(o);
-        if (!msg) continue;
-        count++;
-        if (msg.role === 'user' && msg.text) {
-          const clean = msg.text.replace(/\s+/g, ' ');
-          if (!title) title = clean.slice(0, 60);
-          lastUser = clean.slice(0, 120);
-        }
-      }
+      const edge = FsHelper.readEdgeLines(
+        file,
+        AppConfig.SESSION_META_HEAD_BYTES,
+        AppConfig.SESSION_META_TAIL_BYTES,
+      );
+      headLines = edge.head;
+      tailLines = edge.tail;
     } catch {
-      // 文件损坏：保持空标题
+      // 文件读不到：保持空标题、count=0（损坏文件不阻断列表）
     }
+    const head = this._scan(headLines);
+    const tail = this._scan(tailLines);
+    // 同 claude：尾部窗口无提问时从末尾向前回溯，避免退回最早的提问
+    const lastUser = tail.lastUser || this._lastUserBackward(file) || head.lastUser;
     return {
       id: `${rootId}:${uuid}`,
       rootId,
       engine: 'codex',
-      name: title || '(未命名会话)',
+      name: head.title || tail.title || '(未命名会话)',
       claudeSessionId: uuid, // 复用字段承载引擎会话 id（codex thread/rollout uuid）
       paused: false,
       createdAt: createdAt || mtimeMs,
       updatedAt: mtimeMs,
       tasks: [],
       messages: [],
-      source: count > 0 ? 'typed' : 'empty',
+      source: head.count + tail.count > 0 ? 'typed' : 'empty',
       lastUser,
     };
+  }
+
+  // 从文件末尾向前找最近一条用户消息（与 _scan 同一套帧过滤规则）
+  private static _lastUserBackward(file: string): string {
+    let found = '';
+    FsHelper.tailBatches(
+      file,
+      AppConfig.SESSION_META_SCAN_CHUNK_BYTES,
+      AppConfig.SESSION_META_SCAN_BYTES,
+      (lines) => {
+        for (let i = lines.length - 1; i >= 0; i--) {
+          const msg = this._asMessage(this._parse(lines[i]));
+          if (!msg || msg.role !== 'user' || !msg.text) continue;
+          found = msg.text.replace(/\s+/g, ' ').slice(0, 120);
+          return true;
+        }
+        return false;
+      },
+    );
+    return found;
+  }
+
+  // 扫一段 rollout 行，取出标题（首条用户消息）、末条用户消息与消息条数
+  private static _scan(lines: string[]): { title: string; lastUser: string; count: number } {
+    let title = '';
+    let lastUser = '';
+    let count = 0;
+    for (const ln of lines) {
+      const o = this._parse(ln);
+      const msg = this._asMessage(o);
+      if (!msg) continue;
+      count++;
+      if (msg.role === 'user' && msg.text) {
+        const clean = msg.text.replace(/\s+/g, ' ');
+        if (!title) title = clean.slice(0, 60);
+        lastUser = clean.slice(0, 120);
+      }
+    }
+    return { title, lastUser, count };
   }
 
   protected static _parseMessages(lines: string[], uuid: string): Message[] {
