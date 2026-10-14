@@ -1,10 +1,10 @@
 {
-  "version": "3.1.1",
+  "version": "3.1.2",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-10-11",
+  "releasedAt": "2026-10-14",
   "notesI18n": {
-    "zh": "· 修复：设置 → AI 引擎里改了服务商或模型后，点整个弹窗底部的「保存」却没生效（那个按钮只存了默认引擎）\n· 整个板块现在只有一个保存按钮，保存结果与「有未保存的改动」都显示在按钮旁边，不用再进折叠块里找\n· 服务商/模型保存失败时不再静默丢弃改动：会说明是哪一块、为什么，并展开那一块",
-    "en": "· Fix: after changing the provider or model under Settings → AI engine, clicking the dialog's bottom Save did nothing — that button only wrote the default engine\n· The pane now has a single Save button, and both the result and an “unsaved changes” hint appear right next to it, so there is no inner button to hunt for\n· A failed provider/model save is no longer silent: it names the block that failed and why, and expands it"
+    "zh": "· 打开会话、加载会话列表明显变快：不再为每个会话读取整份记录（本机最大的已超过 30MB），列表从十几秒降到 1 秒以内\n· 会话列表里「最近一条提问」的预览更准：长时间的工具调用之后不会再退回显示最早的那条提问",
+    "en": "· Sessions open and the session list loads much faster: the app no longer reads every session's whole record (the largest one here is over 30MB), cutting list time from tens of seconds to under a second\n· The “last asked” preview in the session list is accurate again — it no longer falls back to the earliest question after a long tool-heavy turn"
   }
 }
