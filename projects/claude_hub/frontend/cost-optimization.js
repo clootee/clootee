@@ -1,9 +1,9 @@
 const CostUi = {
   pending: false,
-  defaults: { mode: 'auto', scope: 'both', guard: true, strict: false, enhance: true, thresholdTokens: 50000, minExtraUsd: 0.5, cheapModel: '' },
+  defaults: { mode: 'auto', scope: 'both', guard: true, strict: false, enhance: true, thresholdTokens: 50000, minExtraUsd: 0.5, cheapModel: '', warnMessages: 15, maxMessages: 20 },
   policy() { return { ...this.defaults, ...(State.settings.costOptimization || {}) }; },
   applyText() {
-    const labels = { costModeLabel: 'costMode', costScopeLabel: 'costScope', costSavingsClaim: 'costSavings',
+    const labels = { costWarnMessagesLabel: 'costWarnMessages', costMaxMessagesLabel: 'costMaxMessages', costMessageLimitNote: 'costMessageLimitNote', costModeLabel: 'costMode', costScopeLabel: 'costScope', costSavingsClaim: 'costSavings',
       costAutomaticNote: 'costAutomatic', costGuardLabel: 'costGuard', costStrictLabel: 'costStrict',
       costEnhanceLabel: 'costEnhance', costTokensLabel: 'costTokens', costExtraLabel: 'costExtra',
       costCheapModelLabel: 'costCheapModel', costClassifierNote: 'costClassifierNote',
@@ -22,6 +22,8 @@ const CostUi = {
     const p = this.policy();
     $('costMode').value = p.mode;
     $('costScope').value = p.scope;
+    $('costWarnMessages').value = p.warnMessages;
+    $('costMaxMessages').value = p.maxMessages;
     for (const [id, key] of [['costGuard', 'guard'], ['costStrict', 'strict'], ['costEnhance', 'enhance']]) $(id).checked = p[key];
     $('costTokens').value = p.thresholdTokens;
     $('costExtra').value = p.minExtraUsd;
@@ -32,7 +34,14 @@ const CostUi = {
   },
   sync() { $('costManual').hidden = $('costMode').value !== 'manual'; $('costAutomaticNote').hidden = $('costMode').value !== 'auto'; },
   async save() {
+    const warnMessages = Number($('costWarnMessages').value);
+    const maxMessages = Number($('costMaxMessages').value);
+    if (!Number.isInteger(warnMessages) || !Number.isInteger(maxMessages) || warnMessages < 1 || maxMessages > 10000 || warnMessages >= maxMessages) {
+      alert(T('sessionLimitInvalid'));
+      return false;
+    }
     const p = { mode: $('costMode').value, scope: $('costScope').value,
+      warnMessages, maxMessages,
       guard: $('costGuard').checked, strict: $('costStrict').checked, enhance: $('costEnhance').checked,
       thresholdTokens: Number($('costTokens').value), minExtraUsd: Number($('costExtra').value), cheapModel: $('costCheapModel').value.trim() };
     const patch = { costOptimization: p };
@@ -46,6 +55,7 @@ const CostUi = {
     if (!saved) { setPaneNotice('engSaveFailShort', null, 'err', 0); return false; }
     PromptCacheUi.dirty = false;
     PromptCacheUi.render();
+    SessionLimitUi.refresh();
     setPaneNotice('engSavedToast', null, 'ok', 2500);
     return true;
   },

@@ -12,6 +12,7 @@ import { TraceStore } from '../logic_realize/TraceStore';
 import { EngineConfig } from '../logic_realize/EngineConfig';
 import { CostOptimizer } from '../logic_realize/CostOptimizer';
 import { CostPolicy } from '../helper/CostPolicy';
+import { SessionLimit } from '../helper/SessionLimit';
 import { Settings } from '../logic_realize/Settings';
 import { SUBSCRIPTION_PROVIDERS } from '../config/ClaudePricing';
 import { ProjectPrompt } from '../logic_realize/ProjectPrompt';
@@ -38,6 +39,8 @@ export class TaskQueueStruct {
     if (!sessionId) throw new Error(`addTasks: invalid sessionId=${sessionId}`);
     const cleaned = prompts.map((p) => (p || '').trim()).filter((p) => p.length > 0);
     if (cleaned.length === 0) throw new Error('addTasks: no valid prompts');
+    const full = SessionManager.getSessionFull(sessionId);
+    SessionLimit.assertCapacity(SessionLimit.status(full, full.messages, Settings.get().costOptimization), cleaned.length);
 
     // 暂停整条序列期间新增 = 「补充任务」：插到冻结队列最前，并可越过暂停立即执行（视为对被暂停任务的补充）
     const supplement = SessionManager.getSession(sessionId).paused === true;
@@ -99,6 +102,15 @@ export class TaskQueueStruct {
   // 注意顺序：可能抛异常的准备动作（取根目录、落轨迹）一律排在 _markRunning 之前——
   // 一旦任务被置为 running 之后再抛，队列就会永远停在"执行中"，界面上表现为发消息没反应。
   static _startTask(session: Session, task: Task): void {
+    const full = SessionManager.getSessionFull(session.id);
+    const limit = SessionLimit.status(full, full.messages, Settings.get().costOptimization);
+    if (limit.count >= limit.max) {
+      task.held = true;
+      SessionManager.saveSession(session);
+      EventBus.broadcast({ kind: 'task', sessionId: session.id, task });
+      EventBus.broadcast({ kind: 'notice', sessionId: session.id, taskId: task.id, level: 'warn', message: 'session_message_limit_reached' });
+      return;
+    }
     if (session.engine === 'claude' && !CostOptimizer.allowed(session.id, task.prompt, task.costApproval)) {
       task.held = true;
       task.costBlocked = true;

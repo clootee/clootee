@@ -2422,6 +2422,7 @@ async function selectSession(id) {
 function renderMessages() {
   const box = $('messages');
   box.innerHTML = '';
+  SessionLimitUi.refresh();
   // 没有会话可显示时给出「下一步该干什么」的引导（新用户否则面对一片空白，不知道该点哪个 ＋）
   if (!State.session) {
     box.appendChild(gettingStartedEl());
@@ -2440,6 +2441,7 @@ function renderMessages() {
     else addAssistantGroupEl(unit);
   });
   renderNotices();
+  SessionLimitUi.render();
   syncTypingIndicator();
   renderElapsedNotes();
   refreshAiCollapseBtn();
@@ -5598,6 +5600,7 @@ async function addTask() {
       return;
     }
   }
+  if (!(await SessionLimitUi.prepare(1))) return;
   if (!(await PromptCacheUi.ensure())) return;
   const prepared = await CostUi.prepare([applyQuickPrefix(applySlashPrefix(raw))]);
   if (!prepared) return;
@@ -5615,7 +5618,8 @@ async function addTask() {
     ta.value = text;
     Attach.items = keepAttach;
     renderAttachBar();
-    alert(e.message || 'Submit failed');
+    SessionLimitUi.refresh();
+    alert((e.message || '').includes('session_message_limit_reached') ? T('sessionLimitBatch').replace('{remaining}', '0') : e.message || 'Submit failed');
   }
 }
 // ── 批量任务弹窗 ──
@@ -5658,6 +5662,7 @@ async function submitTasks() {
     }
   }
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
+  if (!(await SessionLimitUi.prepare(prompts.length))) return;
   if (!(await PromptCacheUi.ensure())) return;
   const prepared = await CostUi.prepare(prompts.map(applyQuickPrefix));
   if (!prepared) return;
@@ -6015,11 +6020,16 @@ function connectWs() {
       if (e.task.external && e.task.status === 'pending') showExtMsgToast(e.sessionId, e.task.prompt);
     }
     // 运行提示（引擎无响应等）：任务还没结束就要让用户看到
-    if (e.kind === 'notice') { if (e.message === 'cost_send_blocked') e.message = T('costBlockedNotice'); pushNotice(e); return; }
+    if (e.kind === 'notice') {
+      if (e.message === 'cost_send_blocked') e.message = T('costBlockedNotice');
+      if (e.message === 'session_message_limit_reached') { e.message = T('sessionLimitBatch').replace('{remaining}', '0'); SessionLimitUi.refresh(); }
+      pushNotice(e); return;
+    }
     // Claude Code 把服务商的 402 原样写成一条助手消息（task.error 里反而没有）。额度是全局的，
     // 不管发生在哪个会话都要提示，所以放在按会话过滤之前
     if (e.kind === 'message' && e.message && e.message.role === 'assistant' && Clootee.isOutOfCredit(e.message.text)) Clootee.showOutOfCredit();
     if (e.sessionId !== State.sessionId) return; // 其余（正文/过程）仅更新当前查看的会话
+    if (['message', 'task', 'taskRemoved'].includes(e.kind)) SessionLimitUi.refresh();
     // 轨迹事件：缓存标脏（下次展开「过程」时重新拉取）；全过程抽屉打开时顺带刷新
     if (e.kind === 'trace') {
       Trace.stale = true;

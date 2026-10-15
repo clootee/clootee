@@ -12,6 +12,7 @@ import { RootManager } from '../logic_realize/RootManager';
 import { SessionManager } from '../logic_realize/SessionManager';
 import { TaskQueue } from '../logic_realize/TaskQueue';
 import { CostOptimizer } from '../logic_realize/CostOptimizer';
+import { SessionLimit } from '../helper/SessionLimit';
 import { AuthManager } from '../logic_realize/AuthManager';
 import { FsBrowser } from '../logic_realize/FsBrowser';
 import { TemplateManager } from '../logic_realize/TemplateManager';
@@ -482,6 +483,12 @@ export class Server {
     );
     app.post('/api/session/prompt-cache', (req, res) =>
       this._wrap(res, 'session.promptCache', () => SessionManager.setPromptCache(String(req.body.id || ''), req.body.mode)),
+    );
+    app.get('/api/session/limit', (req, res) =>
+      this._wrap(res, 'session.limit', () => {
+        const session = SessionManager.getSessionFull(String(req.query.id));
+        return SessionLimit.status(session, session.messages, Settings.get().costOptimization);
+      }),
     );
     app.get('/api/session/get', (req, res) =>
       this._wrap(res, 'session.get', () => SessionManager.getSessionFull(String(req.query.id))),

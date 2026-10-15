@@ -1,5 +1,12 @@
 // 国际化字典与翻译函数。至少支持 zh / en
 const DICT = {
+  costWarnMessages: { en: 'Suggest a new session after this many user messages', zh: '达到多少条用户消息后，强烈提醒开新会话' },
+  costMaxMessages: { en: 'Maximum user messages per session', zh: '每个会话最多允许多少条用户消息' },
+  costMessageLimitNote: { en: 'Default: warn at 15, stop at 20. Each prompt/task counts once; AI replies and tool output do not count. Queued tasks reserve slots. Applies to Claude and Codex in every mode, including Off.', zh: '默认 15 条提醒、20 条禁止追加。每条提问或任务算一条，AI 回复和工具输出不计入，排队任务占用名额。适用于 Claude 和 Codex，在所有模式（包括关闭费用优化）下生效。' },
+  sessionLimitWarning: { en: '⚠ Strong recommendation: start a new session now to avoid growing context costs. {count} user messages, {queued} queued. This session stops accepting messages at {max}.', zh: '⚠ 强烈建议立即开新会话，避免历史上下文持续增加费用！当前已发送 {count} 条用户消息，另有 {queued} 条排队。达到 {max} 条后将禁止继续追加。' },
+  sessionLimitBlocked: { en: '⛔ Message limit reached: {count} user messages and {queued} queued (limit {max}). Sending is disabled. You must start a new session.', zh: '⛔ 已达到消息上限：已发送 {count} 条、排队 {queued} 条（上限 {max} 条）。禁止继续追加消息，必须开新会话！' },
+  sessionLimitBatch: { en: 'This session has room for {remaining} more user messages. Start a new session to continue, or reduce the batch to fit.', zh: '当前会话还可追加 {remaining} 条用户消息。请开新会话继续；批量提交时请勿超过剩余名额。' },
+  sessionLimitInvalid: { en: 'Enter whole numbers: warning must be at least 1 and below the maximum; maximum cannot exceed 10000.', zh: '请输入整数：提醒阈值至少为 1，且必须小于禁止追加的阈值；上限不能超过 10000。' },
   title: { en: 'Clootee', zh: 'Clootee' },
   tagline: {
     en: 'Making Claude Code / Codex easier to use',
