@@ -1,5 +1,6 @@
 // 国际化字典与翻译函数。至少支持 zh / en
 const DICT = {
+  sessionLimitSettingsHint: { en: 'You can change the thresholds in {settings}.', zh: '您可以在{settings}中修改阈值。' },
   costWarnMessages: { en: 'Suggest a new session after this many user messages', zh: '达到多少条用户消息后，强烈提醒开新会话' },
   costMaxMessages: { en: 'Maximum user messages per session', zh: '每个会话最多允许多少条用户消息' },
   costMessageLimitNote: { en: 'Default: warn at 15, stop at 20. Each prompt/task counts once; AI replies and tool output do not count. Queued tasks reserve slots. Applies to Claude and Codex in every mode, including Off.', zh: '默认 15 条提醒、20 条禁止追加。每条提问或任务算一条，AI 回复和工具输出不计入，排队任务占用名额。适用于 Claude 和 Codex，在所有模式（包括关闭费用优化）下生效。' },

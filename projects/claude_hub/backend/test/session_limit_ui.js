@@ -33,7 +33,30 @@ async function main() {
     assert.match(await page.locator('#sessionLimitBanner').innerText(), /强烈建议/);
     assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => getComputedStyle(el).borderTopColor), 'rgb(239, 68, 68)');
     assert.equal(await page.locator('#addTaskBtn').isEnabled(), true);
+    await page.evaluate(() => {
+      const panel = document.createElement('div');
+      panel.id = 'settingsPaneOverlay'; panel.hidden = true;
+      panel.style.cssText = 'position:fixed;inset:20px;background:white;overflow:auto;height:250px;z-index:10';
+      panel.innerHTML = '<div style="height:700px"></div><div id="costMessageLimits" tabindex="-1"><input id="costWarnMessages" value="15"><input id="costMaxMessages" value="20"></div><div style="height:700px"></div>';
+      document.body.appendChild(panel);
+      window.openSettings = () => {};
+      window.openSettingsPane = id => { window.openedPane = id; panel.hidden = false; panel.scrollTop = 0; };
+    });
+    for (const blocked of [false, true]) {
+      await page.evaluate(blocked => { fixture.blocked = blocked; fixture.count = blocked ? 20 : 15; fixture.warning = true; return Ui.load(); }, blocked);
+      assert.match(await page.locator('#sessionLimitBanner').innerText(), /您可以在设置中修改阈值/);
+      await page.click('.session-limit-settings-link');
+      await page.waitForFunction(() => document.activeElement?.id === 'costMessageLimits');
+      await page.waitForFunction(() => {
+        const target = document.getElementById('costMessageLimits').getBoundingClientRect();
+        const panel = document.getElementById('settingsPaneOverlay').getBoundingClientRect();
+        return target.top >= panel.top && target.bottom <= panel.bottom;
+      });
+      assert.equal(await page.evaluate(() => openedPane), 'cost');
+      await page.evaluate(() => { document.getElementById('settingsPaneOverlay').hidden = true; });
+    }
     await page.evaluate(() => { fixture.count = 19; return Ui.load(); });
+    await page.evaluate(() => { fixture.blocked = false; return Ui.load(); });
     assert.equal(await page.evaluate(() => Ui.prepare(1)), true);
     assert.equal(await page.evaluate(() => Ui.prepare(2)), false);
     assert.equal(await page.locator('#taskInput').inputValue(), 'Unsent draft');
@@ -45,7 +68,7 @@ async function main() {
       await page.evaluate(language => { window.lang = language; Ui.render(); }, language);
       assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => el.scrollWidth <= el.clientWidth), true, 'mobile banner fits');
     }
-    await page.click('#sessionLimitBanner button');
+    await page.click('#sessionLimitBanner > button');
     await page.evaluate(() => Ui.render());
     assert.equal(await page.locator('#sessionLimitBanner').count(), 0);
     assert.equal(await page.locator('#addTaskBtn').isEnabled(), true);

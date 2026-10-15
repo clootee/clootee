@@ -17,12 +17,31 @@ const SessionLimitUi = {
     const text = document.createElement('strong');
     text.textContent = T(s.blocked ? 'sessionLimitBlocked' : 'sessionLimitWarning')
       .replace('{count}', s.count).replace('{queued}', s.queued).replace('{max}', s.max);
+    const hint = document.createElement('span');
+    hint.className = 'session-limit-settings-hint';
+    const [before, after] = T('sessionLimitSettingsHint').split('{settings}');
+    const settings = document.createElement('button');
+    settings.type = 'button';
+    settings.className = 'session-limit-settings-link';
+    settings.textContent = T('settings');
+    settings.onclick = () => this.openSettings();
+    hint.append(before, settings, after || '');
+    text.appendChild(hint);
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = T('newSession');
     button.onclick = () => newSession();
     banner.append(text, button);
     box.appendChild(banner);
+  },
+  openSettings() {
+    openSettings();
+    openSettingsPane('cost');
+    requestAnimationFrame(() => {
+      const target = $('costMessageLimits');
+      target.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      target.focus({ preventScroll: true });
+    });
   },
   async load() {
     const id = State.sessionId;

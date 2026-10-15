@@ -2418,6 +2418,20 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
   cursor: pointer;
 }
 .session-limit-blocked { background: #7f1d1d; border-color: #f87171; }
+.session-limit-settings-hint { display: block; margin-top: 6px; font-size: 13px; font-weight: 400; }
+.session-limit-banner .session-limit-settings-link {
+  padding: 0 2px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+#costMessageLimits { scroll-margin: 16px; }
+#costMessageLimits:focus { outline: 2px solid #ef4444; outline-offset: 6px; border-radius: 4px; }
 body.light .session-limit-banner { background: #fff1f2; color: #991b1b; }
 body.light .session-limit-blocked { background: #ffe4e6; }
 .sx-navi-tx { flex: 1 1 auto; min-width: 0; }

@@ -10,7 +10,7 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
-  <link rel="stylesheet" href="styles.css?v=20261015a" />
+  <link rel="stylesheet" href="styles.css?v=20261015b" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -543,11 +543,13 @@
           <label class="sx-lbl" for="costScope" id="costScopeLabel"></label>
           <select class="sx-input" id="costScope"><option value="both"></option><option value="subscription"></option><option value="apikey"></option></select>
           <div class="sx-note" id="costAutomaticNote"></div>
+          <div id="costMessageLimits" tabindex="-1">
           <label class="sx-lbl" for="costWarnMessages" id="costWarnMessagesLabel"></label>
           <input class="sx-input" type="number" id="costWarnMessages" min="1" max="9999" step="1" />
           <label class="sx-lbl" for="costMaxMessages" id="costMaxMessagesLabel"></label>
           <input class="sx-input" type="number" id="costMaxMessages" min="2" max="10000" step="1" />
           <p class="sx-note" id="costMessageLimitNote"></p>
+          </div>
           <div id="costManual" hidden>
             <label class="sx-chk"><input type="checkbox" id="costGuard" /><span id="costGuardLabel"></span></label>
             <label class="sx-chk"><input type="checkbox" id="costStrict" /><span id="costStrictLabel"></span></label>
@@ -1154,7 +1156,7 @@
     <p id="promptCacheError" role="alert"></p>
     <div class="prompt-cache-actions"><button type="button" id="promptCacheCancel"></button><button type="button" id="promptCacheConfirm"></button></div>
   </dialog>
-  <script src="trans.js?v=20261015a"></script>
+  <script src="trans.js?v=20261015b"></script>
   <script src="workspace.js?v=20260825a"></script>
   <script src="rootwizard.js?v=20260804a"></script>
   <script src="health.js?v=20260911a"></script>
@@ -1173,7 +1175,7 @@
   <script src="helper/ErrorHandler.js?v=20261012e"></script>
   <script src="prompt-cache.js?v=20261012e"></script>
   <script src="cost-optimization.js?v=20261015a"></script>
-  <script src="session-limit.js?v=20261015a"></script>
+  <script src="session-limit.js?v=20261015b"></script>
   <script src="app.js?v=20261015a"></script>
 </body>
 </html>
