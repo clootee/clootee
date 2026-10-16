@@ -5619,7 +5619,8 @@ async function addTask() {
     Attach.items = keepAttach;
     renderAttachBar();
     SessionLimitUi.refresh();
-    alert((e.message || '').includes('session_message_limit_reached') ? T('sessionLimitBatch').replace('{remaining}', '0') : e.message || 'Submit failed');
+    if ((e.message || '').includes('session_message_limit_reached')) SessionLimitUi.showFeedback(T('sessionLimitBatch').replace('{remaining}', '0'));
+    else alert(e.message || 'Submit failed');
   }
 }
 // ── 批量任务弹窗 ──

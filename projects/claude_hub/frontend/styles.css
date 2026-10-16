@@ -2389,51 +2389,33 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 }
 .sx-navi-ic { flex: 0 0 26px; width: 26px; text-align: center; font-size: 20px; line-height: 1; }
 
+/* Session system notice: stays in the message flow and scrolls away with history. */
 .session-limit-banner {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 16px 0 0;
-  padding: 16px;
-  border: 2px solid #ef4444;
-  border-radius: 10px;
-  background: #450a0a;
-  color: #fecaca;
-  box-shadow: 0 0 0 3px #ef444426;
-  font-size: 15px;
+  position: static;
+  margin: 12px 0;
+  padding: 4px 8px;
+  color: #ef6b73;
+  font-size: 13px;
+  font-weight: 400;
   line-height: 1.6;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
-.session-limit-banner strong { flex: 1 1 240px; }
 .session-limit-banner button {
-  padding: 9px 16px;
-  border: 1px solid #fca5a5;
-  border-radius: 7px;
-  background: #dc2626;
-  color: #fff;
-  font-weight: 700;
-  cursor: pointer;
-}
-.session-limit-blocked { background: #7f1d1d; border-color: #f87171; }
-.session-limit-settings-hint { display: block; margin-top: 6px; font-size: 13px; font-weight: 400; }
-.session-limit-banner .session-limit-settings-link {
-  padding: 0 2px;
+  display: inline;
+  padding: 0;
   border: 0;
-  border-radius: 2px;
   background: transparent;
   color: inherit;
   font: inherit;
-  font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 3px;
+  cursor: pointer;
 }
+.session-limit-settings-hint { display: inline; }
 #costMessageLimits { scroll-margin: 16px; }
 #costMessageLimits:focus { outline: 2px solid #ef4444; outline-offset: 6px; border-radius: 4px; }
-body.light .session-limit-banner { background: #fff1f2; color: #991b1b; }
-body.light .session-limit-blocked { background: #ffe4e6; }
+body.light .session-limit-banner { color: #b4232f; }
 .sx-navi-tx { flex: 1 1 auto; min-width: 0; }
 .sx-navi-tx b { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.4; }
 .sx-navi-tx em {

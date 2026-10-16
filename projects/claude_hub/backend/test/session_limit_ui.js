@@ -31,7 +31,19 @@ async function main() {
     assert.equal(await page.locator('#sessionLimitBanner').count(), 0);
     await page.evaluate(() => { fixture.count = 15; fixture.warning = true; return Ui.load(); });
     assert.match(await page.locator('#sessionLimitBanner').innerText(), /强烈建议/);
-    assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => getComputedStyle(el).borderTopColor), 'rgb(239, 68, 68)');
+    assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => getComputedStyle(el).position), 'static');
+    assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => getComputedStyle(el).fontSize), '13px');
+    assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)');
+    await page.setViewportSize({ width: 360, height: 640 });
+    await page.evaluate(() => {
+      const box = $('messages');
+      box.style.cssText = 'height:240px;overflow:auto;display:block;position:relative';
+      const history = document.createElement('div');
+      history.id = 'testHistory'; history.style.height = '900px';
+      box.prepend(history); box.scrollTop = 0;
+    });
+    assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => el.getBoundingClientRect().top >= document.getElementById('testHistory').getBoundingClientRect().bottom), true);
+    assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => el.getBoundingClientRect().top > document.getElementById('messages').getBoundingClientRect().bottom), true, 'notice does not float over visible history');
     assert.equal(await page.locator('#addTaskBtn').isEnabled(), true);
     await page.evaluate(() => {
       const panel = document.createElement('div');
@@ -59,11 +71,13 @@ async function main() {
     await page.evaluate(() => { fixture.blocked = false; return Ui.load(); });
     assert.equal(await page.evaluate(() => Ui.prepare(1)), true);
     assert.equal(await page.evaluate(() => Ui.prepare(2)), false);
+    assert.equal(await page.evaluate(() => alerts.length), 0, 'batch feedback must stay inline');
     assert.equal(await page.locator('#taskInput').inputValue(), 'Unsent draft');
     await page.evaluate(() => { fixture.count = 20; fixture.blocked = true; return Ui.load(); });
     assert.match(await page.locator('#sessionLimitBanner').innerText(), /必须开新会话/);
     assert.equal(await page.locator('#addTaskBtn').isDisabled(), true);
     assert.equal(await page.evaluate(() => Ui.prepare(1)), false);
+    assert.equal(await page.evaluate(() => alerts.length), 0, 'hard stop must not open a popup');
     for (const language of ['zh', 'en']) {
       await page.evaluate(language => { window.lang = language; Ui.render(); }, language);
       assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => el.scrollWidth <= el.clientWidth), true, 'mobile banner fits');
