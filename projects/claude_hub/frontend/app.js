@@ -2274,26 +2274,33 @@ async function newSession() {
   closeDrawer(); // 移动端：新建会话（右侧要开新对话/弹目录选择）收起抽屉
   resetSessionSearch(false);
   if (State.favoritesOnly) {
-    // 收藏夹里已按目录筛选 → 新会话直接用该目录，不再让用户重选；没筛选才留空等用户选
+    if (State.favoriteRootBindingDraftId) return;
+    // 跨目录视图已筛选目录时，立即创建并绑定，避免无目录草稿被左侧筛选隐藏。
     const favRoot = favFilterRootId();
     const cur = State.session;
+    State.runFilters.clear();
+    syncRunTabs();
+    switchTab('active');
     // 与主列表同规则：当前就是该目录下一个空的新会话时直接复用，不重复建
     if (favRoot && cur && cur.rootId === favRoot && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
       showMiniToast(T('alreadyNewSession'));
+      bumpSessionUpdatedAt(cur.id, Date.now());
+      await selectSession(cur.id);
+      $('sessionList').scrollTop = 0;
       flashSessionRow(cur.id);
-      selectSession(cur.id);
       focusTaskInputIfDesktop();
       return;
     }
     // 已经是收藏草稿会话（哪怕还没选目录）也算「已经是新会话」，不重复弹目录选择
-    if (cur && isFavoriteDraftId(cur.id)) {
+    if (cur && isFavoriteDraftId(cur.id) && !favRoot) {
       showMiniToast(T('alreadyNewSession'));
       flashSessionRow(cur.id);
       focusTaskInputIfDesktop();
       return;
     }
-    // 不再自动绑定：即使收藏夹按目录筛选中，也只是把该目录预选中，仍需用户点确认才真正建会话
     createFavoriteDraftSession(favRoot);
+    if (favRoot) await bindFavoriteDraftRoot(favRoot);
+    $('sessionList').scrollTop = 0;
     focusTaskInputIfDesktop();
     return;
   }
