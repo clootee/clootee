@@ -2274,33 +2274,26 @@ async function newSession() {
   closeDrawer(); // 移动端：新建会话（右侧要开新对话/弹目录选择）收起抽屉
   resetSessionSearch(false);
   if (State.favoritesOnly) {
-    if (State.favoriteRootBindingDraftId) return;
-    // 跨目录视图已筛选目录时，立即创建并绑定，避免无目录草稿被左侧筛选隐藏。
+    // 收藏夹里已按目录筛选 → 新会话直接用该目录，不再让用户重选；没筛选才留空等用户选
     const favRoot = favFilterRootId();
     const cur = State.session;
-    State.runFilters.clear();
-    syncRunTabs();
-    switchTab('active');
     // 与主列表同规则：当前就是该目录下一个空的新会话时直接复用，不重复建
     if (favRoot && cur && cur.rootId === favRoot && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
       showMiniToast(T('alreadyNewSession'));
-      bumpSessionUpdatedAt(cur.id, Date.now());
-      await selectSession(cur.id);
-      $('sessionList').scrollTop = 0;
       flashSessionRow(cur.id);
+      selectSession(cur.id);
       focusTaskInputIfDesktop();
       return;
     }
     // 已经是收藏草稿会话（哪怕还没选目录）也算「已经是新会话」，不重复弹目录选择
-    if (cur && isFavoriteDraftId(cur.id) && !favRoot) {
+    if (cur && isFavoriteDraftId(cur.id)) {
       showMiniToast(T('alreadyNewSession'));
       flashSessionRow(cur.id);
       focusTaskInputIfDesktop();
       return;
     }
+    // 新建按钮只预选目录；点确认、发送消息或上传文件时再真正建会话。
     createFavoriteDraftSession(favRoot);
-    if (favRoot) await bindFavoriteDraftRoot(favRoot);
-    $('sessionList').scrollTop = 0;
     focusTaskInputIfDesktop();
     return;
   }
@@ -2343,6 +2336,7 @@ function createFavoriteDraftSession(preferredRootId = '') {
     id: `favorite-draft-${now}`,
     rootId: '',
     preferredRootId,
+    pendingRootId: preferredRootId,
     name: '',
     engine: State.settings.defaultEngine,
     claudeSessionId: '',
@@ -2656,8 +2650,8 @@ function favoriteDraftRootPickerEl() {
     o.textContent = `${r.name} (${r.path})`;
     sel.appendChild(o);
   });
-  // 收藏夹按目录筛选时，把该目录预选为默认项，但仍需用户点「确认」才真正建会话，不自动触发
-  const preferredRootId = State.session?.preferredRootId || '';
+  // 保留用户当前选择（包括主动清空）；确认、发送消息或上传文件时才真正建会话。
+  const preferredRootId = State.session?.pendingRootId ?? State.session?.preferredRootId ?? '';
   if (preferredRootId && sortedRoots().some((r) => r.id === preferredRootId)) {
     sel.value = preferredRootId;
   }
@@ -4128,16 +4122,7 @@ function uploadOne(file, fname, onProgress) {
 // ── 上传文件到 <会话根目录>/tmp/ ──
 async function uploadFiles(files) {
   if (!files || !files.length) return;
-  if (!State.sessionId) { alert(T('selectRootFirst')); return; }
-  // 收藏夹草稿会话下拉框已选好目录时，截图/上传文件同样等同于替用户点了一次确认，不必先点确定
-  if (State.session && !State.session.rootId) {
-    const pendingRootId = State.session.pendingRootId || '';
-    if (pendingRootId) await bindFavoriteDraftRoot(pendingRootId);
-    if (!State.session || !State.session.rootId) {
-      alert(T('favoriteRootRequired'));
-      return;
-    }
-  }
+  if (!(await ensureSession())) return;
   const ta = $('taskInput');
   const names = [];
   const list = Array.prototype.slice.call(files);
@@ -5561,12 +5546,22 @@ function applyQuickPrefix(text) {
 // 无当前会话时按当前模式自动创建一个可用会话（新根目录、之前无会话、用户直接在输入框提交 = 自动开新会话）。
 // 成功并有可用 sessionId 返回 true；需要用户先做选择（选目录/选根目录）则给出提示并返回 false。
 async function ensureSession() {
-  if (State.sessionId) return true;
+  if (State.sessionId) {
+    if (!isFavoriteDraftId(State.sessionId)) return true;
+    // 发消息/上传即认可选择器中的目录；显式清空时不能回退到其他目录。
+    const rootId = State.session?.pendingRootId ?? State.session?.preferredRootId ?? '';
+    if (!rootId || !State.roots.some((r) => r.id === rootId)) {
+      alert(T('favoriteRootRequired'));
+      return false;
+    }
+    await bindFavoriteDraftRoot(rootId);
+    return !!State.session?.rootId && !isFavoriteDraftId(State.sessionId);
+  }
   // 收藏夹视图：创建一个待绑定根目录的草稿会话（后续仍需绑定根目录才能发任务）。
   if (State.favoritesOnly) {
-    // 即使目录筛选中也不自动绑定：只预选该目录，仍需用户点确认，避免误发到错误目录
+    // 当前操作已表示确认：预选目录后继续绑定，无须再点一次发送/上传。
     createFavoriteDraftSession(favFilterRootId());
-    return false;
+    return ensureSession();
   }
   // 工作台模式：必须先选工作目录，无法静默创建，走原有目录选择流程。
   if (isWorkspace()) {
@@ -5595,18 +5590,7 @@ async function addTask() {
   // 附件路径在发送这一刻才拼进正文（输入体验上它只是输入框上方的卡片）
   const raw = [text, files.join(' ')].filter(Boolean).join(text ? ' ' : '');
   if (!raw) return;
-  if (!State.sessionId && !(await ensureSession())) return;
-  if (State.session && !State.session.rootId) {
-    // 下拉框已经选好目录时，直接发消息就等同于替用户点了一次确认，不用再多点一下
-    const pendingRootId = State.session.pendingRootId || '';
-    if (pendingRootId) {
-      await bindFavoriteDraftRoot(pendingRootId);
-    }
-    if (!State.session || !State.session.rootId) {
-      alert(T('favoriteRootRequired'));
-      return;
-    }
-  }
+  if (!(await ensureSession())) return;
   if (!(await SessionLimitUi.prepare(1))) return;
   if (!(await PromptCacheUi.ensure())) return;
   const prepared = await CostUi.prepare([applyQuickPrefix(applySlashPrefix(raw))]);
@@ -5658,17 +5642,7 @@ function closeTasksModal() {
 async function submitTasks() {
   const prompts = parseTaskLines();
   if (prompts.length === 0 || !State.sessionId) return;
-  if (State.session && !State.session.rootId) {
-    // 收藏夹草稿会话下拉框已选好目录（用户还没点确认）：直接发消息即视为确认，省去多余一步
-    const pendingRootId = State.session.pendingRootId || '';
-    if (pendingRootId) {
-      await bindFavoriteDraftRoot(pendingRootId);
-      if (!State.session || !State.session.rootId) return; // 绑定失败已弹出错误提示
-    } else {
-      alert(T('favoriteRootRequired'));
-      return;
-    }
-  }
+  if (!(await ensureSession())) return;
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
   if (!(await SessionLimitUi.prepare(prompts.length))) return;
   if (!(await PromptCacheUi.ensure())) return;
