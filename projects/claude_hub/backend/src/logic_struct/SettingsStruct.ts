@@ -38,7 +38,9 @@ export interface AutoCompactSetting {
 }
 export const AUTO_COMPACT_MIN = 100000;
 export const AUTO_COMPACT_MAX = 1000000;
-export const AUTO_COMPACT_DEFAULT_TOKENS = 200000;
+// 自定义窗口的出厂默认值：CLI 允许的最大值，压缩频率最低。
+// 旧配置里已经落盘的 200000 不会被改写（用户显式存过就尊重），只影响「没填过」的情况。
+export const AUTO_COMPACT_DEFAULT_TOKENS = 1000000;
 
 export interface AppSettings {
   costOptimization: CostPolicySettings;

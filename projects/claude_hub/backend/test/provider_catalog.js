@@ -137,11 +137,12 @@ test('context window declaration drives both CLI env keys', () => {
   assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '1000000');
   assert.equal(Config.get().claude.contextWindow, 1000000);
 
-  // 2) 留空 / 0 → 不声明（两个键都不出现，交回引擎/服务商默认）
+  // 2) 自定义服务商留空 / 0 → 出厂默认 1M（它的模型名 Claude Code 都不认识，
+  //    不声明就会被按 200K 处理，约 16.7 万 token 就开始压缩）
   withWindow('custom', { baseUrl: 'https://api.deepseek.com/anthropic', contextWindow: 0 });
   env = Config.claudeEnv();
-  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, undefined);
-  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '1000000');
+  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '1000000');
   assert.equal(Config.get().claude.contextWindow, undefined);
 
   // 3) 用户显式值覆盖服务商 extraEnv 里写死的那个（clootee 出厂 1M）
@@ -179,6 +180,27 @@ test('context window declaration drives both CLI env keys', () => {
   // 8) 原版：不注入任何窗口键（官方模型自带正确窗口）
   save('claude', 'official', '', '');
   assert.deepEqual(Config.claudeEnv(), {});
+});
+
+// 只声明 AUTO_COMPACT_WINDOW 的服务商：CLI 会拿它按「以为的模型窗口」夹一次，
+// 必须同时写 MAX_CONTEXT_TOKENS，否则 1M 声明会被夹回 200K。
+test('providers that only declare the compact window also declare the model window', () => {
+  save('claude', 'minimax', 'sk-test', 'MiniMax-M3');
+  let env = Config.claudeEnv();
+  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '1000000');
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '1000000');
+  save('claude', 'kimi', 'sk-test', 'kimi-for-coding');
+  env = Config.claudeEnv();
+  assert.equal(env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '1048576');
+  assert.equal(env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, '1048576');
+});
+
+// 前端预设/默认值提示需要知道每个服务商的出厂窗口
+test('provider list exposes the factory context window', () => {
+  const byId = Object.fromEntries(Config.providerList().map((p) => [p.id, p]));
+  assert.equal(byId.custom.defaultContextWindow, 1000000);
+  assert.equal(byId.deepseek.defaultContextWindow, 1000000);
+  assert.equal(byId.official.defaultContextWindow, undefined);
 });
 
 // DeepSeek 官方直连：deepseek-flash 是 1M 上下文，出厂就声明，不能等用户自己填。

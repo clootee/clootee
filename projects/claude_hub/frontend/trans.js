@@ -1183,6 +1183,11 @@ const DICT = {
     en: 'Claude Code treats any model name it does not recognise as 200K, so a 1M model gets compacted at ~167K tokens. Fill in the model’s real window (e.g. 1000000) to fix that. Leave blank to keep the provider default. Setting it too high makes the API reject long requests instead of compacting first.',
     zh: 'Claude Code 对不认识的模型名一律按 200K 处理，1M 的模型会在约 16.7 万 token 时就被强制压缩。填模型真实的窗口（如 1000000）即可解决。留空=跟随服务商默认。填得过大时会话会先撑爆 API 报错，而不是先压缩。',
   },
+  engCtxWindowDefault: { en: 'Provider default: {n}.', zh: '服务商默认：{n}。' },
+  costCompactPresetHint: {
+    en: '1M is the largest window Claude Code accepts — the least frequent compaction.',
+    zh: '1M 是 Claude Code 允许的最大窗口，压缩频率最低。',
+  },
   engRefetchModels: { en: 'Re-fetch models', zh: '重新拉取模型' },
   engDetectCurrent: { en: 'Detect current model', zh: '检测当前模型' },
   engDetectAvailable: { en: 'Detect available models', zh: '检测可用模型' },

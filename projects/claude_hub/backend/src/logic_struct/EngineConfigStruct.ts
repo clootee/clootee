@@ -90,6 +90,10 @@ export const CONTEXT_WINDOW_MAX = 10_000_000;
 // claude CLI 对 `--autocompact` / CLAUDE_CODE_AUTO_COMPACT_WINDOW 的硬性区间（二进制里写死的）。
 export const AUTO_COMPACT_WINDOW_MIN = 100_000;
 export const AUTO_COMPACT_WINDOW_MAX = 1_000_000;
+// 自定义服务商的出厂默认窗口。Claude Code 对不认识的模型名一律按 200K 处理，
+// 于是约 16.7 万 token 就被强制压缩；自定义网关的模型名几乎都不认识，
+// 所以默认给到 CLI 允许的最大值（1M），用户仍可在设置里按真实模型改大/改小。
+export const CUSTOM_DEFAULT_CONTEXT_WINDOW = 1_000_000;
 
 // 顺序即前端展示顺序：首推的服务商放最前
 export const PROVIDERS: Record<string, ProviderMeta> = {
@@ -390,11 +394,17 @@ export class EngineConfigStruct {
       ANTHROPIC_AUTH_TOKEN: cfg.apiKey,
       ...(meta?.extraEnv || {}),
     };
+    // 服务商 extraEnv 只声明了 AUTO_COMPACT_WINDOW、没声明模型大小时（MiniMax / Kimi），
+    // 把 MAX_CONTEXT_TOKENS 补成同一个值：CLI 会用「它以为的模型窗口」把前者夹一次，
+    // 不认识的名字默认 200K —— 只给后者等于没给。
+    if (env.CLAUDE_CODE_AUTO_COMPACT_WINDOW && !env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
+      env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
     // 用户显式填了「上下文窗口」→ 覆盖服务商 extraEnv 里写死的那个（如 clootee 的 1M）。
     // 两个键必须一起给：CLAUDE_CODE_MAX_CONTEXT_TOKENS 是「这个模型有多大」，
     // 而 CLAUDE_CODE_AUTO_COMPACT_WINDOW 会被 CLI 按模型窗口 `Math.min` 夹一次 ——
     // 只给后者的话，不认识的模型名仍会被夹回它默认的 200K，等于没设。
-    const ctxWin = cfg.contextWindow;
+    // 自定义服务商留空时给 1M 出厂默认，避免它的模型名不被认识而被压到 200K。
+    const ctxWin = cfg.contextWindow || (cfg.provider === 'custom' ? CUSTOM_DEFAULT_CONTEXT_WINDOW : 0);
     if (ctxWin && ctxWin > 0) {
       env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(ctxWin);
       env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(
@@ -503,7 +513,7 @@ export class EngineConfigStruct {
   ];
 
   // 供前端「新手引导 / 设置」展示的服务商清单（含开通链接与说明）
-  static providerList(): Array<{ id: EngineProvider; engines?: string[] } & Partial<ProviderMeta>> {
+  static providerList(): Array<{ id: EngineProvider; engines?: string[]; defaultContextWindow?: number } & Partial<ProviderMeta>> {
     const featured = this.FEATURED_PROVIDERS.filter((id) => THIRD_PARTY_PROVIDERS.indexOf(id) >= 0);
     const rest = THIRD_PARTY_PROVIDERS.filter((id) => featured.indexOf(id) < 0);
     return [
@@ -517,13 +527,25 @@ export class EngineConfigStruct {
       ...[...featured, ...rest].map((id) => ({
         id, ...PROVIDERS[id],
         engines: this._enginesOf(PROVIDERS[id]),
+        defaultContextWindow: this.defaultContextWindow(id),
       })),
       {
         id: 'custom' as EngineProvider,
         label: '自定义服务商',
         note: '填写兼容 Base URL、模型列表 URL 与 API Key',
+        defaultContextWindow: CUSTOM_DEFAULT_CONTEXT_WINDOW,
       },
     ];
+  }
+
+  // 服务商出厂声明的上下文窗口（供前端显示「默认值」；undefined=未声明，引擎按 200K 猜）。
+  // custom 走 CUSTOM_DEFAULT_CONTEXT_WINDOW；其余取 extraEnv 里的两个键之一（后者可能被 CLI 夹）。
+  static defaultContextWindow(provider: EngineProvider): number | undefined {
+    if (provider === 'official') return undefined;
+    if (provider === 'custom') return CUSTOM_DEFAULT_CONTEXT_WINDOW;
+    const extra = PROVIDERS[provider]?.extraEnv || {};
+    const raw = Number(extra.CLAUDE_CODE_MAX_CONTEXT_TOKENS || extra.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
+    return Number.isFinite(raw) && raw > 0 ? raw : undefined;
   }
 
   // 某服务商能被哪个引擎用：有 Anthropic 兼容端点 → Claude Code；有 OpenAI 兼容端点 → Codex。

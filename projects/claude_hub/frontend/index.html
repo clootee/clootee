@@ -453,6 +453,12 @@
                 <div id="claudeCtxWindowBox">
                   <label class="sx-lbl" id="claudeCtxWindowLbl">上下文窗口（tokens）</label>
                   <input class="sx-input" id="claudeCtxWindow" type="number" min="1000" max="10000000" step="10000" placeholder="留空=跟随服务商默认" />
+                  <div class="ctx-presets" id="claudeCtxWindowPresets">
+                    <button type="button" class="ctx-preset" data-ctx-window="128000">128K</button>
+                    <button type="button" class="ctx-preset" data-ctx-window="256000">256K</button>
+                    <button type="button" class="ctx-preset" data-ctx-window="512000">512K</button>
+                    <button type="button" class="ctx-preset" data-ctx-window="1000000">1M</button>
+                  </div>
                   <div class="sx-note" id="claudeCtxWindowNote"></div>
                 </div>
                 <div class="sx-adv">
@@ -573,8 +579,14 @@
           </select>
           <div id="autoCompactCustomBox" hidden>
             <label class="sx-lbl" id="costCompactTokensLabel"></label>
-            <input class="sx-input" id="autoCompactTokensInput" type="number" min="100000" max="1000000" step="10000" placeholder="例如 200000" />
+            <input class="sx-input" id="autoCompactTokensInput" type="number" min="100000" max="1000000" step="10000" placeholder="例如 1000000" />
+            <div class="ctx-presets" id="autoCompactPresets">
+              <button type="button" class="ctx-preset" data-auto-compact="200000">200K</button>
+              <button type="button" class="ctx-preset" data-auto-compact="500000">500K</button>
+              <button type="button" class="ctx-preset" data-auto-compact="1000000">1M</button>
+            </div>
             <div class="sx-note" id="costCompactWindowHelp"></div>
+            <div class="sx-note" id="costCompactPresetHint"></div>
           </div>
           <div class="sx-note" id="autoCompactNote"></div>
         </div>

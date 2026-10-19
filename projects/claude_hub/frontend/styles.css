@@ -2517,6 +2517,14 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 .sx-btn:hover { border-color: var(--accent, #6ea8fe); }
 .sx-btn-auto { flex: 0 0 auto; }
 .sx-btn-primary { flex: 0 0 auto; background: var(--accent, #3b6ea5); border-color: transparent; color: #fff; }
+/* 上下文窗口的快捷预设（128K / 256K / 512K / 1M）：点一下直接填数，不用手敲 */
+.ctx-presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.ctx-preset {
+  flex: 0 0 auto; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer;
+  background: var(--hover, rgba(255, 255, 255, .06)); color: var(--text, #e6e6e6);
+  border: 1px solid var(--border, #333); border-radius: 999px;
+}
+.ctx-preset:hover { border-color: var(--accent, #6ea8fe); color: var(--accent, #6ea8fe); }
 
 /* 快捷按钮 GUI 编辑器：分组卡片 → 组名/组提示词 → 每行一个按钮（文字 + 含义） */
 .qedit { display: flex; flex-direction: column; gap: 10px; }

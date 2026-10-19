@@ -6950,6 +6950,19 @@ function bind() {
       $(id).addEventListener('input', () => markEngineDirty(eng));
     }
   }
+  // 手改上下文窗口同样算「未保存的改动」，否则只改这一项时保存按钮不会把它落盘
+  $('claudeCtxWindow').addEventListener('input', () => markEngineDirty('claude'));
+  // 上下文窗口快捷预设：点一下直接填数（保存仍由板块底部按钮完成）
+  for (const b of document.querySelectorAll('#claudeCtxWindowPresets [data-ctx-window]')) {
+    b.addEventListener('click', () => {
+      $('claudeCtxWindow').value = b.dataset.ctxWindow;
+      markEngineDirty('claude');
+    });
+  }
+  // 自定义压缩窗口的快捷预设
+  for (const b of document.querySelectorAll('#autoCompactPresets [data-auto-compact]')) {
+    b.addEventListener('click', () => { $('autoCompactTokensInput').value = b.dataset.autoCompact; });
+  }
   // 更新引擎 + 修改密码
   $('tcRefreshBtn').addEventListener('click', renderToolchain);
   $('runAsUserSaveBtn').addEventListener('click', saveRunAsUser);
@@ -7613,7 +7626,10 @@ function applyEnginePaneText() {
     if (u.ctxWin) {
       $('claudeCtxWindowLbl').textContent = T('engCtxWindowLabel');
       u.ctxWin.placeholder = T('engCtxWindowPh');
-      $('claudeCtxWindowNote').textContent = T('engCtxWindowNote');
+      const def = providerDefaultContextWindow(u.select.value);
+      $('claudeCtxWindowNote').textContent = def
+        ? `${T('engCtxWindowNote')} ${T('engCtxWindowDefault').replace('{n}', formatCtxWindow(def))}`
+        : T('engCtxWindowNote');
     }
     $(`${engine}AdvLabel`).textContent = T('advOptions');
     $(`${engine}ModelsBtn`).textContent = T('engRefetchModels');
@@ -7869,7 +7885,9 @@ function quickEditTagRow(g, gi, t, ti) {
 // 只作用于 Claude Code（Codex 由其自身机制处理，故面板里直接说明，不给它开关）。
 const AUTO_COMPACT_MIN = 100000;
 const AUTO_COMPACT_MAX = 1000000;
-const AUTO_COMPACT_DEFAULT = 200000;
+// 自定义压缩窗口的默认值：给到 CLI 允许的最大值，避免一选「自定义」就被默认的 20 万
+// 立刻压回「动不动就压缩」的老问题。用户仍可用旁边的 200K/500K/1M 预设改小。
+const AUTO_COMPACT_DEFAULT = 1000000;
 
 // 20 万 → 「20 万」/「200k」：摘要里给人看的写法，不参与任何计算
 function formatTokens(n) {
@@ -7881,7 +7899,9 @@ function formatTokens(n) {
 function fillContextPane() {
   const ac = State.settings.autoCompact || {};
   $('autoCompactModeSelect').value = ac.mode === 'custom' ? 'custom' : 'auto';
-  $('autoCompactTokensInput').value = ac.tokens || AUTO_COMPACT_DEFAULT;
+  // 只有 custom 模式下的 tokens 才是用户显式选的；auto 模式下展示新的高默认值，
+  // 免得用户一切到「自定义窗口」就看到旧版遗留的 20 万，又回到频繁压缩。
+  $('autoCompactTokensInput').value = ac.mode === 'custom' ? (ac.tokens || AUTO_COMPACT_DEFAULT) : AUTO_COMPACT_DEFAULT;
   syncAutoCompactMode();
 }
 // 切换模式：自定义才显示数字输入；备注行说明当前引擎设置对谁生效
@@ -8339,6 +8359,22 @@ async function loadProviderCatalog(engine) {
   select.value = previous;
 }
 
+// 服务商出厂声明的上下文窗口（后端 /api/engine/providers 下发）。
+// 0/undefined = 没有出厂默认，留空就交给引擎按 200K 猜。
+function providerDefaultContextWindow(provider) {
+  const p = (EngineProviderCatalog || []).find((x) => x.id === provider);
+  const n = p ? Number(p.defaultContextWindow) : 0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// 128000 → "128K"、1000000 → "1M"：给预设/默认值提示用，不参与计算
+function formatCtxWindow(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000000 && v % 100000 === 0) return `${v / 1000000}M`;
+  if (v >= 1000 && v % 1000 === 0) return `${Math.round(v / 1000)}K`;
+  return String(v);
+}
+
 function providerUi(engine) {
   const p = engine === 'claude' ? 'claude' : 'codex';
   return {
@@ -8413,6 +8449,20 @@ function syncProviderVisibility(engine) {
   u.custom.hidden = provider !== 'custom';
   // 原版模型自带正确窗口，不需要（也不该）手填；第三方 / 自定义才显示
   if (u.ctxWinBox) u.ctxWinBox.hidden = provider === 'official';
+  if (engine === 'claude' && u.ctxWin) {
+    const def = providerDefaultContextWindow(provider);
+    // 自定义服务商的模型名 Claude Code 全不认识；留空会被按 200K 压缩。
+    // 切到自定义且用户没填过 → 直接预填 1M，保存后即生效。
+    if (provider === 'custom' && !String(u.ctxWin.value || '').trim() && def)
+      u.ctxWin.value = String(def);
+    const note = $('claudeCtxWindowNote');
+    if (note) {
+      note.textContent = def
+        ? `${T('engCtxWindowNote')} ${T('engCtxWindowDefault').replace('{n}', formatCtxWindow(def))}`
+        : T('engCtxWindowNote');
+    }
+  }
+
   // 模型选择框始终显示，允许原版订阅也选择模型；
   // 自定义服务商换成可手填的输入框（拉不到模型列表时也能用）
   const free = modelIsFree(engine);
@@ -8475,6 +8525,11 @@ async function onEngineProviderChange(engine) {
     }
     if (u.effort) u.effort.value = slot.effort || '';
     renderAccSummary(engine);
+  }
+  // 自定义服务商从没存过窗口 → 回显出厂默认 1M（上面清空表单时把预填值也清掉了）
+  if (provider === 'custom' && u.ctxWin && !String(u.ctxWin.value || '').trim()) {
+    const def = providerDefaultContextWindow(provider);
+    if (def) u.ctxWin.value = String(def);
   }
   // 没有选定模型才自动定档（不覆盖用户上次的选择）
   if (!modelValue(engine)) autoPickModel(engine);

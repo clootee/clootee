@@ -7,7 +7,7 @@ const CostUi = {
       costAutomaticNote: 'costAutomatic', costGuardLabel: 'costGuard', costStrictLabel: 'costStrict',
       costEnhanceLabel: 'costEnhance', costTokensLabel: 'costTokens', costExtraLabel: 'costExtra',
       costCheapModelLabel: 'costCheapModel', costClassifierNote: 'costClassifierNote',
-      costCompactIntro: 'costCompactIntro', costCompactWindowLabel: 'costCompactWindow', costCompactTokensLabel: 'costCompactTokens', costCompactWindowHelp: 'costCompactHelp',
+      costCompactIntro: 'costCompactIntro', costCompactWindowLabel: 'costCompactWindow', costCompactTokensLabel: 'costCompactTokens', costCompactWindowHelp: 'costCompactHelp', costCompactPresetHint: 'costCompactPresetHint',
       costGuardTitle: 'costAlertTitle', costContinue: 'costContinue', costNew: 'costNew',
       costCompact: 'costCompact', costCancel: 'cancel', costGuardStrictNote: 'costStrictNote',
       costPreparedLabel: 'costPreparedLabel', costPreparedSend: 'costPreparedSend' };
@@ -49,7 +49,7 @@ const CostUi = {
       patch.claudePromptCache = $('claudePromptCache').value;
       patch.askClaudePromptCache = $('askClaudePromptCache').checked;
       patch.autoCompact = { mode: $('autoCompactModeSelect').value,
-        tokens: Math.max(100000, Math.min(1000000, Number($('autoCompactTokensInput').value) || 200000)) };
+        tokens: Math.max(100000, Math.min(1000000, Number($('autoCompactTokensInput').value) || 1000000)) };
     } else if (p.mode === 'auto') { patch.claudePromptCache = '1h'; patch.askClaudePromptCache = false; }
     const saved = await patchSettings(patch);
     if (!saved) { setPaneNotice('engSaveFailShort', null, 'err', 0); return false; }
