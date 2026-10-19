@@ -2390,32 +2390,65 @@ body.light .session-item .meta .favorite-dir-badge { background: #dbeafe; color:
 .sx-navi-ic { flex: 0 0 26px; width: 26px; text-align: center; font-size: 20px; line-height: 1; }
 
 /* Session system notice: stays in the message flow and scrolls away with history. */
+/* Theme contract: new themes inherit --text; optional notice tokens customize the accent. */
 .session-limit-banner {
   position: static;
-  margin: 12px 0;
-  padding: 4px 8px;
-  color: #ef6b73;
+  display: block;
+  margin: 8px 0;
+  padding: 0;
+  color: var(--session-notice-fg, var(--text));
   font-size: 13px;
   font-weight: 400;
-  line-height: 1.6;
+  line-height: 1.8;
   text-align: center;
   overflow-wrap: anywhere;
 }
+.session-limit-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--session-notice-mark, var(--text));
+  font-size: 9px;
+  line-height: 1;
+  vertical-align: 1px;
+}
+.session-limit-summary, .session-limit-settings-hint, .session-limit-queued { display: inline; }
+.session-limit-count { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .session-limit-banner button {
   display: inline;
   padding: 0;
   border: 0;
   background: transparent;
-  color: inherit;
+  color: var(--session-notice-action, var(--text));
   font: inherit;
   text-decoration: underline;
   text-underline-offset: 3px;
+  white-space: nowrap;
   cursor: pointer;
 }
-.session-limit-settings-hint { display: inline; }
+.session-limit-banner button:hover { text-decoration-thickness: 2px; }
+.session-limit-banner button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
 #costMessageLimits { scroll-margin: 16px; }
-#costMessageLimits:focus { outline: 2px solid #ef4444; outline-offset: 6px; border-radius: 4px; }
-body.light .session-limit-banner { color: #b4232f; }
+#costMessageLimits:focus { outline: 2px solid var(--session-notice-mark, var(--text)); outline-offset: 6px; border-radius: 4px; }
+body.dark { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #c8a66a; }
+body.light { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #876321; }
+body.ocean { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #d5b76a; }
+body.pink { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #90601f; }
+body.green { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #73601c; }
+body.cat { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #855c20; }
+body.galaxy { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #d8bd78; }
+body.mecha { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #c5ae70; }
+body.cyber { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #d9c583; }
+body.steam { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #d2b16e; }
+body.rain { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #c3b17c; }
+body.sea { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #c8b878; }
+body.aurora { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #b9bc88; }
+body.winter { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #715a29; }
+body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--text); --session-notice-mark: #716027; }
 .sx-navi-tx { flex: 1 1 auto; min-width: 0; }
 .sx-navi-tx b { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.4; }
 .sx-navi-tx em {

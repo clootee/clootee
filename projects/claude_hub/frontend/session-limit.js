@@ -14,25 +14,42 @@ const SessionLimitUi = {
     if (!s?.warning && !feedback) return;
     const banner = document.createElement('div');
     banner.id = 'sessionLimitBanner';
-    banner.className = 'session-limit-banner';
+    banner.className = 'session-limit-banner' + (s?.blocked ? ' is-blocked' : '');
     banner.setAttribute('role', 'status');
+    const icon = document.createElement('span');
+    icon.className = 'session-limit-icon';
+    icon.textContent = '!';
+    icon.setAttribute('aria-hidden', 'true');
     const text = document.createElement('span');
+    text.className = 'session-limit-summary';
     text.textContent = feedback || T(s.blocked ? 'sessionLimitBlocked' : 'sessionLimitWarning')
       .replace('{count}', s.count).replace('{queued}', s.queued).replace('{max}', s.max);
     const hint = document.createElement('span');
     hint.className = 'session-limit-settings-hint';
-    const [before, after] = T('sessionLimitSettingsHint').split('{settings}');
     const settings = document.createElement('button');
     settings.type = 'button';
     settings.className = 'session-limit-settings-link';
     settings.textContent = T('settings');
+    settings.title = T('sessionLimitSettingsHint').replace('{settings}', T('settings'));
     settings.onclick = () => this.openSettings();
-    hint.append(before, settings, after || '');
+    hint.append(settings);
+    let queued;
+    if (s?.queued) {
+      queued = document.createElement('span');
+      queued.className = 'session-limit-queued';
+      queued.textContent = T('sessionLimitQueued').replace('{queued}', s.queued);
+    }
+    const count = document.createElement('span');
+    count.className = 'session-limit-count';
+    count.textContent = s ? `${s.count + s.queued}/${s.max}` : '';
+    count.setAttribute('aria-label', T('sessionLimitCount'));
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = T('newSession');
     button.onclick = () => newSession();
-    banner.append(text, ' ', hint, ' ', button);
+    banner.append(icon, ' ', count, ' · ', text);
+    if (queued) banner.append(' · ', queued);
+    banner.append(' · ', hint, ' · ', button);
     box.appendChild(banner);
   },
   showFeedback(text) {
@@ -68,10 +85,20 @@ const SessionLimitUi = {
   },
   async prepare(incoming) {
     this.feedback = null;
+    const id = State.sessionId;
+    if (!id || !State.session?.rootId) { this.id = ''; this.status = null; this.render(); return false; }
+    // 发送优先于后台刷新：递增 request 让排队/在途的 refresh 结果作废，并清掉待触发的定时器。
+    // 否则刚建会话时 renderMessages() 调度的 refresh 会在 80ms 后顶掉本次 load（返回 null），
+    // 导致首条消息静默不发送、必须再按一次回车。
+    ++this.request;
+    clearTimeout(this.timer);
+    this.timer = null;
     try {
-      const s = await this.load();
-      if (!s) return false;
-      if (s.count + s.queued + incoming <= s.max) return true;
+      const s = await api('/api/session/limit?id=' + encodeURIComponent(id));
+      if (id !== State.sessionId) return false;
+      this.id = id;
+      this.status = s;
+      if (s.count + s.queued + incoming <= s.max) { this.render(); return true; }
       this.showFeedback(T('sessionLimitBatch').replace('{remaining}', Math.max(0, s.max - s.count - s.queued)));
       return false;
     } catch (e) {

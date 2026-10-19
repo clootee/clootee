@@ -30,10 +30,10 @@ async function main() {
     await page.evaluate(() => Ui.load());
     assert.equal(await page.locator('#sessionLimitBanner').count(), 0);
     await page.evaluate(() => { fixture.count = 15; fixture.warning = true; return Ui.load(); });
-    assert.match(await page.locator('#sessionLimitBanner').innerText(), /强烈建议/);
+    assert.match(await page.locator('#sessionLimitBanner').innerText(), /建议新会话/);
     assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => getComputedStyle(el).position), 'static');
     assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => getComputedStyle(el).fontSize), '13px');
-    assert.equal(await page.locator('#sessionLimitBanner').evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(0, 0, 0, 0)');
+    assert.equal(await page.locator('.session-limit-count').innerText(), '15/20');
     await page.setViewportSize({ width: 360, height: 640 });
     await page.evaluate(() => {
       const box = $('messages');
@@ -56,7 +56,7 @@ async function main() {
     });
     for (const blocked of [false, true]) {
       await page.evaluate(blocked => { fixture.blocked = blocked; fixture.count = blocked ? 20 : 15; fixture.warning = true; return Ui.load(); }, blocked);
-      assert.match(await page.locator('#sessionLimitBanner').innerText(), /您可以在设置中修改阈值/);
+      assert.match(await page.locator('.session-limit-settings-link').getAttribute('title'), /您可以在设置中修改阈值/);
       await page.click('.session-limit-settings-link');
       await page.waitForFunction(() => document.activeElement?.id === 'costMessageLimits');
       await page.waitForFunction(() => {
@@ -71,10 +71,20 @@ async function main() {
     await page.evaluate(() => { fixture.blocked = false; return Ui.load(); });
     assert.equal(await page.evaluate(() => Ui.prepare(1)), true);
     assert.equal(await page.evaluate(() => Ui.prepare(2)), false);
+    // 刚建会话时 renderMessages() 会 refresh() 排一个 80ms 后的 load；发送时若接口慢于 80ms，
+    // 旧的实现会被这个后台刷新顶掉并静默返回 false（首条消息不发送，需再按一次回车）。
+    await page.evaluate(async () => {
+      const saved = window.api;
+      window.api = async () => { await new Promise(r => setTimeout(r, 150)); return { ...fixture, count: 0, queued: 0, blocked: false }; };
+      Ui.refresh();
+      window.racePrepare = await Ui.prepare(1);
+      window.api = saved;
+    });
+    assert.equal(await page.evaluate(() => racePrepare), true, 'first send must not be lost to a background refresh');
     assert.equal(await page.evaluate(() => alerts.length), 0, 'batch feedback must stay inline');
     assert.equal(await page.locator('#taskInput').inputValue(), 'Unsent draft');
     await page.evaluate(() => { fixture.count = 20; fixture.blocked = true; return Ui.load(); });
-    assert.match(await page.locator('#sessionLimitBanner').innerText(), /必须开新会话/);
+    assert.match(await page.locator('#sessionLimitBanner').innerText(), /已达上限/);
     assert.equal(await page.locator('#addTaskBtn').isDisabled(), true);
     assert.equal(await page.evaluate(() => Ui.prepare(1)), false);
     assert.equal(await page.evaluate(() => alerts.length), 0, 'hard stop must not open a popup');
