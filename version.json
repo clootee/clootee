@@ -1,10 +1,10 @@
 {
-  "version": "3.1.4",
+  "version": "3.1.5",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-10-16",
+  "releasedAt": "2026-10-19",
   "notesI18n": {
-    "zh": "消息数量提醒改为消息清单中的普通字号系统提示，随消息滚动，不再悬浮遮挡移动端正文。",
-    "en": "Message limits now appear as regular-size system notices in the conversation, scrolling with history without covering mobile content. Limit and batch feedback is inline; Settings and New Session shortcuts remain available."
+    "zh": "第三方/DeepSeek 服务商默认使用 1M 上下文窗口，大幅减少频繁自动压缩；新增 128K/256K/512K/1M 快捷预设。修复新建会话后首条消息需要按两次回车的问题，选中目录下发送与上传会自动创建正式会话。",
+    "en": "Third-party and DeepSeek providers now default to a 1M context window, greatly reducing frequent auto-compaction, with 128K/256K/512K/1M quick presets. Fixed the first message after creating a session requiring a second Enter; sending or uploading with a selected directory now creates the real session automatically."
   }
 }
