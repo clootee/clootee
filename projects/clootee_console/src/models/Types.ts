@@ -24,6 +24,7 @@ export interface LedgerData {
   devices: DeviceRecord[];
   usage: UsageRecord[];
   issuedPerIp: Record<string, { day: string; count: number }>;
+  daily: { day: string; spentMicro: number };
 }
 
 export interface LinkCodeRecord {

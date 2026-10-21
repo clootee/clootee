@@ -65,6 +65,7 @@ export class GatewayStruct {
 
   protected static async _proxyAi(req: http.IncomingMessage, res: http.ServerResponse, path: string): Promise<void> {
     const device = this._device(req);
+    Ledger.assertBudget();
     Ledger.assertRate(device);
     Ledger.assertBalance(device);
     const body = await this._readJson(req);

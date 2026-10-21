@@ -31,8 +31,10 @@ CC_PORT=8980
 CC_GRANT_MICRO=5000000             # 新设备体验额度（1,000,000 micro = 1 单位）
 CC_PRICE_INPUT_MICRO_PER_M=1000000
 CC_PRICE_OUTPUT_MICRO_PER_M=2000000
+CC_DEVICES_PER_IP_PER_DAY=10       # 同一 IP 每天可领的新设备数
+CC_DAILY_BUDGET_MICRO=100000000    # 全站每日预算（¥100），到顶后全部 402
 # 可选：CC_MODEL_MAP=deepseek-flash|ep-xxx;deepseek-v4-pro|ep-yyy
-# 可选：CC_PUBLIC_URL / CC_DATA_DIR / CC_DEVICES_PER_IP_PER_DAY / CC_RATE_LIMIT_RPM
+# 可选：CC_PUBLIC_URL / CC_DATA_DIR / CC_RATE_LIMIT_RPM
 ```
 
 环境变量统一 `CC_` 前缀，避免被服务器上已有的 `PORT` 等变量污染。

@@ -105,6 +105,15 @@ export class LedgerStruct {
     }
   }
 
+  // 全站每日预算（0 = 不限制）：到顶后不再放行任何调用。
+  static assertBudget(): void {
+    if (Config.DAILY_BUDGET_MICRO <= 0) return;
+    const spent = this._dailySpent(this._today());
+    if (spent >= Config.DAILY_BUDGET_MICRO) {
+      throw new HttpError(402, `Ledger.assertBudget: daily budget exhausted (${spent}/${Config.DAILY_BUDGET_MICRO} micro)`);
+    }
+  }
+
   // 每分钟请求数限制（按设备）。
   static assertRate(device: DeviceRecord): void {
     this._rateCheck(device.installId);
@@ -132,6 +141,7 @@ export class LedgerStruct {
   protected static _issueLinkCode(_token: string): string { throw new Error('Not implemented'); }
   protected static _resolveLinkCode(_code: string): string | null { throw new Error('Not implemented'); }
   protected static _rateCheck(_installId: string): void { throw new Error('Not implemented'); }
+  protected static _dailySpent(_day: string): number { throw new Error('Not implemented'); }
   protected static _enforceIpQuota(_day: string, _ip: string): void { throw new Error('Not implemented'); }
   protected static _today(): string { throw new Error('Not implemented'); }
   protected static _clampLimit(raw: unknown): number {

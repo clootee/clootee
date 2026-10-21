@@ -19,7 +19,11 @@ function esc(value: unknown): string {
 
 export class Gateway extends GatewayStruct {
   protected static _listen(host: string, port: number): void {
-    const server = http.createServer((req, res) => { void this.handle(req, res); });
+    const server = http.createServer((req, res) => {
+      const started = Date.now();
+      res.on('finish', () => this._log('info', `${req.method} ${req.url} ${res.statusCode} ${Date.now() - started}ms`));
+      void this.handle(req, res);
+    });
     server.on('error', (e) => this._log('error', `server error: ${e.message}`));
     server.listen(port, host, () => this._log('info', `listening on http://${host}:${port} (models: ${Config.MODEL_MAP.size})`));
   }

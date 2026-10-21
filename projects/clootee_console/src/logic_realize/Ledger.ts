@@ -20,7 +20,7 @@ export class Ledger extends LedgerStruct {
 
   private static _load(): LedgerData {
     if (this._data) return this._data;
-    let data: LedgerData = { devices: [], usage: [], issuedPerIp: {} };
+    let data: LedgerData = { devices: [], usage: [], issuedPerIp: {}, daily: { day: '', spentMicro: 0 } };
     try {
       if (fs.existsSync(this._file)) {
         const parsed = JSON.parse(fs.readFileSync(this._file, 'utf8'));
@@ -28,6 +28,7 @@ export class Ledger extends LedgerStruct {
           devices: Array.isArray(parsed.devices) ? parsed.devices : [],
           usage: Array.isArray(parsed.usage) ? parsed.usage : [],
           issuedPerIp: parsed.issuedPerIp && typeof parsed.issuedPerIp === 'object' ? parsed.issuedPerIp : {},
+          daily: parsed.daily && typeof parsed.daily === 'object' ? parsed.daily : { day: '', spentMicro: 0 },
         };
       }
     } catch (e) {
@@ -102,6 +103,9 @@ export class Ledger extends LedgerStruct {
     data.usage.push(usage);
     if (data.usage.length > Config.USAGE_KEEP) data.usage.splice(0, data.usage.length - Config.USAGE_KEEP);
     device.spentMicro = (Number(device.spentMicro) || 0) + (Number(usage.costMicro) || 0);
+    const day = this._today();
+    if (data.daily.day !== day) data.daily = { day, spentMicro: 0 };
+    data.daily.spentMicro = (Number(data.daily.spentMicro) || 0) + (Number(usage.costMicro) || 0);
     this._save();
   }
 
@@ -123,6 +127,11 @@ export class Ledger extends LedgerStruct {
     const rec = this._links.get(code);
     if (!rec || rec.expiresAt <= Date.now()) return null;
     return rec.token;
+  }
+
+  protected static _dailySpent(day: string): number {
+    const data = this._load();
+    return data.daily.day === day ? Number(data.daily.spentMicro) || 0 : 0;
   }
 
   protected static _rateCheck(installId: string): void {

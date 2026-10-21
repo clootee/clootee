@@ -18,9 +18,19 @@ export interface UpstreamResponse {
 
 export class UpstreamStruct {
   // 对外公开的模型列表（供 /v1/models 与设置页选择）
-  static listModels(): { id: string; object: string; owned_by: string }[] {
+  // 同时带 OpenAI（object/owned_by）与 Anthropic（type/display_name/created_at）字段，
+  // Claude Code 会拉 /v1/models 校验模型名，缺 type 会被判成 unrecognized_model。
+  static listModels(): { id: string; object: string; owned_by: string; type: string; display_name: string; created_at: string }[] {
     if (!Config.UPSTREAM_MODEL) throw new Error('Upstream.listModels: UPSTREAM_MODEL is empty');
-    return [...Config.MODEL_MAP.keys()].map((id) => ({ id, object: 'model', owned_by: 'clootee' }));
+    const createdAt = new Date().toISOString();
+    return [...Config.MODEL_MAP.keys()].map((id) => ({
+      id,
+      object: 'model',
+      owned_by: 'clootee',
+      type: 'model',
+      display_name: id,
+      created_at: createdAt,
+    }));
   }
 
   // 调度：解析模型 → 生成上游目标 → 发出请求 → 挂上用量采集
