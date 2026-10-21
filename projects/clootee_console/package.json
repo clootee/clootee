@@ -1,0 +1,15 @@
+{
+  "name": "clootee-console",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Clootee default provider gateway: anonymous device tokens, usage ledger, Anthropic/OpenAI-compatible proxy to Volcano Ark DeepSeek",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.6.3"
+  }
+}
