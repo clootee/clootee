@@ -14,7 +14,7 @@ const State = {
   runFilters: new Set(),                  // 运行状态筛选（与 tab 叠加）：可同时含 running / justFinished（并集）；空集=「所有」
   mode: 'classic',                       // 模式切换已下线，固定经典模式
   // 会话列表视图：single=单目录 / favorites=收藏夹 / all=全部目录（只列已建索引的会话）。
-  // 刷新后保持（与 rootId 同用 sessionStorage）；'favoritesOnly' 是它的派生只读属性（见下方 defineProperty），
+  // 刷新后保持，且新标签页/新窗口沿用（localStorage）；'favoritesOnly' 是它的派生只读属性（见下方 defineProperty），
   // 含义为「跨目录视图」——收藏夹与全部目录共用同一套列表/草稿/目录筛选逻辑，只是数据源不同。
   listMode: readListMode(),
   favoriteSessions: [],   // 跨目录视图的列表缓存（收藏夹或全部目录，取决于 listMode）
@@ -31,11 +31,23 @@ const State = {
   noticeOpen: false,                      // 右下角错误小圆圈是否已展开
   updateInfo: null,                       // 最近一次软件更新检测结果（/api/update/check 的返回值）
 };
-// 兼容旧的 sessionStorage 键：老版本只有收藏夹开关 favoritesOnly=1
+// 视图模式存 localStorage：刷新页面、新开标签页/窗口都沿用上次选择的模式。
+// 兼容旧版本：listMode 曾存 sessionStorage，收藏夹开关曾用 favoritesOnly 键，读取时一并识别并迁移。
 function readListMode() {
-  const m = sessionStorage.getItem('listMode');
-  if (m === 'single' || m === 'favorites' || m === 'all') return m;
-  return sessionStorage.getItem('favoritesOnly') === '1' ? 'favorites' : 'single';
+  const legacy = sessionStorage.getItem('listMode');
+  const m = localStorage.getItem('listMode') || legacy;
+  if (m === 'single' || m === 'favorites' || m === 'all') {
+    if (legacy) {
+      localStorage.setItem('listMode', m);
+      sessionStorage.removeItem('listMode');
+    }
+    return m;
+  }
+  const legacyFav = (localStorage.getItem('favoritesOnly') || sessionStorage.getItem('favoritesOnly')) === '1';
+  if (legacyFav) localStorage.setItem('listMode', 'favorites');
+  localStorage.removeItem('favoritesOnly');
+  sessionStorage.removeItem('favoritesOnly');
+  return legacyFav ? 'favorites' : 'single';
 }
 // favoritesOnly = 「跨目录视图」派生值，只读。切换视图一律走 setListMode。
 Object.defineProperty(State, 'favoritesOnly', {
@@ -82,13 +94,15 @@ function setTabRootId(rootId) {
   else sessionStorage.removeItem('rootId');
 }
 
-// 列表视图切换：持久化到 sessionStorage，刷新页面后仍停留在同一视图
+// 列表视图切换：持久化到 localStorage，刷新页面或新开标签页后仍停留在同一视图
 function setListMode(mode) {
   const next = mode === 'favorites' || mode === 'all' ? mode : 'single';
   if (State.listMode !== next) State.favoriteSessions = []; // 换数据源：旧缓存（含草稿）一律作废
   State.listMode = next;
-  sessionStorage.setItem('listMode', next);
-  sessionStorage.removeItem('favoritesOnly'); // 旧键不再使用
+  localStorage.setItem('listMode', next);
+  localStorage.removeItem('favoritesOnly'); // 旧键不再使用
+  sessionStorage.removeItem('listMode');
+  sessionStorage.removeItem('favoritesOnly');
   resetSessionPage();
 }
 function setFavoritesOnly(on) {
