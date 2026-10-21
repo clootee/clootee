@@ -1,5 +1,6 @@
 // 文件上传实现：清洗文件名、确保 tmp/ 存在、防重名后写入。跨平台用 path.join。
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { UploaderStruct, UploadResult } from '../logic_struct/UploaderStruct';
 import { EngineAccess } from '../helper/EngineAccess';
@@ -8,7 +9,14 @@ import { Settings } from './Settings';
 export class Uploader extends UploaderStruct {
   protected static _writeToTmp(rootPath: string, filename: string, data: Buffer): UploadResult {
     const tmpDir = path.join(rootPath, 'tmp');
-    fs.mkdirSync(tmpDir, { recursive: true });
+    // 服务不是以 root 跑时（Linux 下通常是 claudeuser），如果 tmp/ 是别的用户建的（例如以前
+    // root 起服务时留下的 root:root 0755），mkdirSync 与写入都会 EACCES —— 前端只能看到
+    // “上传失败: ... EACCES”，看不出该改哪里。这里翻译成可行动的提示（含当前进程用户和目标目录）。
+    try {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    } catch (e: any) {
+      throw this._accessError(e, 'mkdir', tmpDir);
+    }
     // 引擎以别的系统用户跑时（root 起服务 + 切 claudeuser），这里先把根目录/tmp 的访问权补上，
     // 否则附件写进去了引擎却读不到，会话里只剩一个读不开的 tmp/xxx.jpg（见 EngineAccess 注释）。
     EngineAccess.ensureDir(rootPath, Settings.runAsUser());
@@ -24,7 +32,7 @@ export class Uploader extends UploaderStruct {
       try { fs.unlinkSync(full); } catch { /* 文件可能压根没创建出来 */ }
       if (e && (e.code === 'ENOSPC' || e.code === 'EDQUOT'))
         throw new Error(`磁盘空间不足，无法保存 ${finalName}（${Math.round(data.length / 1024 / 1024)}MB），请先清理服务器磁盘`);
-      throw e;
+      throw this._accessError(e, 'write', full);
     }
     EngineAccess.ensureFile(full, Settings.runAsUser());
     return {
@@ -32,6 +40,18 @@ export class Uploader extends UploaderStruct {
       rel: `tmp/${finalName}`,
       sizeKb: Math.round((data.length / 1024) * 10) / 10,
     };
+  }
+
+  // 把 EACCES/EPERM 翻译成「谁能改、怎么改」，其余错误原样返回
+  private static _accessError(e: any, op: 'mkdir' | 'write', target: string): any {
+    if (!e || (e.code !== 'EACCES' && e.code !== 'EPERM')) return e;
+    const user = (() => {
+      try { return os.userInfo().username; } catch { return 'unknown'; }
+    })();
+    return new Error(
+      `Uploader._writeToTmp: ${op} 被拒绝（${e.code}），当前服务运行用户 ${user} 无权写入 ${target}。` +
+      `请用管理员执行：chown -R ${user}:${user} ${target}（或 chmod 775 并把 ${user} 加入属组）`,
+    );
   }
 
   // 只取文件名部分，剔除路径分隔符与控制/非法字符，避免越界写入
