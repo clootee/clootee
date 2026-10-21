@@ -66,6 +66,9 @@ OPENSOURCE_CHECKLIST.md
 # 例外三：docs/ 是对外公开的说明文档目录（架构说明等），必须入库。
 !docs/
 !docs/*.md
+# 例外三补充：claude_hub 的运维排障文档也要入库。
+!projects/claude_hub/docs/
+!projects/claude_hub/docs/*.md
 
 *.docx
 *.xlsx
