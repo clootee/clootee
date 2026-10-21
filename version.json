@@ -1,10 +1,10 @@
 {
-  "version": "3.1.5",
+  "version": "3.1.6",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-10-19",
+  "releasedAt": "2026-10-21",
   "notesI18n": {
-    "zh": "第三方/DeepSeek 服务商默认使用 1M 上下文窗口，大幅减少频繁自动压缩；新增 128K/256K/512K/1M 快捷预设。修复新建会话后首条消息需要按两次回车的问题，选中目录下发送与上传会自动创建正式会话。",
-    "en": "Third-party and DeepSeek providers now default to a 1M context window, greatly reducing frequent auto-compaction, with 128K/256K/512K/1M quick presets. Fixed the first message after creating a session requiring a second Enter; sending or uploading with a selected directory now creates the real session automatically."
+    "zh": "排队任务不再受费用保护二次暂定：任务一旦进入队列就直接执行，不会因为在队列中等待期间 token 涨过阈值而停下等待确认。费用提示仍保留在发送前。",
+    "en": "Queued tasks now always run: once accepted into the queue a task no longer waits for cost confirmation when token usage crosses the threshold while it is queued. The cost prompt still appears before sending."
   }
 }
