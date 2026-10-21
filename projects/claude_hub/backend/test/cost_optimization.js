@@ -44,9 +44,15 @@ async function main() {
   const task = { id: 'blocked', prompt: 'Continue', status: 'pending' };
   s.tasks = [task];
   SessionManager.saveSession = () => {};
+  RootManager.getRoot = () => ({ path: require('node:os').tmpdir() });
+  TraceStore.record = () => {};
+  TaskQueue._ensureProjectPrompt = () => {};
+  let launched = 0;
+  ClaudeRunner.execute = () => { launched++; return { kill() {} }; };
   TaskQueue._startTask(s, task);
-  assert.equal(task.held, true);
-  assert.equal(task.costBlocked, true, 'server guard must stop execution before launching');
+  assert.equal(task.held, undefined, 'a queued task must not be held by the cost guard');
+  assert.equal(task.status, 'running');
+  assert.equal(launched, 1, 'a queued task must execute even when token usage crossed the cost threshold');
   s.tasks = [];
   settings.costOptimization.scope = 'subscription';
   assert.equal(CostOptimizer.check(s.id).active, false);
@@ -118,6 +124,6 @@ async function main() {
   assert.throws(() => CostOptimizer.approve(s.id, 'Continue', compacted.check.fingerprint), /strict_locked/);
   const afterCompact = CostOptimizer.approve(s.id, 'Continue', compacted.check.fingerprint, compacted.compactProof);
   assert.equal(CostOptimizer.allowed(s.id, 'Continue', afterCompact), true, 'verified compaction enables one reviewed send even in strict mode');
-  process.stdout.write('cost_optimization: strict server guard, approvals, TTL, scopes, classifier and migration passed\n');
+  process.stdout.write('cost_optimization: queued-task guard bypass, approvals, TTL, scopes, classifier and migration passed\n');
 }
 main().catch(e => { process.stderr.write(e.stack + '\n'); process.exitCode = 1; });

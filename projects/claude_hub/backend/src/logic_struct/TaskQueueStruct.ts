@@ -111,14 +111,9 @@ export class TaskQueueStruct {
       EventBus.broadcast({ kind: 'notice', sessionId: session.id, taskId: task.id, level: 'warn', message: 'session_message_limit_reached' });
       return;
     }
-    if (session.engine === 'claude' && !CostOptimizer.allowed(session.id, task.prompt, task.costApproval)) {
-      task.held = true;
-      task.costBlocked = true;
-      SessionManager.saveSession(session);
-      EventBus.broadcast({ kind: 'task', sessionId: session.id, task });
-      EventBus.broadcast({ kind: 'notice', sessionId: session.id, taskId: task.id, level: 'warn', message: 'cost_send_blocked' });
-      return;
-    }
+    // 费用保护只在下发前提示（前端 CostUi.prepare → /api/cost/check），
+    // 任务一旦进入队列即视为已确认：排队任务必须直接执行，
+    // 不因为在队列里等待期间 token 涨过阈值而再次暂定/要求提示。
     task.costBlocked = false;
     CostOptimizer.consume(task.costApproval);
     const root = RootManager.getRoot(session.rootId);
