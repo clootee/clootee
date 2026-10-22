@@ -53,8 +53,15 @@ export class CostOptimizer {
     const earliest = started?.ts || lastAt;
     const now = Date.now();
     const modelKey = (v: string) => v.toLowerCase().replace(/^anthropic\//, '').replace(/\./g, '-').replace(/-\d{8}$/, '');
-    const modelChanged = !!cfg.model && !!last?.model && !['opus', 'sonnet', 'haiku'].includes(cfg.model)
-      && modelKey(cfg.model) !== modelKey(last.model);
+    // 自定义/中转服务商下，CLI 回报的是上游真实模型名（如 deepseek-v4-1-flash），
+    // 与配置里的 endpoint 别名（ep-...）天然不同，不能据此判定“用户换了模型”。
+    // 优先比较上一轮启动时记录的配置模型；老轨迹没有该字段时，仅官方订阅登录才退回比较 CLI 回报值。
+    const startedModel = String((started?.raw as any)?.model || '');
+    const modelChanged = !!cfg.model && (startedModel
+      ? modelKey(cfg.model) !== modelKey(startedModel)
+      : SUBSCRIPTION_PROVIDERS.includes(cfg.provider) && !!last?.model
+        && !['opus', 'sonnet', 'haiku'].includes(cfg.model)
+        && modelKey(cfg.model) !== modelKey(last.model));
     const providerChanged = !!(started?.raw as any)?.provider && (started?.raw as any).provider !== cfg.provider;
     const cacheState = !last ? 'unknown' : mode === 'off' || !ttl ? 'disabled' : modelChanged || providerChanged ? 'invalidated'
       : now - lastAt > ttl + margin ? 'expired'
@@ -63,8 +70,10 @@ export class CostOptimizer {
     const costs = ApiCost.estimate(cfg.provider, model, tokens, mode);
     const extraUsd = costs ? Math.max(0, costs.coldUsd - costs.warmUsd) : null;
     const running = session.tasks.some(t => t.status === 'running');
+    // 价目未知（自定义 endpoint 等）时算不出缓存重建要多花多少，弹窗只能显示“价目未知”，
+    // 对用户没有决策价值，反而每次过期后都拦一次 → 这种情况不拦，只在能估算且差价够大时提示。
     const blocked = active && !running && tokens >= policy.thresholdTokens && cacheState !== 'warm'
-      && (extraUsd === null || extraUsd >= policy.minExtraUsd);
+      && extraUsd !== null && extraUsd >= policy.minExtraUsd;
     const fingerprint = this.hash(JSON.stringify([this.key(session), last?.msgId, last?.ts, tokens, mode, cfg.provider, model, boundary?.ts]));
     return { active, blocked, strict: policy.strict, subscription, cacheState, cacheMode: actualMode,
       nextCacheMode: mode, tokens, estimated, lastAt, model, costs, extraUsd, fingerprint,
