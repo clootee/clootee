@@ -1,10 +1,10 @@
 {
-  "version": "3.1.6",
+  "version": "3.1.7",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-10-21",
+  "releasedAt": "2026-10-22",
   "notesI18n": {
-    "zh": "排队任务不再受费用保护二次暂定：任务一旦进入队列就直接执行，不会因为在队列中等待期间 token 涨过阈值而停下等待确认。费用提示仍保留在发送前。",
-    "en": "Queued tasks now always run: once accepted into the queue a task no longer waits for cost confirmation when token usage crosses the threshold while it is queued. The cost prompt still appears before sending."
+    "zh": "修复自定义/中转服务商下“每次发送都弹费用确认”的误报：不再拿配置的 endpoint 别名与 CLI 上报的上游模型名比较来判断模型切换；价目未知时不再拦截发送。",
+    "en": "Fix false “confirm context cost” prompts on custom/relay providers: model changes are now detected from the configured model across turns instead of comparing the endpoint alias with the upstream model name reported by the CLI; sends are no longer blocked when pricing is unknown."
   }
 }
