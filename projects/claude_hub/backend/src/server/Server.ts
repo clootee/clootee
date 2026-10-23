@@ -610,7 +610,12 @@ export class Server {
     );
     app.get('/api/fm/search', (req, res) =>
       this._wrap(res, 'fm.search', () =>
-        FileManager.search(String(req.query.rootId), String(req.query.q || '')),
+        FileManager.search(
+          String(req.query.rootId),
+          String(req.query.q || ''),
+          String(req.query.rel || ''),
+          String(req.query.recursive || '') !== '0',
+        ),
       ),
     );
     app.get('/api/fm/read', (req, res) =>

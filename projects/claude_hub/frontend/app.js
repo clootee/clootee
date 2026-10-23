@@ -452,6 +452,7 @@ function applyText() {
   $('pickerName').placeholder = T('dirNameLabel');
   $('pickerSelect').textContent = T('selectThisDir');
   $('fmSearchInput').placeholder = T('searchFiles');
+  $('fmSearchRecurseLbl').textContent = T('searchSubdirs');
   $('fmSearchBtn').title = T('search');
   $('fmRefreshBtn').title = T('refresh');
   $('settingsBtn').title = T('settings');
@@ -6384,7 +6385,11 @@ function fileCardEl(f) {
 }
 
 // ── 文件管理器（右侧抽屉：按根目录浏览/编辑/搜索/重点文件夹） ──
-const FM = { rel: '', favorites: [], searchOpen: false, searchTimer: null, searching: false };
+const FM = {
+  rel: '', favorites: [], searchOpen: false, searchTimer: null, searching: false,
+  // 多级搜索（递归子目录）：默认开启，用户可勾掉只看当前这一层；选择跨刷新保留
+  recurse: localStorage.getItem('fmSearchRecurse') !== '0',
+};
 
 // 文件管理器下载/预览直链（按 rootId + 相对路径，带 token）
 function fmFileUrl(rel, download) {
@@ -6542,6 +6547,7 @@ function fmToggleSearch() {
   FM.searchOpen = !FM.searchOpen;
   $('fmSearch').hidden = !FM.searchOpen;
   if (FM.searchOpen) {
+    $('fmSearchRecurse').checked = FM.recurse;
     fmUpdateSearchClear();
     setTimeout(() => $('fmSearchInput').focus(), 30);
   } else {
@@ -6569,13 +6575,19 @@ async function fmRunSearch(q) {
   const list = $('filesList');
   list.innerHTML = `<div class="files-empty">${T('loading')}</div>`;
   let files = [];
+  const rel = FM.rel;
+  const recursive = FM.recurse;
   try {
     files = await api('/api/fm/search?rootId=' + encodeURIComponent(State.rootId) +
-      '&q=' + encodeURIComponent(q));
+      '&q=' + encodeURIComponent(q) +
+      '&rel=' + encodeURIComponent(rel || '') +
+      '&recursive=' + (recursive ? '1' : '0'));
   } catch (e) {
     list.innerHTML = `<div class="files-empty">${escapeHtml(e.message)}</div>`;
     return;
   }
+  // 异步期间用户可能离开了搜索 / 切换了目录：丢弃过期结果
+  if (!$('fmSearchInput').value.trim() || FM.rel !== rel || FM.recurse !== recursive) return;
   FM.searching = true;
   $('fmCrumbs').innerHTML = `<span class="fm-crumb on">🔍 ${T('searchResults')} (${files.length})</span>`;
   list.innerHTML = '';
@@ -6584,6 +6596,14 @@ async function fmRunSearch(q) {
     return;
   }
   files.forEach((f) => list.appendChild(fmFileRowEl(f)));
+}
+
+// 切换「多级搜索」：记住选择，并按当前关键字立即重搜 / 回到普通浏览
+function fmOnRecurseChange() {
+  FM.recurse = $('fmSearchRecurse').checked;
+  localStorage.setItem('fmSearchRecurse', FM.recurse ? '1' : '0');
+  const q = $('fmSearchInput').value.trim();
+  if (q) fmRunSearch(q);
 }
 
 // ── 文本编辑器（覆盖层） ──
@@ -7077,6 +7097,7 @@ function bind() {
   $('fmRefreshBtn').addEventListener('click', () => fmBrowse(FM.rel));
   $('fmSearchInput').addEventListener('input', fmOnSearchInput);
   $('fmSearchClear').addEventListener('click', fmClearSearch);
+  $('fmSearchRecurse').addEventListener('change', fmOnRecurseChange);
   $('fpClose').addEventListener('click', closeFilePreview);
   $('fpOverlay').addEventListener('click', (e) => { if (e.target.id === 'fpOverlay') closeFilePreview(); });
   $('edClose').addEventListener('click', closeEditor);

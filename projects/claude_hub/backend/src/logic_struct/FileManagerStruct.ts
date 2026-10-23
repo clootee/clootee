@@ -31,15 +31,25 @@ export class FileManagerStruct {
     };
   }
 
-  // 在根目录下按文件名递归搜索（返回文件元信息，限量）
-  static search(rootId: string, q: string): FileMeta[] {
+  // 在根目录下的指定目录内按路径搜索（返回文件元信息，限量）。
+  // recursive=true 时递归搜索所有子目录（多级搜索），否则只看该目录这一层。
+  static search(rootId: string, q: string, rel = '', recursive = true): FileMeta[] {
     const needle = String(q || '').trim().toLowerCase();
     if (!needle) return [];
     const base = this._rootPath(rootId);
-    return FsHelper.listFilesRecursive(base)
+    const dir = this._resolveDir(base, rel);
+    if (!recursive) {
+      return FsHelper.listChildren(dir)
+        .filter((c) => !c.isDir)
+        .map((c) => ({ rel: FsHelper.relOf(base, c.path), size: c.size, mtime: c.mtime }))
+        .filter((f) => f.rel.toLowerCase().includes(needle))
+        .slice(0, 200)
+        .map((f) => this._meta(f.rel, f.size, f.mtime));
+    }
+    return FsHelper.listFilesRecursive(dir)
       .filter((f) => f.rel.toLowerCase().includes(needle))
       .slice(0, 200)
-      .map((f) => this._meta(f.rel, f.size, f.mtime));
+      .map((f) => this._meta(FsHelper.relOf(base, f.path), f.size, f.mtime));
   }
 
   // 读取文本文件内容（用于内置编辑器）；非文本/超大不可编辑

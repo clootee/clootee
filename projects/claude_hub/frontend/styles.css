@@ -1275,7 +1275,8 @@ body.light .eng-badge.eng-claude { background: #fbf0d0; color: #92660a; border-c
 body.light .eng-badge.eng-codex  { background: #d6f2f2; color: #0a6c6c; border-color: #7fcccc; }
 
 /* 主区标题旁引擎控件 */
-.engine-select { flex: none; padding: 3px 8px; font-size: 12px; margin-left: 4px; }
+/* 全局 select { width:100% } 会让草稿会话的引擎下拉撑满整行，把右侧图标挤出屏幕；这里收回宽度 */
+.engine-select { flex: none; width: auto; max-width: 180px; padding: 3px 8px; font-size: 12px; margin-left: 4px; }
 .engine-badge { flex: none; font-size: 11px; padding: 3px 9px; margin-left: 4px; border-radius: 999px;
   border: 1px solid var(--border); color: var(--muted); background: var(--panel2); }
 
@@ -2071,6 +2072,8 @@ button.sm { padding: 6px 12px; font-size: 13px; border-radius: 7px; }
   .main-header { padding: 10px 12px; flex-wrap: nowrap; gap: 8px; }
   .main-header .title { font-size: 14px; flex: 1 1 0; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .main-header .icon-btn { flex: 0 0 auto; }
+  /* 草稿会话的引擎下拉 + 一排图标很容易超出窄屏，收紧下拉宽度给图标留位置 */
+  .main-header .engine-select { max-width: 104px; font-size: 11px; }
 
   /* 对话区：消息占满，输入框沉底（类似 ChatGPT） */
   .content { flex-direction: column; min-height: 0; }
@@ -2182,6 +2185,12 @@ button.sm { padding: 6px 12px; font-size: 13px; border-radius: 7px; }
 /* 文件管理器：搜索栏 */
 .fm-search { padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel2); }
 .fm-search input { width: 100%; box-sizing: border-box; }
+.fm-recurse {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 7px; font-size: 12px; color: var(--muted);
+  cursor: pointer; user-select: none;
+}
+.fm-recurse input[type="checkbox"] { width: auto; flex: none; margin: 0; cursor: pointer; }
 /* 文件管理器：重点文件夹 chips */
 .fm-favs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .fm-fav-lbl { font-size: 13px; flex: none; }

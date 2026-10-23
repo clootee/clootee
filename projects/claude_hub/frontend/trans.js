@@ -1355,6 +1355,7 @@ const DICT = {
   emptyFolder: { en: 'Empty folder', zh: '空文件夹' },
   searchFiles: { en: 'Search files in this workspace…', zh: '在此工作目录下搜索文件…' },
   searchResults: { en: 'Search results', zh: '搜索结果' },
+  searchSubdirs: { en: 'Include subfolders (multi-level)', zh: '包含子文件夹（多级搜索）' },
   refresh: { en: 'Refresh', zh: '刷新' },
   favorites: { en: 'Pinned', zh: '重点文件夹' },
   pin: { en: 'Pin folder', zh: '设为重点' },
