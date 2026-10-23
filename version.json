@@ -1,10 +1,10 @@
 {
-  "version": "3.1.7",
+  "version": "3.1.8",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-10-22",
+  "releasedAt": "2026-10-23",
   "notesI18n": {
-    "zh": "修复自定义/中转服务商下“每次发送都弹费用确认”的误报：不再拿配置的 endpoint 别名与 CLI 上报的上游模型名比较来判断模型切换；价目未知时不再拦截发送。",
-    "en": "Fix false “confirm context cost” prompts on custom/relay providers: model changes are now detected from the configured model across turns instead of comparing the endpoint alias with the upstream model name reported by the CLI; sends are no longer blocked when pricing is unknown."
+    "zh": "修复 codex 任务在回合结束后仍长时间显示“运行中”的问题：以回合完成信号收尾，进程被部署时拉起的后台子进程拖住时，超时强制结束进程树。",
+    "en": "Fix codex tasks staying in “running” long after their turn finished: settle on the turn-completed signal, and end the process tree when background children keep it alive beyond a grace period."
   }
 }
