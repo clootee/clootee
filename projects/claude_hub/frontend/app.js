@@ -389,6 +389,7 @@ function applyText() {
   paintListModeIcons();
   $('sessionSearch').placeholder = T('searchSessions');
   $('advSearchLabel').textContent = T('advancedSearch');
+  $('ftSearchStatusLbl').textContent = T('fullTextSearching');
   $('tabActiveBtn').textContent = T('tabActive');
   $('tabTestingBtn').textContent = T('tabTesting');
   $('tabCompletedBtn').textContent = T('tabCompleted');
@@ -1539,7 +1540,7 @@ function onSessionListScroll() {
 }
 
 // hits：后端全文搜索命中集（id→片段）。前端只加载当前会话正文，其余会话的全文命中全靠后端。
-const Search = { open: false, query: '', advanced: false, hits: new Map(), reqSeq: 0, timer: null };
+const Search = { open: false, query: '', advanced: false, hits: new Map(), reqSeq: 0, timer: null, pending: false };
 
 function toggleSearch() {
   Search.open = !Search.open;
@@ -1550,26 +1551,38 @@ function toggleSearch() {
   } else {
     Search.query = '';
     Search.hits = new Map();
+    Search.reqSeq++;
+    setSearchPending(false);
     $('sessionSearch').value = '';
     updateSearchClear();
     renderSessions();
   }
 }
 
+// 全文搜索进行中的动画：输入框内转圈 + 搜索栏下方状态行（防抖等待期间也显示）
+function setSearchPending(pending) {
+  Search.pending = !!pending;
+  $('sessionSearchSpin').hidden = !Search.pending;
+  $('ftSearchStatus').hidden = !Search.pending;
+}
 // 全文搜索走后端（跨会话读 jsonl）。300ms 防抖 + 序号防竞态；非全文/空词即清空命中集。
 function scheduleFullTextSearch() {
   if (Search.timer) clearTimeout(Search.timer);
   Search.timer = null;
   if (!Search.advanced || !Search.query) {
     Search.hits = new Map();
+    Search.reqSeq++; // 让在途请求的结果作废
+    setSearchPending(false);
     return;
   }
+  setSearchPending(true);
   Search.timer = setTimeout(runFullTextSearch, 300);
 }
 async function runFullTextSearch() {
   const q = Search.query;
   if (!Search.advanced || !q) {
     Search.hits = new Map();
+    setSearchPending(false);
     return;
   }
   const seq = ++Search.reqSeq;
@@ -1589,6 +1602,8 @@ async function runFullTextSearch() {
       Search.hits = new Map();
       renderSessions();
     }
+  } finally {
+    if (seq === Search.reqSeq) setSearchPending(false);
   }
 }
 function updateSearchClear() {

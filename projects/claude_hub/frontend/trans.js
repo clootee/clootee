@@ -91,6 +91,7 @@ const DICT = {
   search: { en: 'Search', zh: '搜索' },
   searchSessions: { en: 'Search session titles…', zh: '搜索会话标题…' },
   advancedSearch: { en: 'Full-text', zh: '全文搜索' },
+  fullTextSearching: { en: 'Searching all sessions', zh: '正在全文搜索' },
   noSearchResults: { en: 'No matching sessions', zh: '没有匹配的会话' },
   tabActive: { en: 'Active', zh: '活跃' },
   tabTesting: { en: 'Testing', zh: '待测试' },

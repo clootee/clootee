@@ -1033,6 +1033,46 @@ body.light .icon-square.active {
   padding: 0;
 }
 .search-clear:hover { color: var(--text); background: var(--hover); }
+/* 全文搜索进行中的转圈动画：输入框内 + 搜索栏下方的状态行 */
+.search-spin {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: searchSpin .7s linear infinite;
+}
+.search-input-wrap .search-spin {
+  position: absolute;
+  right: 32px;
+  top: 50%;
+  margin-top: -7px;
+  pointer-events: none;
+}
+.ft-search-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ft-search-status #ftSearchStatusLbl::after {
+  content: '';
+  display: inline-block;
+  width: 1.2em;
+  text-align: left;
+  animation: ftSearchDots 1.2s steps(4, end) infinite;
+}
+@keyframes searchSpin { to { transform: rotate(360deg); } }
+@keyframes ftSearchDots {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+  100% { content: ''; }
+}
 .adv-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
 .adv-toggle input { width: auto; margin: 0; }
 .session-item .snippet {

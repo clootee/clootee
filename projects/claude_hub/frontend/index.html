@@ -821,9 +821,14 @@
         <div class="search-bar" id="searchBar" hidden>
           <div class="search-input-wrap">
             <input id="sessionSearch" spellcheck="false" />
+            <span class="search-spin" id="sessionSearchSpin" hidden aria-hidden="true"></span>
             <button id="sessionSearchClear" class="search-clear" type="button" aria-label="clear search" hidden>x</button>
           </div>
           <label class="adv-toggle"><input type="checkbox" id="advSearch" /> <span id="advSearchLabel"></span></label>
+          <div class="ft-search-status" id="ftSearchStatus" hidden>
+            <span class="search-spin"></span>
+            <span id="ftSearchStatusLbl"></span>
+          </div>
         </div>
         <div class="fav-dir-filter" id="favDirFilter" hidden></div>
         <!-- 目录标签超过 3 行时的展开/收起开关（默认只显示 3 行，避免占满侧栏） -->
