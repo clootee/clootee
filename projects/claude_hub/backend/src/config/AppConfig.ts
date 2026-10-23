@@ -27,6 +27,12 @@ export const AppConfig = {
   // 单条任务最大运行时长（毫秒），超时则强制结束
   TASK_TIMEOUT_MS: Number(process.env.TASK_TIMEOUT_MS) || 1000 * 60 * 30,
 
+  // 引擎自报「本回合结束」（codex 的 turn.completed）后，等待子进程退出的宽限期。
+  // 正常 1~2 秒就退；超过这个时间说明进程被自己启动的后台子孙进程（pm2 守护进程、
+  // dev server 等）拖住、或卡死不退——此时按回合已完成收尾并强杀进程树，
+  // 否则界面会一直显示“运行中”，实测有卡 11 分钟甚至数小时的。
+  ENGINE_TURN_GRACE_MS: Number(process.env.ENGINE_TURN_GRACE_MS) || 1000 * 15,
+
   // 引擎启动后多久仍无任何输出（stdout/stderr 都没有）就往界面上报一次「疑似卡住」提示。
   // 部分机器上内置 node/git 被安全软件拦截、或首次运行等待登录时，进程会一直挂着不吭声。
   ENGINE_SILENCE_WARN_MS: Number(process.env.ENGINE_SILENCE_WARN_MS) || 1000 * 45,

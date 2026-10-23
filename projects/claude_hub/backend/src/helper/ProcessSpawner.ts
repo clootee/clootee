@@ -3,7 +3,9 @@ import { spawn, ChildProcess } from 'child_process';
 
 export interface SpawnHandle {
   child: ChildProcess;
-  kill: () => void;
+  // force=true：跳过「优雅中断」，立刻强杀整棵进程树。
+  // 用于引擎已自报回合结束、但进程被后台子孙进程拖住不退的场景。
+  kill: (force?: boolean) => void;
 }
 
 export interface SpawnCallbacks {
@@ -81,19 +83,53 @@ export class ProcessSpawner {
       clearSilence();
       cb.onError(err);
     });
-    child.on('close', (code) => {
+
+    // 收尾只执行一次：优先由 'exit' 触发，'close' 兜底。
+    // 不能只等 'close'：子进程把 stdout/stderr 继承给它启动的长寿子孙进程（pm2 守护进程、
+    // 后台 dev server 等）时，管道在本进程退出后仍被孙进程握着，'close' 可能几小时都不触发，
+    // 任务就会一直显示“运行中”（实测 codex 部署任务多跑 11 分钟，最多 7 小时）。
+    let finalized = false;
+    const finalize = (code: number | null) => {
+      if (finalized) return;
+      finalized = true;
       clearSilence();
       const tail = buffer.trim();
+      buffer = '';
       if (tail) cb.onLine(tail);
       cb.onExit(code);
+    };
+    let exited = false;
+    child.on('exit', (code) => {
+      exited = true;
+      // exit 之后管道里可能还剩最后一批输出，留 300ms 读干净再收尾
+      setTimeout(() => {
+        if (!exited) return;
+        finalize(code);
+      }, 300);
+    });
+    child.on('close', (code) => {
+      finalize(code);
     });
 
     return {
       child,
       // 停止：尽量用"原生中断"——等价于在终端按 Ctrl+C/ESC，让 claude 优雅收尾；
       // 超时仍未退出再强制结束。跨平台分别处理。
-      kill: () => {
+      kill: (force = false) => {
         try {
+          if (force) {
+            // 强杀：整棵进程树立刻结束，不给后台孙进程留活口（Unix 用进程组）
+            if (process.platform === 'win32' && child.pid) {
+              spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true });
+            } else if (child.pid) {
+              try {
+                process.kill(-child.pid, 'SIGKILL');
+              } catch {
+                child.kill('SIGKILL');
+              }
+            }
+            return;
+          }
           if (process.platform === 'win32' && child.pid) {
             // Windows 无法投递 SIGINT：先 taskkill /t（请求结束进程树），3s 后未退出再 /f 强杀
             spawn('taskkill', ['/pid', String(child.pid), '/t'], { windowsHide: true });

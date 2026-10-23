@@ -14,6 +14,12 @@ import { Toolchain } from '../logic_realize/Toolchain';
 import { RootManager } from '../logic_realize/RootManager';
 import { ExternalEnv } from '../helper/ExternalEnv';
 
+// 解析器 → 骨架的「回合已结束」上报口：codex 的 turn.completed / turn.failed 是语义上的收尾信号，
+// 进程退出只是物理信号；后者可能被后台子孙进程拖住，不能作为唯一依据。
+export interface CodexTurnWatch {
+  settled: (ok: boolean, reason?: string) => void;
+}
+
 export class CodexRunnerStruct {
   // ── 调度骨架：execute ──
   static execute(
@@ -54,15 +60,66 @@ export class CodexRunnerStruct {
     const diag = (extra: Partial<RunDiagInput>) =>
       RunDiag.format({ bin, args, cwd: rootPath, ...extra });
 
+    // 收尾策略：
+    //   正常路径 → 进程退出（onExit）后按退出码收尾；
+    //   兜底路径 → 走到 turn.completed 后 ENGINE_TURN_GRACE_MS 仍未退出，
+    //              说明进程被部署/构建时拉起的后台子孙进程拖住（他们的 stdout 继承自我们，
+    //              'exit' 也可能永远等不到），此时按「回合已完成」收尾并强杀整棵进程树。
+    // 两条路径共用 done 闸门，谁先到谁生效，后到的退出回调只记日志。
+    let done = false;
+    let graceTimer: NodeJS.Timeout | null = null;
+    let handle: SpawnHandle;
+
+    const finish = (success: boolean, error?: string) => {
+      if (done) return;
+      done = true;
+      if (graceTimer) clearTimeout(graceTimer);
+      graceTimer = null;
+      cb.onDone(success, error);
+    };
+
+    // 强杀后略等进程真正消失再通知队列，避免下一个 resume 撞上 codex 的 thread 写锁
+    const forceFinish = (success: boolean, error?: string) => {
+      if (done) return;
+      done = true;
+      if (graceTimer) clearTimeout(graceTimer);
+      graceTimer = null;
+      Logger.warn('CodexRunner', 'turn settled but process still alive, force finish', {
+        sessionId: session.id,
+        elapsedMs: Date.now() - startedAt,
+      });
+      try {
+        handle.kill(true);
+      } catch {
+        /* 进程可能已退出 */
+      }
+      setTimeout(() => cb.onDone(success, error), 300);
+    };
+
+    const turn: CodexTurnWatch = {
+      settled: (ok, reason) => {
+        if (done || graceTimer) return;
+        Logger.info('CodexRunner', 'turn settled, waiting for process exit', {
+          sessionId: session.id,
+          ok,
+          elapsedMs: Date.now() - startedAt,
+        });
+        graceTimer = setTimeout(() => {
+          graceTimer = null;
+          forceFinish(ok, reason);
+        }, AppConfig.ENGINE_TURN_GRACE_MS);
+      },
+    };
+
     // prompt 通过 stdin 传入（args 里用 '-' 占位），避免命令行参数被 shell 截断
-    return ProcessSpawner.run(
+    handle = ProcessSpawner.run(
       bin,
       args,
       rootPath,
       {
         onLine: (line) => {
           sawOutput = true;
-          this._parseLine(line, cb);
+          this._parseLine(line, cb, turn);
         },
         onStderr: (chunk) => {
           sawOutput = true;
@@ -94,7 +151,7 @@ export class CodexRunnerStruct {
               bin,
               cwd: rootPath,
             });
-            cb.onDone(
+            finish(
               false,
               `codex 退出码 0，但全程没有任何输出。\n` +
                 diag({ exitCode: code, elapsedMs, hint: AppConfig.ENGINE_SILENT_HINT }),
@@ -103,7 +160,7 @@ export class CodexRunnerStruct {
           }
           if (code === 0) {
             Logger.info('CodexRunner', 'execute done', { sessionId: session.id, code });
-            cb.onDone(true);
+            finish(true);
             return;
           }
           Logger.error('CodexRunner', 'execute failed', {
@@ -112,7 +169,7 @@ export class CodexRunnerStruct {
             cwd: rootPath,
             stderr: stderr.slice(0, 2000),
           });
-          cb.onDone(
+          finish(
             false,
             `codex 执行失败。\n` +
               diag({ exitCode: code, elapsedMs, stderr, hint: stderr ? '' : AppConfig.ENGINE_SILENT_HINT }),
@@ -125,7 +182,7 @@ export class CodexRunnerStruct {
             cwd: rootPath,
             message: err.message,
           });
-          cb.onDone(
+          finish(
             false,
             `${RunDiag.explain(err, bin)}\n工作目录：${rootPath}\n${AppConfig.ENGINE_SILENT_HINT}`,
           );
@@ -136,6 +193,7 @@ export class CodexRunnerStruct {
       AppConfig.ENGINE_SILENCE_WARN_MS,
       ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
     );
+    return handle;
   }
 
   // 组装 codex 参数：已有会话 id 且其 rollout 存在 → resume 续接；否则首跑（codex 生成新 id 并经 --json 回报）
@@ -152,8 +210,9 @@ export class CodexRunnerStruct {
     throw new Error('Not implemented');
   }
 
-  // 解析一行 codex --json 事件，分发到对应回调
-  protected static _parseLine(_line: string, _cb: RunCallbacks): void {
+  // 解析一行 codex --json 事件，分发到对应回调；
+  // 顶层回合结束（turn.completed / turn.failed）通过 turn.settled 上报，驱动兜底收尾
+  protected static _parseLine(_line: string, _cb: RunCallbacks, _turn: CodexTurnWatch): void {
     throw new Error('Not implemented');
   }
 }

@@ -1,5 +1,5 @@
 // Codex 执行器（实现）：填充参数组装与 codex --json 事件解析细节。
-import { CodexRunnerStruct } from '../logic_struct/CodexRunnerStruct';
+import { CodexRunnerStruct, CodexTurnWatch } from '../logic_struct/CodexRunnerStruct';
 import { RunCallbacks } from '../logic_struct/ClaudeRunnerStruct';
 import { CodexStoreHelper } from '../helper/CodexStoreHelper';
 import { Settings } from './Settings';
@@ -59,7 +59,7 @@ export class CodexRunner extends CodexRunnerStruct {
     return ['exec', ...common, '-'];
   }
 
-  protected static _parseLine(line: string, cb: RunCallbacks): void {
+  protected static _parseLine(line: string, cb: RunCallbacks, turn: CodexTurnWatch): void {
     let evt: any;
     try {
       evt = JSON.parse(line);
@@ -96,10 +96,16 @@ export class CodexRunner extends CodexRunnerStruct {
 
     // 顶层错误 / 回合失败：归入过程视图（不致命的模型元信息告警等）
     if (evt.type === 'error' && evt.message) cb.onOutput(`[error] ${evt.message}`);
-    else if (evt.type === 'turn.failed') cb.onOutput(`[turn.failed] ${this._short(evt.error)}`);
-    // 注意：turn.completed 不在这里 onDone。codex 进程在 turn.completed 之后还要 1~2 秒才退出，
+    else if (evt.type === 'turn.failed') {
+      const reason = `codex 回合失败：${this._short(evt.error || evt.message || evt)}`;
+      cb.onOutput(`[turn.failed] ${this._short(evt.error)}`);
+      turn.settled(false, reason);
+    }
+    // 回合结束：不在这里 onDone。codex 进程在 turn.completed 之后还要 1~2 秒才退出/写完 rollout，
     // 提前收尾会让队列以为会话空闲并立刻起下一个 resume，撞上 codex 的 thread 写锁。
-    // 完成信号统一由 CodexRunnerStruct 的 onExit 给出。
+    // 这里只把「语义上已结束」告诉骨架：骨架等进程退出（正常路径），
+    // 超过宽限期进程仍不退则按完成收尾并强杀（兜底路径，避免界面一直转圈）。
+    if (evt.type === 'turn.completed') turn.settled(true);
   }
 
   private static _dispatchItem(item: any, cb: RunCallbacks): void {
