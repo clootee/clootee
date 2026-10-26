@@ -231,7 +231,7 @@ export class UpdateChecker extends UpdateCheckerStruct {
     const log = fs.openSync(path.join(Paths.LOGS_DIR, 'update-restart.log'), 'a');
     Logger.info('UpdateChecker', 'trigger restart', { script });
     const child = isWin
-      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
           '-File', script, '-NodeExe', process.execPath, '-ServerPid', String(process.pid), '-Port', String(process.env.PORT || 8970)], {
           cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log], windowsHide: true,
         })
