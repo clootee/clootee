@@ -45,23 +45,9 @@ if exist "node\node.exe" (
   goto :tools
 )
 
-echo [node] downloading %NODE_URL%
-powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri $env:NODE_URL -OutFile 'node.zip' -TimeoutSec 60"
-if not errorlevel 1 goto :unzip
-echo [node] official source failed, trying mirror
-powershell -NoProfile -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri $env:NODE_MIRROR -OutFile 'node.zip'"
+REM PowerShell keeps the bilingual status animated during download and extraction.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bootstrap-node.ps1"
 if errorlevel 1 goto :fail
-
-:unzip
-echo [node] extracting ...
-if exist "%NODE_PKG%" rmdir /s /q "%NODE_PKG%"
-powershell -NoProfile -Command "Expand-Archive -Path 'node.zip' -DestinationPath '.' -Force"
-if errorlevel 1 goto :fail
-if exist "node" rmdir /s /q "node"
-ren "%NODE_PKG%" "node"
-if errorlevel 1 goto :fail
-del /q "node.zip" >nul 2>nul
-if not exist "node\node.exe" goto :fail
 
 :tools
 set "PATH=%~dp0node;%PATH%"

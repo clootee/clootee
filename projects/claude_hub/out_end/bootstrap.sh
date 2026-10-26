@@ -47,6 +47,27 @@ else
   command -v curl >/dev/null 2>&1 || { echo "[错误] 需要 curl / curl is required"; exit 1; }
   command -v tar  >/dev/null 2>&1 || { echo "[错误] 需要 tar / tar is required"; exit 1; }
 
+  echo "[node] 正在安装 Node.js，请勿关闭窗口。预计约需 10 分钟（取决于网络速度）。"
+  echo "[node] Installing Node.js. Please do not close this window. Allow about 10 minutes (depending on your connection)."
+  # Heartbeat runs independently of downloads/extraction and is always reaped on exit.
+  (
+    dots=0
+    while :; do
+      dots=$((dots % 3 + 1))
+      printf '\r[node] 正在安装 / Installing Node.js %-3s' "$(printf '%*s' "$dots" '' | tr ' ' '.')"
+      sleep 1
+    done
+  ) &
+  node_heartbeat_pid=$!
+  stop_node_heartbeat() {
+    kill "$node_heartbeat_pid" 2>/dev/null || true
+    wait "$node_heartbeat_pid" 2>/dev/null || true
+    printf '\n'
+  }
+  trap stop_node_heartbeat EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
   # 先各花最多 2 秒探一下两个源的响应，谁快用谁——比「先等官方源超时再换镜像」快得多。
   # （只测到响应头，不下载正文。探不通的记为 9999。）
   probe() { curl -o /dev/null -sI --connect-timeout 2 --max-time 3 -w '%{time_total}' "$1" 2>/dev/null || echo 9999; }
@@ -69,6 +90,9 @@ else
   mv "$NODE_PKG" node
   rm -f node.tar
   [ -x "node/bin/node" ] || { echo "[错误] 解压后仍找不到 node / node missing after extract"; exit 1; }
+  stop_node_heartbeat
+  trap - EXIT INT TERM
+  echo "[node] 安装完成 / installation complete"
 fi
 
 export PATH="$(pwd)/node/bin:$PATH"

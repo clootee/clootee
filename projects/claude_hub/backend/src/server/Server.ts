@@ -564,7 +564,7 @@ export class Server {
     // 鉴权中间件已对 /api/* 校验 token；raw 解析器仅作用于本路由
     app.post(
       '/api/session/upload',
-      express.raw({ type: '*/*', limit: '200mb' }),
+      express.raw({ type: '*/*', limit: '500mb' }),
       (req, res) => {
         this._wrap(res, 'session.upload', () =>
           Uploader.save(

@@ -4140,6 +4140,10 @@ function uploadOne(file, fname, onProgress) {
       if (e.lengthComputable) onProgress(e.loaded / e.total * 100);
     };
     xhr.onload = () => {
+      if (xhr.status === 413) {
+        reject(new Error(T('uploadTooLarge')));
+        return;
+      }
       let json = null;
       try { json = JSON.parse(xhr.responseText); } catch (e) {}
       if (!json || !json.success) reject(new Error((json && json.error) || ('HTTP ' + xhr.status)));

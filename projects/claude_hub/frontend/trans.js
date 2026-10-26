@@ -1283,6 +1283,10 @@ const DICT = {
   uploadCancel: { en: 'Cancel', zh: '取消' },
   uploadCanceled: { en: 'Upload canceled', zh: '已取消上传' },
   uploadFailed: { en: 'Upload failed', zh: '上传失败' },
+  uploadTooLarge: {
+    en: 'The file exceeds the server upload limit. Each file can be up to 500MB. Please compress or split the file and try again.',
+    zh: '文件大小超过服务器上传限制，单个文件最大支持 500MB。请压缩文件或拆分后重新上传。',
+  },
   attachRemove: { en: 'Remove', zh: '删除' },
   attachPath: { en: 'Path', zh: '路径' },
   attachSize: { en: 'Size', zh: '大小' },
