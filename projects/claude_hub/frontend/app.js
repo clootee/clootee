@@ -497,6 +497,7 @@ const THEMES = [
   { id: 'ocean', name: () => T('themeOcean'), sw: ['#0a1a2f', '#38bdf8', '#dce8f5'], anim: true },
   { id: 'pink', name: () => T('themePink'), sw: ['#fff0f6', '#ec4899', '#5a2a42'] },
   { id: 'green', name: () => T('themeGreen'), sw: ['#f0f7ee', '#3fa34d', '#22331c'], anim: true },
+  { id: 'dog', name: () => T('themeDog'), sw: ['#f7f3ee', '#956849', '#48392f'], anim: true },
   { id: 'cat', name: () => T('themeCat'), sw: ['#fdf6ec', '#e08a3c', '#4a3928'], anim: true },
   { id: 'galaxy', name: () => T('themeGalaxy'), sw: ['#05070f', '#3b82f6', '#f2f6ff'], anim: true },
   { id: 'mecha', name: () => T('themeMecha'), sw: ['#171a1c', '#eab308', '#d5dde2'], anim: true },
@@ -509,7 +510,7 @@ const THEMES = [
   { id: 'rabbit', name: () => T('themeRabbit'), sw: ['#e7f3dc', '#6aa84f', '#35402a'], anim: true },
 ];
 // 浅底主题集合（编辑器用 CodeMirror default，其余用 material-darker）
-const LIGHT_THEMES = ['light', 'pink', 'green', 'cat', 'winter', 'rabbit'];
+const LIGHT_THEMES = ['light', 'pink', 'green', 'dog', 'cat', 'winter', 'rabbit'];
 // 移动端只保留最简单的深/浅两套：动效主题的 canvas 动画在手机上容易卡死。
 const MOBILE_THEMES = ['dark', 'light'];
 function isMobileView() {
@@ -543,6 +544,7 @@ function applyTheme() {
   if (window.Winter) window.Winter.setActive(theme === 'winter');
   if (window.Ocean) window.Ocean.setActive(theme === 'ocean');
   if (window.Bamboo) window.Bamboo.setActive(theme === 'green');
+  if (window.Dog) window.Dog.setActive(theme === 'dog');
   if (window.Cat) window.Cat.setActive(theme === 'cat');
   if (window.Rabbit) window.Rabbit.setActive(theme === 'rabbit');
   if (window.Mecha) window.Mecha.setActive(theme === 'mecha');

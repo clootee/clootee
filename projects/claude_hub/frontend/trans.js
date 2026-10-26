@@ -437,6 +437,8 @@ const DICT = {
   themeOcean: { en: 'Ocean Blue', zh: '大海蓝' },
   themePink: { en: 'Sweet Pink', zh: '粉色少女心' },
   themeGreen: { en: 'Fresh Green', zh: '森林绿' },
+  themeDog: { en: 'Teddy Puppy', zh: '宠物狗 · 泰迪' },
+  dogPet: { en: 'Pet the puppy', zh: '摸摸泰迪' },
   themeCat: { en: 'Kitty', zh: '宠物猫' },
   themeGalaxy: { en: 'Galaxy', zh: '银河系' },
   themeMecha: { en: 'Mecha', zh: '机械' },
