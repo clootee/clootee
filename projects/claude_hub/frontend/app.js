@@ -5878,12 +5878,13 @@ async function runAppUpdate(box, onFail) {
   });
   render();
   try {
+    const before = await api('/api/auth/check');
     await api('/api/update/apply', {});
     UpdateApplyLog.stop();
     box.className = 'sx-note sx-pre ok';
     lines.push(T('updateApplyDone'));
     render();
-    waitForAppRestart(box);
+    waitForAppRestart(box, before.instance);
   } catch (e) {
     UpdateApplyLog.stop();
     if (onFail) onFail();
@@ -5962,7 +5963,7 @@ const UpdateModal = {
 };
 
 // 重启期间服务会短暂下线：每 3 秒探一次登录态，探通即说明新版本已跑起来，刷新页面拿新前端资源
-function waitForAppRestart(box) {
+function waitForAppRestart(box, previousInstance) {
   const MAX_TRIES = 40; // 最多等 2 分钟，之后提示用户自己刷新
   let secs = 0;
   let tries = 0;
@@ -5970,7 +5971,8 @@ function waitForAppRestart(box) {
     secs += 3;
     tries += 1;
     try {
-      await api('/api/auth/check');
+      const status = await api('/api/auth/check');
+      if (!status.instance || status.instance === previousInstance) throw new Error('Waiting for restart');
       location.reload();
     } catch {
       box.textContent += `\n${T('updateReconnecting').replace('{s}', secs)}`;

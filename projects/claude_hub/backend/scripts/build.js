@@ -94,7 +94,7 @@ function build(opts) {
   if (!tsc) {
     return { ok: false, error: '未找到 typescript（请先 npm install） / typescript is not installed' };
   }
-  const r = spawnSync(process.execPath, [tsc, '-p', TSCONFIG], { cwd: BACKEND, stdio: 'inherit' });
+  const r = spawnSync(process.execPath, [tsc, '-p', TSCONFIG], { cwd: BACKEND, stdio: 'inherit', windowsHide: true });
   if (r.status !== 0) {
     return { ok: false, error: `tsc 编译失败 / tsc failed (exit ${r.status})` };
   }

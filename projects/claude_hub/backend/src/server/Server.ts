@@ -3,6 +3,7 @@ import express, { Request, Response } from 'express';
 import * as http from 'http';
 import { WebSocketServer } from 'ws';
 import { AppConfig } from '../config/AppConfig';
+import { PackageInfo } from '../helper/PackageInfo';
 import { Paths } from '../paths';
 import { Logger } from '../helper/Logger';
 import { LifeGuard } from '../logic_realize/LifeGuard';
@@ -39,6 +40,8 @@ import { ExternalInbox } from '../logic_realize/ExternalInbox';
 import { ConsoleAccount } from '../logic_realize/ConsoleAccount';
 import { RootLock } from '../logic_realize/RootLock';
 import { ApiCost } from '../logic_realize/ApiCost';
+
+const SERVER_STARTED_AT = Date.now();
 
 export class Server {
   // 慢请求阈值（毫秒）：超过就在日志里留一条 WARN
@@ -117,7 +120,7 @@ export class Server {
     });
 
     // 客户端用持久 token 探测登录态
-    app.get('/api/auth/check', (_req, res) => this._ok(res, { ok: true }));
+    app.get('/api/auth/check', (_req, res) => this._ok(res, { ok: true, version: PackageInfo.version(), instance: `${process.pid}:${SERVER_STARTED_AT}` }));
     // 修改密码（需先验证旧密码）
     app.post('/api/auth/change', (req, res) =>
       this._wrap(res, 'auth.change', () => ({

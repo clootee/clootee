@@ -47,6 +47,7 @@ export interface UpdateApplyResult {
 }
 
 export class UpdateCheckerStruct {
+  private static _applying = false;
   // 对比本地与 GitHub：先读版本清单，再读远端 commit，两者交给 _decide 汇总成结论
   static async check(lang?: string): Promise<UpdateCheckResult> {
     const branch = this._currentBranch();
@@ -74,13 +75,20 @@ export class UpdateCheckerStruct {
 
   // 拉取最新代码并触发重新编译 + 重启；重启脚本会杀掉当前进程，因此这里不等重启跑完
   static async apply(onProgress?: UpdateProgress): Promise<UpdateApplyResult> {
-    const pull = await this._pull(onProgress);
-    // 拉取失败必须抛出：接口层只把抛错映射成 success=false，返回 ok=false 的话前端会
-    // 当成「更新成功」→ 等重启 → 首个探测就通（进程根本没重启过）→ 刷新后又弹更新，
-    // 表现就是「点了更新永远在更新」。
-    if (!pull.ok) throw new Error(`UpdateCheckerStruct.apply: git pull 失败 -> ${pull.output}`);
-    this._triggerRestart();
-    return { ok: true, output: `${pull.output}\n[restart] 已触发重新编译与重启，请稍候刷新页面` };
+    if (this._applying) throw new Error('Update already in progress');
+    this._applying = true;
+    try {
+      const pull = await this._pull(onProgress);
+      // 拉取失败必须抛出：接口层只把抛错映射成 success=false，返回 ok=false 的话前端会
+      // 当成「更新成功」→ 等重启 → 首个探测就通（进程根本没重启过）→ 刷新后又弹更新，
+      // 表现就是「点了更新永远在更新」。
+      if (!pull.ok) throw new Error(`UpdateCheckerStruct.apply: git pull 失败 -> ${pull.output}`);
+      this._triggerRestart();
+      return { ok: true, output: `${pull.output}\n[restart] 已触发重新编译与重启，请稍候刷新页面` };
+    } catch (e) {
+      this._applying = false;
+      throw e;
+    }
   }
 
   // ── Realize 实现点 ──

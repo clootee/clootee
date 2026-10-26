@@ -104,7 +104,7 @@ function runNpm(args, cwd) {
   // 清掉 NODE_ENV=production：否则 npm 会跳过 devDependencies（typescript 装不上就没法编译 dist）
   const env = { ...process.env };
   delete env.NODE_ENV;
-  const opts = { cwd: cwd || BACKEND, stdio: 'inherit', env };
+  const opts = { cwd: cwd || BACKEND, stdio: 'inherit', env, windowsHide: true };
   if (cli) return spawnSync(process.execPath, [cli, ...args], opts);
   // 兜底：走 PATH 上的 npm（Windows 是 npm.cmd，必须 shell:true）
   return spawnSync('npm', args, { ...opts, shell: process.platform === 'win32' });
@@ -146,7 +146,7 @@ function npmInstallWithFallback(args, cwd, label) {
 
 function onPath(cmd) {
   const finder = process.platform === 'win32' ? 'where' : 'which';
-  const r = spawnSync(finder, [cmd], { encoding: 'utf-8' });
+  const r = spawnSync(finder, [cmd], { encoding: 'utf-8', windowsHide: true });
   if (r.status !== 0 || !r.stdout) return null;
   const first = String(r.stdout).trim().split(/\r?\n/)[0];
   return first || null;
@@ -388,7 +388,7 @@ async function checkEngines() {
 function gitUsable() {
   const p = onPath('git');
   if (!p) return null;
-  const r = spawnSync(p, ['--version'], { encoding: 'utf-8' });
+  const r = spawnSync(p, ['--version'], { encoding: 'utf-8', windowsHide: true });
   return r.status === 0 ? p : null;
 }
 

@@ -2,6 +2,7 @@
 // origin 指向哪个 GitHub 仓库就查那个仓库，不写死 owner/repo——跟随仓库自身，换个 fork 也能用。
 import { execFileSync, spawn } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 import {
   UpdateCheckerStruct,
   UpdateCommitInfo,
@@ -23,7 +24,13 @@ export class UpdateChecker extends UpdateCheckerStruct {
   // 要比较/拉取的分支：本地分支名可能和它实际跟踪的远端分支名不一样
   // （比如本地叫 master 却跟踪 origin/main），git pull 拉的是上游跟踪分支，
   // 所以这里必须查上游而不是本地分支名，否则会拿错分支去比对 GitHub。
+  private static _hasRepo(): boolean {
+    const dir = path.resolve(Paths.PROJECT_ROOT, '../..', '.git');
+    return fs.existsSync(dir) && !fs.existsSync(path.join(dir, 'clootee-bootstrap'));
+  }
+
   protected static _currentBranch(): string {
+    if (!this._hasRepo()) return 'main';
     const git = GitBin.resolve();
     try {
       const upstream = execFileSync(
@@ -44,6 +51,7 @@ export class UpdateChecker extends UpdateCheckerStruct {
   }
 
   protected static _localCommit(): UpdateCommitInfo {
+    if (!this._hasRepo()) return { sha: '', short: '', date: '', message: 'Release package' };
     const git = GitBin.resolve();
     const raw = execFileSync(git, ['log', '-1', '--format=%H%n%h%n%cI%n%s'], {
       cwd: Paths.PROJECT_ROOT,
@@ -158,7 +166,33 @@ export class UpdateChecker extends UpdateCheckerStruct {
         return;
       }
       Logger.info('UpdateChecker', 'git pull start');
-      const child = spawn(git, ['pull', '--ff-only'], { cwd: Paths.PROJECT_ROOT, windowsHide: true });
+      const root = path.resolve(Paths.PROJECT_ROOT, '../..');
+      const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' };
+      // Release ZIPs have no .git. Establish tracking without touching ignored user data.
+      if (!this._hasRepo()) {
+        try {
+          const run = (args: string[]) => execFileSync(git, args, {
+            cwd: root, encoding: 'utf-8', windowsHide: true, env, timeout: 180000,
+          });
+          onProgress?.('[git] Preparing release package update');
+          run(['init']);
+          fs.writeFileSync(path.join(root, '.git', 'clootee-bootstrap'), 'pending');
+          try { run(['remote', 'get-url', 'origin']); } catch {
+            run(['remote', 'add', 'origin', 'https://github.com/clootee/clootee.git']);
+          }
+          run(['fetch', '--depth=1', 'origin', 'main']);
+          run(['checkout', '-f', '-B', 'main', 'FETCH_HEAD']);
+          run(['branch', '--set-upstream-to=origin/main', 'main']);
+          fs.unlinkSync(path.join(root, '.git', 'clootee-bootstrap'));
+          resolve({ ok: true, output: 'Release package updated' });
+        } catch (e: any) {
+          resolve({ ok: false, output: e.message });
+        }
+        return;
+      }
+      const child = spawn(git, ['pull', '--ff-only'], {
+        cwd: Paths.PROJECT_ROOT, windowsHide: true, env,
+      });
       let out = '';
       const cap = (c: Buffer) => {
         const text = c.toString();
@@ -187,21 +221,23 @@ export class UpdateChecker extends UpdateCheckerStruct {
     });
   }
 
-  // 复用 restart.sh / restart.bat（唯一的自检+编译+pm2重启实现）：detached 拉起，
-  // 不受当前进程随后被杀掉影响；脚本尾部在 Windows 下有交互 pause，
-  // 但 stdio 设为 ignore 时读到的是空输入，pause 会立即放行，不会挂起。
+  // Restart through the Windows background service; keep diagnostics on disk.
   protected static _triggerRestart(): void {
     const isWin = process.platform === 'win32';
-    const script = path.join(Paths.PROJECT_ROOT, isWin ? 'restart.bat' : 'restart.sh');
+    const script = isWin
+      ? path.resolve(Paths.PROJECT_ROOT, '../../scripts/restart-update.ps1')
+      : path.join(Paths.PROJECT_ROOT, 'restart.sh');
+    fs.mkdirSync(Paths.LOGS_DIR, { recursive: true });
+    const log = fs.openSync(path.join(Paths.LOGS_DIR, 'update-restart.log'), 'a');
     Logger.info('UpdateChecker', 'trigger restart', { script });
     const child = isWin
-      ? spawn('cmd.exe', ['/c', script], {
-          cwd: Paths.PROJECT_ROOT,
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: true,
+      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+          '-File', script, '-NodeExe', process.execPath, '-ServerPid', String(process.pid), '-Port', String(process.env.PORT || 8970)], {
+          cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log], windowsHide: true,
         })
-      : spawn('bash', [script], { cwd: Paths.PROJECT_ROOT, detached: true, stdio: 'ignore' });
+      : spawn('bash', [script], { cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log] });
+    fs.closeSync(log);
+    child.on('error', (e) => Logger.error('UpdateChecker', 'restart launch failed', e));
     child.unref();
   }
 
@@ -259,6 +295,7 @@ export class UpdateChecker extends UpdateCheckerStruct {
   }
 
   private static _originRepo(): { owner: string; repo: string } {
+    if (!this._hasRepo()) return { owner: 'clootee', repo: 'clootee' };
     const git = GitBin.resolve();
     const url = execFileSync(git, ['remote', 'get-url', 'origin'], {
       cwd: Paths.PROJECT_ROOT,
