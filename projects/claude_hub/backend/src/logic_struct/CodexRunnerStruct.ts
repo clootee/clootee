@@ -67,6 +67,7 @@ export class CodexRunnerStruct {
     //              'exit' 也可能永远等不到），此时按「回合已完成」收尾并强杀整棵进程树。
     // 两条路径共用 done 闸门，谁先到谁生效，后到的退出回调只记日志。
     let done = false;
+    let turnResult: { ok: boolean; reason?: string } | null = null;
     let graceTimer: NodeJS.Timeout | null = null;
     let handle: SpawnHandle;
 
@@ -98,7 +99,9 @@ export class CodexRunnerStruct {
 
     const turn: CodexTurnWatch = {
       settled: (ok, reason) => {
-        if (done || graceTimer) return;
+        if (done) return;
+        turnResult = { ok, reason };
+        if (graceTimer) return;
         Logger.info('CodexRunner', 'turn settled, waiting for process exit', {
           sessionId: session.id,
           ok,
@@ -158,7 +161,7 @@ export class CodexRunnerStruct {
             );
             return;
           }
-          if (code === 0) {
+          if (code === 0 && turnResult?.ok !== false) {
             Logger.info('CodexRunner', 'execute done', { sessionId: session.id, code });
             finish(true);
             return;
@@ -167,12 +170,13 @@ export class CodexRunnerStruct {
             sessionId: session.id,
             code,
             cwd: rootPath,
+            reason: turnResult?.reason || '',
             stderr: stderr.slice(0, 2000),
           });
           finish(
             false,
-            `codex 执行失败。\n` +
-              diag({ exitCode: code, elapsedMs, stderr, hint: stderr ? '' : AppConfig.ENGINE_SILENT_HINT }),
+            `${turnResult?.reason || 'codex 执行失败。'}\n` +
+              diag({ exitCode: code, elapsedMs, stderr, hint: stderr || turnResult?.reason ? '' : AppConfig.ENGINE_SILENT_HINT }),
           );
         },
         onError: (err) => {
