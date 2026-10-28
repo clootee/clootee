@@ -1,6 +1,6 @@
 // 新手引导（首次进入）。默认是「一键开始」一屏：
-//   本机随机密码（免设）→ 领 Clootee 默认服务商的体验额度 → 后台装 Claude Code → 进主界面。
-//   不问网络、不问引擎、不问服务商；想用自己账号/别家服务商的点「高级」走下面的五步引导。
+//   本机随机密码（免设）→ 邮箱登录并授权 Clootee 后领取体验额度 → 后台装 Claude Code → 进主界面。
+//   不问网络、不问引擎；想用自己账号/别家服务商的点「高级」走下面的五步引导。
 // 高级引导五步：
 //   ① 语言 + 明暗主题  ② 网络体检  ③ 选执行引擎  ④ 选模型服务商
 //   ⑤ 原版（Claude / Codex）→ 登录账号；第三方 → 填 API Key 并选模型
@@ -17,6 +17,7 @@ const OB_STEPS = 5;
 // 强制引导：新用户必须逐项显式选择（语言/主题/引擎/服务商/模型），不提供「以后再说」。
 const Onboard = {
   mode: 'quick',         // 'quick' = 一键开始；'advanced' = 五步引导
+  quickTimer: null,
   quick: null,           // 一键开始的进度：{ stage, error, grantedMicro }
   step: 1,
   langSet: false,        // 语言是否已显式选择（浏览器默认值不算）
@@ -33,14 +34,18 @@ const Onboard = {
   loginSkipped: false,   // 用户明确选择「稍后再登录」
   busy: false,
   installing: '',        // 正在安装的引擎（同一时刻只允许装一个）
+  installErrors: {},     // 失败后只允许手动重试，避免自动重试循环
+  stopInstallProgress: null,
 };
 
 async function showOnboard() {
+  clearTimeout(Onboard.quickTimer);
   Onboard.mode = 'quick';
   Onboard.quick = null;
   Onboard.step = 1;
   Onboard.busy = false;
   Onboard.installing = '';
+  Onboard.installErrors = {};
   try {
     const [pv, st] = await Promise.all([
       api('/api/engine/providers'),
@@ -57,11 +62,12 @@ async function showOnboard() {
 }
 
 function hideOnboard() {
+  clearTimeout(Onboard.quickTimer);
   $('onboardOverlay').hidden = true;
 }
 
 function onboardProviderList() {
-  return Onboard.providers.filter((p) => p.id !== 'custom' && (!p.engines || p.engines.includes(Onboard.engine)));
+  return Onboard.providers.filter((p) => p.id !== 'custom' && p.id !== 'clootee' && (!p.engines || p.engines.includes(Onboard.engine)));
 }
 
 function onboardProviderMeta(id) {
@@ -90,6 +96,7 @@ function renderOnboard() {
 
   $('onboardSkip').hidden = true; // 高级引导：进来了就逐项选完，不提供跳过
   $('onboardBack').textContent = T('obBack');
+  $('onboardBack').disabled = false;
 
   if (Onboard.step === 1) renderOnboardLocale();
   else if (Onboard.step === 2) renderOnboardNet();
@@ -124,7 +131,7 @@ function renderOnboardQuick() {
   let stages = '';
   if (q) {
     stages = '<ol class="ob-quick-stages">' + QUICK_STAGES.map((k, i) => {
-      const st = i < q.stage ? 'done' : i === q.stage ? (q.error ? 'err' : 'run') : 'todo';
+      const st = i < q.stage ? 'done' : i === q.stage ? (q.error ? 'err' : q.login ? 'wait' : 'run') : 'todo';
       const icon = st === 'done' ? '✓' : st === 'err' ? '✕' : st === 'run' ? '<span class="ob-spin"></span>' : '·';
       let extra = '';
       if (i === 1 && q.grantedMicro) extra = ` <span class="ob-badge ok">${T('obQuickGranted').replace('{v}', formatUsd(q.grantedMicro))}</span>`;
@@ -134,7 +141,15 @@ function renderOnboardQuick() {
     stages += `<div class="ob-inst-msg ob-pre" id="obQuickLog"${q.stage === 2 || q.error ? '' : ' hidden'}></div>`;
     if (q.error) stages += `<div class="ob-quick-err">${escapeHtml(q.error)}</div>`;
   }
-  $('onboardBody').innerHTML = langRow + stages;
+  let login = '';
+  if (q && q.stage === 1 && q.login) {
+    const loginUrl = new URL(q.login.url);
+    loginUrl.searchParams.set('lang', currentLang());
+    login = `<div class="ob-note" role="status">${T('obEmailWait')}</div>
+      <p><a href="${escapeHtml(loginUrl.toString())}" target="_blank" rel="noopener noreferrer">${T('obEmailOpen')}</a></p>
+      <p>${T('obEmailCode')} <strong>${escapeHtml(q.login.userCode)}</strong></p>`;
+  }
+  $('onboardBody').innerHTML = langRow + stages + login;
   $('onboardBody').querySelectorAll('[data-lang]').forEach((el) => {
     el.onclick = () => { if (Onboard.busy) return; setLang(el.dataset.lang); renderOnboard(); };
   });
@@ -146,6 +161,7 @@ function renderOnboardQuick() {
   adv.disabled = Onboard.busy;
   adv.onclick = () => {
     if (Onboard.busy) return;
+    clearTimeout(Onboard.quickTimer);
     Onboard.mode = 'advanced';
     Onboard.step = 1;
     adv.onclick = null;
@@ -155,7 +171,7 @@ function renderOnboardQuick() {
   $('onboardBack').hidden = true;
   const next = $('onboardNext');
   next.disabled = Onboard.busy;
-  next.textContent = q && q.error ? T('obQuickRetry') : T('obQuickStart');
+  next.textContent = q && q.error ? T('obQuickRetry') : q && q.login ? T('obEmailCheck') : T('obQuickStart');
 }
 
 function formatUsd(micro) {
@@ -164,9 +180,10 @@ function formatUsd(micro) {
 }
 
 async function runQuickStart() {
+  clearTimeout(Onboard.quickTimer);
   Onboard.busy = true;
   // 失败重试时从出错的那一步继续，已完成的不再重做
-  const q = Onboard.quick && Onboard.quick.error ? Onboard.quick : { stage: 0, error: '', grantedMicro: 0 };
+  const q = Onboard.quick || { stage: 0, error: '', grantedMicro: 0 };
   q.error = '';
   Onboard.quick = q;
   renderOnboard();
@@ -182,7 +199,7 @@ async function runQuickStart() {
       }
       stageDone();
     }
-    // ② 领体验额度 + 两个引擎都切到 clootee
+    // ② 邮箱登录并在云端确认授权；确认完成后才切换供应商。
     if (q.stage === 1) {
       let st;
       try {
@@ -192,6 +209,7 @@ async function runQuickStart() {
       }
       catch (e) { throw new Error(`${T('obQuickFailNet')}\n${e.message || ''}`); }
       q.grantedMicro = st && st.balanceMicro;
+      q.login = null;
       stageDone();
     }
     // ③ 装 Claude Code（已装就跳过）
@@ -287,8 +305,7 @@ function renderOnboardNet() {
 }
 
 // ── 第 3 步：选引擎 ──
-// 引擎不内置：每张卡自带「安装」按钮（npm 全局安装 + 实时进度），装好之前不能选中。
-// 两个动作各有一个显眼的大按钮：未安装 → 立即安装；已安装 → 选择这个引擎。
+// 进入这一步自动依次安装缺少的引擎，失败时才显示重试；装好后由用户选择引擎。
 const ENGINE_META = {
   claude: { name: 'Claude Code', pkg: '@anthropic-ai/claude-code' },
   codex: { name: 'Codex', pkg: '@openai/codex' },
@@ -299,17 +316,20 @@ function engineReady(id) {
 }
 
 function renderOnboardEngine() {
+  if (Onboard.stopInstallProgress) {
+    Onboard.stopInstallProgress();
+    Onboard.stopInstallProgress = null;
+  }
   $('onboardTitle').textContent = T('obStepEngine');
   $('onboardSub').textContent = T('obStepEngineSub');
   $('onboardBody').innerHTML = ['claude', 'codex'].map(onboardEngineCard).join('');
 
-  // 卡片本身也能点（已安装才生效）；没装的卡片点了就提示"先装"，不静默无反应
+  // 已装好的卡片可以直接选择；缺少的引擎自动安装。
   $('onboardBody').querySelectorAll('.ob-card').forEach((el) => {
     el.onclick = (ev) => {
       if (ev.target.closest('button')) return; // 按钮各自处理
       const id = el.dataset.engine;
       if (engineReady(id)) pickOnboardEngine(id);
-      else $(`obInstMsg-${id}`).textContent = T('obNeedInstallFirst');
     };
   });
   $('onboardBody').querySelectorAll('[data-pick]').forEach((b) => {
@@ -322,7 +342,17 @@ function renderOnboardEngine() {
   $('onboardBack').hidden = false;
   $('onboardNext').textContent = T('obNext');
   // 只有"选中的引擎确实装好了"才能继续
-  $('onboardNext').disabled = !Onboard.engine || !engineReady(Onboard.engine);
+  $('onboardBack').disabled = !!Onboard.installing;
+  $('onboardNext').disabled = !!Onboard.installing || !Onboard.engine || !engineReady(Onboard.engine);
+  if (Onboard.installing) {
+    const id = Onboard.installing;
+    Onboard.stopInstallProgress = startEngineInstallProgress(
+      $(`obInstMsg-${id}`), `${ENGINE_META[id].name} ${T('obInstalling')}`,
+    );
+  } else {
+    const missing = Object.keys(ENGINE_META).find((id) => !engineReady(id) && !Onboard.installErrors[id]);
+    if (missing) void installOnboardEngine(missing);
+  }
 }
 
 // 单张引擎卡：状态徽章 + 说明 + 一个大按钮（安装 / 选择）+ 该卡自己的进度区
@@ -331,17 +361,17 @@ function onboardEngineCard(id) {
   const a = (Onboard.status || {})[id] || {};
   const ready = !!a.ready;
   const picked = Onboard.engine === id;
+  const busy = Onboard.installing === id;
+  const error = Onboard.installErrors[id];
   const badge = ready
     ? `<span class="ob-badge ok">✓ ${T('obInstalled')}</span>`
-    : `<span class="ob-badge warn">✕ ${T('obNotInstalled')}</span>`;
-  const note = ready ? T('obFromSystem') : T('obInstallHint');
-  const busy = Onboard.installing === id;
+    : `<span class="ob-badge warn">${T(busy ? 'obInstalling' : error ? 'obNotInstalled' : 'obInstallQueued')}</span>`;
+  const note = ready ? T('obFromSystem') : error ? T('obInstallManual') : T('obInstallHint');
   const action = ready
     ? `<button type="button" class="ob-act ob-act-pick${picked ? ' on' : ''}" data-pick="${id}">` +
       `${picked ? `✓ ${T('obEnginePicked')}` : T('obEnginePick')}</button>`
-    : `<button type="button" class="ob-act ob-act-inst" data-install="${id}"${busy ? ' disabled' : ''}>` +
-      `⤓ ${T('obEngineInstall')}</button>` +
-      `<span class="ob-act-hint">npm install -g ${meta.pkg}</span>`;
+    : `<button type="button" class="ob-act ob-act-inst" data-install="${id}"${Onboard.installing || !error ? ' disabled' : ''}>` +
+      `⤓ ${T(busy ? 'obInstalling' : error ? 'obInstallRetry' : 'obInstallQueued')}</button>`;
   return (
     `<div class="ob-card ob-engine${picked ? ' on' : ''}${ready ? '' : ' locked'}" data-engine="${id}">` +
     `<div class="ob-card-h"><b>${meta.name}</b>${badge}` +
@@ -350,7 +380,7 @@ function onboardEngineCard(id) {
     `<div class="ob-card-d">${id === 'claude' ? T('obClaudeDesc') : T('obCodexDesc')}</div>` +
     `<div class="ob-card-n">${note}</div>` +
     `<div class="ob-act-row">${action}</div>` +
-    `<div class="ob-inst-msg ob-pre" id="obInstMsg-${id}"></div>` +
+    `<div class="ob-inst-msg ob-pre" id="obInstMsg-${id}" role="status" aria-live="polite">${escapeHtml(error || '')}</div>` +
     `</div>`
   );
 }
@@ -364,32 +394,25 @@ function pickOnboardEngine(id) {
   renderOnboard();
 }
 
-// 一键安装：npm 全局安装该引擎，过程中在本卡内显示实时进度（同时只允许装一个）
+// 全局安装沿用同一条进度通道，依次执行以免两个引擎的日志串台。
 async function installOnboardEngine(id) {
-  if (Onboard.installing) return;
+  if (Onboard.installing || engineReady(id)) return;
   Onboard.installing = id;
-  const msg = $(`obInstMsg-${id}`);
-  const btn = $('onboardBody').querySelector(`[data-install="${id}"]`);
-  if (btn) btn.disabled = true;
-  $('onboardBody').querySelectorAll('[data-install]').forEach((b) => { b.disabled = true; });
-  // 引擎包 400-500MB：显示实时进度（npm 最新一行 + 已用时），否则几分钟的静默会被当成卡死
-  const stop = startEngineInstallProgress(msg, `${ENGINE_META[id].name} ${T('obInstalling')}`);
+  delete Onboard.installErrors[id];
+  renderOnboardEngine();
   try {
     await api('/api/engine/update', { engine: id });
-    stop();
-    Onboard.installing = '';
-    Onboard.status = await api('/api/engine/status');
-    renderOnboard();
-    const done = $(`obInstMsg-${id}`);
-    if (done) done.textContent = T('obInstallOk');
+    Onboard.status = await api('/api/engine/status?refresh=1');
+    if (!engineReady(id)) throw new Error(T('obNotInstalled'));
   } catch (e) {
-    stop();
-    Onboard.installing = '';
-    msg.textContent =
+    Onboard.installErrors[id] =
       T('obInstallFail') + (e.message || '') + '\n' + T('obInstallManual') +
       `\n  npm install -g ${ENGINE_META[id].pkg}`;
-    $('onboardBody').querySelectorAll('[data-install]').forEach((b) => { b.disabled = false; });
-    if (btn) btn.textContent = `⤓ ${T('obInstallRetry')}`;
+  } finally {
+    if (Onboard.stopInstallProgress) Onboard.stopInstallProgress();
+    Onboard.stopInstallProgress = null;
+    Onboard.installing = '';
+    if (Onboard.step === 3 && Onboard.mode === 'advanced') renderOnboardEngine();
   }
 }
 
@@ -523,6 +546,7 @@ async function onboardFetchModels() {
 
 // ── 上一步 / 下一步 ──
 function onboardBack() {
+  if (Onboard.installing) return;
   if (Onboard.step > 1) { Onboard.step -= 1; renderOnboard(); }
 }
 
@@ -530,7 +554,7 @@ async function onboardNext() {
   if (Onboard.busy) return;
   if (Onboard.mode === 'quick') { await runQuickStart(); return; }
   // 引擎没装好不放行（按钮本身也是禁用的，这里兜底防止回车/脚本触发）
-  if (Onboard.step === 3 && !engineReady(Onboard.engine)) return;
+  if (Onboard.step === 3 && (Onboard.installing || !engineReady(Onboard.engine))) return;
   if (Onboard.step === 1 || Onboard.step === 2 || Onboard.step === 3) {
     Onboard.step += 1;
     renderOnboard();

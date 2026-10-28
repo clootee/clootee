@@ -1,10 +1,10 @@
 {
-  "version": "3.1.11",
+  "version": "3.1.17",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-10-26",
+  "releasedAt": "2026-10-28",
   "notesI18n": {
-    "zh": "新增宠物狗·泰迪主题：代码绘制红棕卷毛泰迪，支持拖动、点击和抚摸，自主走动、小跑、嗅闻、睡觉和躲藏；四脚步态与睡眠呼吸动画，保留隐藏的图片版用于对比。",
-    "en": "New Teddy Puppy theme: a code-drawn red-brown poodle with dragging, clicking and petting, autonomous walking, trotting, sniffing, sleeping and hiding, coordinated four-leg gait and breathing animation. The image renderer is retained for comparison."
+    "zh": "修复工作目录自动创建位置，新增项目统一放在用户主目录；保留邮箱授权和余额不足时的充值入口。",
+    "en": "Automatically created projects now stay under the user home directory. Includes email authorization and direct top-up links for insufficient credit."
   }
 }

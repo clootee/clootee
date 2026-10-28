@@ -16,6 +16,9 @@ function openAddRootGuide(onRootReady) {
   $('argExistingD').textContent = T('argExistingD');
   $('argNewT').textContent = T('argNewT');
   $('argNewD').textContent = T('argNewD');
+  $('argQuickT').textContent = T('argQuickT');
+  $('argQuickD').textContent = T('argQuickD');
+  $('argQuick').onclick = () => quickStartRoot(onRootReady);
   $('argClose').onclick = closeAddRootGuide;
   $('argExisting').onclick = () => chooseExistingRoot(onRootReady);
   $('argNew').onclick = () => {
@@ -24,6 +27,36 @@ function openAddRootGuide(onRootReady) {
   };
   $('addRootGuideOverlay').hidden = false;
 }
+let quickStartRequestId = '';
+let quickStartBusy = false;
+async function quickStartRoot(onRootReady) {
+  if (quickStartBusy) return;
+  quickStartBusy = true;
+  quickStartRequestId ||= typeof crypto.randomUUID === 'function' ? crypto.randomUUID()
+    : Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => b.toString(16).padStart(2, '0')).join('');
+  const draftId = State.sessionId;
+  const ready = onRootReady || (async (rootId) => {
+    if (State.sessionId === draftId && isFavoriteDraftId(draftId)) await bindFavoriteDraftRoot(rootId);
+    focusTaskInputIfDesktop();
+  });
+  closeAddRootGuide();
+  try {
+    // 立即开始不再要求起名、选位置或选模板；复用目录刷新与回调流程。
+    await runRootFlow('skip', async () => {
+      try {
+        const root = await api('/api/root/quick-start', { requestId: quickStartRequestId });
+        quickStartRequestId = '';
+        showMiniToast(T('quickRootReady').replace('{path}', root.path));
+        return root;
+      } catch (error) {
+        throw new Error(T('quickRootFailed'));
+      }
+    }, ready);
+  } finally {
+    quickStartBusy = false;
+  }
+}
+
 function closeAddRootGuide() {
   $('addRootGuideOverlay').hidden = true;
 }
@@ -77,10 +110,9 @@ function closeNewProject() {
   $('newProjectOverlay').hidden = true;
 }
 
-// 后端默认路由未生效时的父目录回退：Windows 用 D:\projects，其余用主目录下 projects
+// 无法获取本机路径时留空，交给用户浏览选择，不能猜测盘符或把 ~ 当绝对路径。
 function fallbackProjectParent() {
-  const plat = (State.settings && State.settings.platform) || '';
-  return plat === 'win32' ? 'D:\\projects' : '~/projects';
+  return '';
 }
 
 // 项目名合法性：仅英文字母/数字/下划线（作为文件夹名）

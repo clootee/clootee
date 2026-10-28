@@ -1,6 +1,6 @@
 // Clootee 默认服务商的本机账户（调度骨架）。
 // 松耦合：对引擎来说 clootee 只是一个普通的 Anthropic/OpenAI 兼容服务商（见 EngineConfigStruct.PROVIDERS.clootee），
-// 本模块只多做一件事——首次使用时向 console.clootee.com 匿名领一把设备令牌，当作 API Key 填进服务商槽。
+// 本模块只多做一件事——邮箱登录并批准本机后，由 console.clootee.com 颁发密钥填进服务商槽。
 // 余额、用量、充值都在 console.clootee.com，这里只转述，不计费、不存钱。
 // 具体 IO（读写 data/console.json、HTTP 调 console）由 Realize 实现。
 import { EngineConfig } from '../logic_realize/EngineConfig';
@@ -15,6 +15,7 @@ export interface ConsoleRecord {
 }
 
 export interface ConsoleStatus {
+  engines?: string[];
   registered: boolean;      // 是否已领到设备令牌
   active: boolean;          // 当前 Claude 引擎是否正在用 clootee
   balanceMicro: number | null; // 余额（微美元）；null = 没联网/没注册，查不到
@@ -34,7 +35,7 @@ export interface ConsoleUsageItem {
 }
 
 export class ConsoleAccountStruct {
-  // 一键开通：领令牌 → 两个引擎都切到 clootee + 默认模型。重复调用是幂等的（令牌已领就直接用）。
+  // 只允许使用邮箱登录后由云端授权的密钥；不再匿名注册或补发额度。
   static async activate(): Promise<ConsoleStatus> {
     const token = await this.ensureToken();
     this._useForEngine('claude', token);
@@ -57,9 +58,11 @@ export class ConsoleAccountStruct {
   // 余额与状态（前端顶部的余额徽章、额度耗尽弹层都读这个）
   static async status(): Promise<ConsoleStatus> {
     const rec = this._readRecord();
-    const active = EngineConfig.get().claude.provider === 'clootee';
-    if (!rec.token) return { registered: false, active, balanceMicro: null, email: null, consoleUrl: this._consoleUrl() };
-    return this._fetchStatus(rec.token, active);
+    const cfg = EngineConfig.get();
+    const engines = ['claude', 'codex'].filter((engine) => cfg[engine as 'claude' | 'codex'].provider === 'clootee');
+    const active = engines.length > 0;
+    if (!rec.token) return { registered: false, active, engines, balanceMicro: null, email: null, consoleUrl: this._consoleUrl() };
+    return { ...await this._fetchStatus(rec.token, active), engines };
   }
 
   // 最近 N 笔用量（每一笔都能在 console 里点开看单价与 token 构成）

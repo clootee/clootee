@@ -691,7 +691,7 @@ async function loadRoots() {
     sel.appendChild(o);
   });
   if (!State.roots.find((r) => r.id === State.rootId)) {
-    setTabRootId('');
+    setTabRootId(State.roots.length === 1 ? State.roots[0].id : '');
   }
   sel.value = State.rootId;
   renderWorkdirBar();
@@ -726,6 +726,36 @@ function sortedRoots() {
 // 当前选中的根目录对象
 function currentRoot() {
   return State.roots.find((r) => r.id === State.rootId) || null;
+}
+
+// 就近提示并聚焦实际可见的控件，保留输入内容，移动端必要时展开侧栏。
+function requestRootSelection() {
+  showMiniToast(T(State.roots.length ? 'rootChoiceHint' : 'rootAddHint'));
+  let control = State.roots.length
+    ? [...document.querySelectorAll('.favorite-root-required select, .gs-root-chooser select, #rootSelect')]
+        .find((el) => el.getClientRects().length)
+    : $('addRootBtn');
+  control ||= $('rootSelect');
+  if (!control.getClientRects().length) document.body.classList.add('drawer-open');
+  control.classList.add('root-needs-choice');
+  control.setAttribute('aria-invalid', 'true');
+  control.scrollIntoView({ block: 'center' });
+  control.focus();
+  const clear = () => {
+    control.classList.remove('root-needs-choice');
+    control.removeAttribute('aria-invalid');
+  };
+  control.addEventListener(State.roots.length ? 'change' : 'click', clear, { once: true });
+}
+
+function selectOnlyRoot() {
+  if (currentRoot()) return true;
+  if (State.roots.length !== 1) return false;
+  setTabRootId(State.roots[0].id);
+  $('rootSelect').value = State.rootId;
+  renderWorkdirBar();
+  renderRootMeta();
+  return true;
 }
 
 // 选中某个根目录（下拉框 change / 引导按钮共用）：同步下拉框、切换 tab 根目录、刷新会话列表
@@ -2334,8 +2364,8 @@ async function newSession() {
     openWsDir();
     return;
   }
-  if (!State.rootId) {
-    alert(T('selectRootFirst'));
+  if (!selectOnlyRoot()) {
+    requestRootSelection();
     return;
   }
   // 当前已是空的新会话（未发起、无任务）则不再重复创建，直接复用并聚焦输入框
@@ -2362,6 +2392,7 @@ function isFavoriteDraftId(id) {
 }
 
 function createFavoriteDraftSession(preferredRootId = '') {
+  if (!preferredRootId && State.roots.length === 1) preferredRootId = State.roots[0].id;
   const prevKey = State.sessionId;
   const now = Date.now();
   const draft = {
@@ -2855,6 +2886,7 @@ function addAssistantGroupEl(unit) {
 
   div.appendChild(head);
   div.appendChild(body);
+  Clootee.attachCreditActions(div, unit.messages.map((m) => m.text || '').join('\n'));
 
   // 底部明确的「展开」按钮（图标 + 文字），让用户知道这条 AI 消息可点开
   const foot = document.createElement('div');
@@ -3192,6 +3224,12 @@ const Clootee = {
   async refresh() {
     try { this.st = await api('/api/console/status'); } catch { this.st = null; }
     this.renderBadge();
+    (State.session?.messages || []).filter((m) => m.role !== 'user').forEach((m) => {
+      const box = $('messages');
+      const node = box?.querySelector(`[data-mid="${CSS.escape(m.id)}"]`)
+        || [...(box?.querySelectorAll('[data-group-key]') || [])].find((g) => g.dataset.groupKey.split(':').includes(m.id));
+      if (node) this.attachCreditActions(node, m.text);
+    });
   },
   renderBadge() {
     const b = $('clooteeBal');
@@ -3204,16 +3242,31 @@ const Clootee = {
     b.classList.toggle('low', this.st.balanceMicro < 50000);
     b.onclick = () => this.openBilling();
   },
-  // 先同步开一个空窗口再填地址：异步拿到地址后再 window.open 会被浏览器当成弹窗拦掉
-  async openBilling() {
-    const w = window.open('about:blank', '_blank');
+  billingUrl() {
     try {
-      const r = await api('/api/console/link', {});
-      if (w) w.location.href = r.url; else location.href = r.url;
-    } catch (e) {
-      if (w) w.close();
-      alert(T('clooteeLinkFail') + (e.message || ''));
-    }
+      const url = new URL(this.st?.consoleUrl || 'https://console.clootee.com');
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid billing URL');
+      url.pathname = '/billing'; url.search = ''; url.hash = '';
+      url.searchParams.set('lang', currentLang());
+      return url.toString();
+    } catch { return 'https://console.clootee.com/billing'; }
+  },
+  openBilling() { window.open(this.billingUrl(), '_blank', 'noopener,noreferrer'); },
+  usesClootee() {
+    const engine = State.session?.engine || State.settings?.defaultEngine || 'claude';
+    return this.st?.engines ? this.st.engines.includes(engine) : this.active();
+  },
+  attachCreditActions(node, text) {
+    if (!this.usesClootee() || !this.isOutOfCredit(text) || node.querySelector('.credit-actions')) return;
+    const actions = document.createElement('div'); actions.className = 'credit-actions';
+    const hint = document.createElement('p'); hint.textContent = T('clooteeReserveHint');
+    const link = document.createElement('a');
+    link.href = this.billingUrl(); link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = T('clooteeTopupNow');
+    link.addEventListener('click', (e) => e.stopPropagation());
+    const own = document.createElement('button'); own.type = 'button'; own.textContent = T('clooteeUseOwn');
+    own.addEventListener('click', (e) => { e.stopPropagation(); openSettings(); });
+    actions.append(hint, link, own); node.appendChild(actions);
   },
   // 这一轮对应的任务：开始时间落在「本轮用户消息 ~ 下一轮用户消息」之间的最后一条。
   // 两端各放宽 5 秒：任务常比它的用户消息早几毫秒入账，结束端不收窄就会把下一轮的任务算进来
@@ -3246,7 +3299,7 @@ const Clootee = {
     return '';
   },
   onTaskEnd(task) {
-    if (!this.active()) return;
+    if (!this.usesClootee()) return;
     // 本会话最后一轮的缓存作废（任务刚结束，最后几个请求可能还没落账），稍等片刻再取
     setTimeout(() => {
       delete this.turns[task.id];
@@ -3257,11 +3310,12 @@ const Clootee = {
   },
   isOutOfCredit(text) {
     const s = String(text || '');
-    return s.includes('billing_error') || s.includes('balance is used up') || s.includes('余额已用完');
+    return /billing_error|insufficient[_ ](?:available[_ ])?(?:balance|credit)|balance is used up|余额(?:不足|已用完)|额度(?:不足|已用完)/i.test(s)
+      || /(?:API Error[:：]?\s*402|\b(?:HTTP|status)\s*[:=]?\s*402\b)/i.test(s);
   },
   // 额度用完：就地弹层，「充值」与「改用自己的服务商」两条路并列，都是一步到位
   showOutOfCredit() {
-    if ($('clooteeOut')) return;
+    if (!this.usesClootee() || $('clooteeOut')) return;
     const box = document.createElement('div');
     box.className = 'login-overlay';
     box.id = 'clooteeOut';
@@ -3398,6 +3452,7 @@ function noticeEl(item) {
   body.textContent = item.message;
   div.appendChild(head);
   div.appendChild(body);
+  Clootee.attachCreditActions(div, item.message);
   return div;
 }
 
@@ -3554,6 +3609,7 @@ function addMessageEl(m) {
 
   div.appendChild(head);
   div.appendChild(body);
+  if (m.role !== 'user') Clootee.attachCreditActions(div, m.text);
   // AI 消息：挂「🔍 过程」按钮，点开即在本条下方内联展开这一轮的完整轨迹
   if (m.role !== 'user') attachTraceBtn(div, m);
   // AI 内联图表：每个 <chart> 渲染为一张图表卡片（ECharts），追加在正文之后
@@ -5602,9 +5658,10 @@ async function ensureSession() {
   if (State.sessionId) {
     if (!isFavoriteDraftId(State.sessionId)) return true;
     // 发消息/上传即认可选择器中的目录；显式清空时不能回退到其他目录。
-    const rootId = State.session?.pendingRootId ?? State.session?.preferredRootId ?? '';
+    const rootId = State.roots.length === 1 ? State.roots[0].id
+      : State.session?.pendingRootId ?? State.session?.preferredRootId ?? '';
     if (!rootId || !State.roots.some((r) => r.id === rootId)) {
-      alert(T('favoriteRootRequired'));
+      requestRootSelection();
       return false;
     }
     await bindFavoriteDraftRoot(rootId);
@@ -5622,8 +5679,8 @@ async function ensureSession() {
     return false;
   }
   // 经典模式：已选根目录即可直接创建真实会话。
-  if (!State.rootId) {
-    alert(T('selectRootFirst'));
+  if (!selectOnlyRoot()) {
+    requestRootSelection();
     return false;
   }
   const s = await api('/api/session/create', {

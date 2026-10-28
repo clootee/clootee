@@ -1,4 +1,4 @@
-// Clootee 默认服务商的本机账户（实现）：data/console.json 读写 + 调 console.clootee.com 的三个账户接口。
+// 本机账户：邮箱授权设备登录、私有凭据存储、余额与用量查询。
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import * as os from 'os';
@@ -81,9 +81,7 @@ export class ConsoleAccount extends ConsoleAccountStruct {
   }
 
   protected static async _requestLinkUrl(token: string): Promise<string> {
-    const r = await this._authed('POST', '/api/v1/devices/link-code', token);
-    if (!r.url) throw new Error('ConsoleAccount._requestLinkUrl: console 没有返回绑定地址');
-    return String(r.url);
+    return `${CLOOTEE_CONSOLE_BASE}/billing`;
   }
 
   protected static _consoleUrl(): string {
@@ -111,8 +109,7 @@ export class ConsoleAccount extends ConsoleAccountStruct {
     };
   }
 
-  // 带令牌调用；令牌失效（401：在网页上被作废、或 console 换库）时用同一个 installId 重新领一把，
-  // 并把新令牌同步进正在使用 clootee 的引擎槽，然后重试一次。
+  // 已撤销的密钥必须重新邮箱授权，不能用安装 ID 绕过登录换取新密钥。
   private static async _authed(method: string, p: string, token: string): Promise<any> {
     try {
       return await this._call(method, p, token);
@@ -135,7 +132,7 @@ export class ConsoleAccount extends ConsoleAccountStruct {
   }
 
   private static async _call(method: string, p: string, token: string, body?: unknown): Promise<any> {
-    const headers: Record<string, string> = { accept: 'application/json' };
+    const headers: Record<string, string> = { accept: 'application/json', 'x-console-request': '1' };
     if (token) headers.authorization = `Bearer ${token}`;
     if (body !== undefined) headers['content-type'] = 'application/json';
     let res: Response;

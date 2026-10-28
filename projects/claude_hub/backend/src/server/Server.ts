@@ -397,6 +397,9 @@ export class Server {
         RootManager.ensureRoot(req.body.path, !!req.body.create),
       ),
     );
+    app.post('/api/root/quick-start', (req, res) =>
+      this._wrap(res, 'root.quickStart', () => RootManager.quickStart(String(req.body.requestId || ''))),
+    );
     // 新建项目：在 parentDir 下创建以 name（英文/数字/下划线）命名的项目并登记为根目录
     app.post('/api/root/create-project', (req, res) =>
       this._wrap(res, 'root.createProject', () =>

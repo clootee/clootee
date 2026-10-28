@@ -6,6 +6,7 @@ export interface RootLink {
 }
 
 export interface Root {
+  quickStartRequestId?: string; // 新手自动创建请求：断线重试时复用该请求已建的目录
   id: string;
   name: string;
   path: string;

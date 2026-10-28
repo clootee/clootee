@@ -63,3 +63,12 @@ user's own provider account. Restart the hub after updating backend files.
 - [Alibaba keys, including shared sk-sp- prefix](https://help.aliyun.com/en/model-studio/get-api-key)
 - [OpenRouter native Claude integration](https://openrouter.ai/docs/guides/coding-agents/claude-code-integration)
 - [Claude API authentication (`Authorization: Bearer` / `x-api-key`)](https://platform.claude.com/docs/en/api/overview)
+
+
+### Clootee email authorization
+
+Starting with 3.1.14, Clootee uses the Console device authorization flow. Choose **Sign in with email & claim credit**, open the Console link, sign in with an email code, and approve the displayed computer. The client resumes after authorization. **Use my own provider** opens the existing provider setup without a Clootee account.
+
+The client calls `POST /api/device/start`, then polls `POST /api/device/token` on the Console. The private device code stays in the local backend. Only an authorized token associated with an email can activate Clootee. Revoked tokens require a new sign-in; an installation ID never grants a replacement key or more trial credit. Billing opens `/billing` in the Console.
+
+Trial grants and prices are enforced by the cloud service, never by the open-source client. The intended new-account grant is USD 0.50, once per verified email account; existing accounts without a grant receive the same credit. DeepSeek Flash is offered without markup, including cache-hit and peak/off-peak pricing. Operators must verify these cloud rules separately before advertising the trial as available; updating this client does not change cloud balances or prices.
