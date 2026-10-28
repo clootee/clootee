@@ -1,10 +1,10 @@
 {
-  "version": "3.1.20",
+  "version": "3.1.21",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-10-28",
   "notesI18n": {
-    "zh": "Linux 和 macOS 启动时统一先停止旧实例，再检查环境并启动；停止失败立即中止，支持识别尚未监听端口的旧实例，避免误停其他程序。",
-    "en": "Linux and macOS launchers now stop the previous instance before setup and startup, abort on stop failures, detect instances still booting, and avoid stopping unrelated applications."
+    "zh": "更新遇到本地修改或合并冲突时，可选择放弃更新或确认强制更新；强制更新仅覆盖 Clootee 代码，保护其他项目和用户数据。",
+    "en": "When local changes or merge conflicts block an update, choose Cancel update or confirm Force update. Confirmed updates replace only Clootee code while preserving other projects and user data."
   }
 }

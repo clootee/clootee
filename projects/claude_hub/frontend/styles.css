@@ -3188,6 +3188,21 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 .upd-foot .spacer { flex: 1; }
 .upd-foot a { font-size: 12px; opacity: .8; }
 #updModalLog { max-height: 160px; overflow: auto; }
+.update-conflict-modal {
+  width: min(460px, calc(100vw - 32px)); box-sizing: border-box;
+  padding: 22px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--panel2, var(--bg)); color: var(--text);
+}
+.update-conflict-modal::backdrop { background: rgba(0, 0, 0, .55); }
+.update-conflict-modal h3 { margin: 0 0 12px; font-size: 17px; }
+.update-conflict-modal p { margin: 0; line-height: 1.7; }
+.update-conflict-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.update-conflict-actions button { flex: 0 1 auto; padding: 9px 16px; border-radius: 7px; color: #fff; }
+#updConflictCancel { background: #6b7280; border: 1px solid #6b7280; }
+#updConflictForce { background: #2563eb; border: 1px solid #2563eb; }
+#updConflictCancel:hover { background: #4b5563; }
+#updConflictForce:hover { background: #1d4ed8; }
+.update-conflict-actions button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 
 
 /* ── 会话列表视图切换（单目录 / 收藏夹 / 全部目录）下拉菜单 ── */

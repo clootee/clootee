@@ -5940,6 +5940,34 @@ async function checkAppUpdate() {
 
 // 拉取 + 重启的实际流程。设置面板和启动弹窗共用一套，只是把日志写进各自的框。
 // onFail 用于失败后解禁发起按钮——两处的按钮不是同一个，交给调用方处理。
+function confirmAppUpdateOverwrite() {
+  const modal = $('updateConflictModal');
+  $('updConflictTitle').textContent = T('updateConflictTitle');
+  $('updConflictNote').textContent = T('updateConflictNote');
+  $('updConflictCancel').textContent = T('updateConflictCancel');
+  $('updConflictForce').textContent = T('updateConflictForce');
+  return new Promise((resolve) => {
+    const finish = (force) => {
+      $('updConflictCancel').removeEventListener('click', cancel);
+      $('updConflictForce').removeEventListener('click', accept);
+      modal.removeEventListener('cancel', escape);
+      modal.removeEventListener('close', closed);
+      modal.close();
+      resolve(force);
+    };
+    const cancel = () => finish(false);
+    const accept = () => finish(true);
+    const escape = (event) => { event.preventDefault(); finish(false); };
+    const closed = () => { if (!modal.open) finish(false); };
+    $('updConflictCancel').addEventListener('click', cancel);
+    $('updConflictForce').addEventListener('click', accept);
+    modal.addEventListener('cancel', escape);
+    modal.addEventListener('close', closed);
+    modal.showModal();
+    $('updConflictCancel').focus();
+  });
+}
+
 async function runAppUpdate(box, onFail) {
   box.hidden = false;
   box.className = 'sx-note sx-pre';
@@ -5953,7 +5981,24 @@ async function runAppUpdate(box, onFail) {
   render();
   try {
     const before = await api('/api/auth/check');
-    await api('/api/update/apply', {});
+    let force = false;
+    for (;;) {
+      const result = await api('/api/update/apply', { force });
+      if (!result.requiresConfirmation) {
+        if (!result.ok) throw new Error(result.output);
+        break;
+      }
+      if (force) throw new Error(result.output);
+      if (!(await confirmAppUpdateOverwrite())) {
+        UpdateApplyLog.stop();
+        lines.push(T('updateCancelled'));
+        render();
+        if (onFail) onFail();
+        if (box.id === 'updModalLog') $('updateModal').hidden = true;
+        return;
+      }
+      force = true;
+    }
     UpdateApplyLog.stop();
     box.className = 'sx-note sx-pre ok';
     lines.push(T('updateApplyDone'));
@@ -7225,7 +7270,7 @@ function bind() {
   });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if ($('costGuardModal').open) return;
+    if ($('costGuardModal').open || $('updateConflictModal').open) return;
     if ($('promptCacheModal').open) { e.preventDefault(); $('promptCacheModal').close(); return; }
     if ($('batchCostModal').open) { e.preventDefault(); $('batchCostModal').close(); return; }
     if (!$('updateModal').hidden) { UpdateModal.close(); return; } // 强制更新时 close() 是空操作，关不掉

@@ -137,29 +137,66 @@ export class UpdateChecker extends UpdateCheckerStruct {
     return `https://github.com/${owner}/${repo}`;
   }
 
-  // 快进失败时的兜底：检出历史与远端对不上（仓库被重建 / 历史被改写过）时，
-  // git pull --ff-only 只会 fatal 退 128，部署机就此永远停在旧版本、每次点更新都白点。
-  // 工作区干净时（用户数据都在 .gitignore 里，不受影响）直接对齐远端；有本地改动则不动。
-  private static _hardResetIfClean(branch: string, onProgress?: UpdateProgress): UpdateApplyResult {
+  private static _confirmation(): UpdateApplyResult {
+    return { ok: false, requiresConfirmation: true, output: 'Local Clootee changes require confirmation before overwriting.' };
+  }
+
+  private static _updateSpecs(root: string, run: (args: string[]) => string, commit?: string): string[] {
+    const excluded = new Set<string>(['projects/claude_hub/data']);
+    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+      if ((entry.isDirectory() || entry.isSymbolicLink()) && !['scripts', 'docs', 'projects', '.github'].includes(entry.name)) excluded.add(entry.name);
+    }
+    const projects = new Set<string>();
+    if (fs.existsSync(path.join(root, 'projects'))) {
+      for (const name of fs.readdirSync(path.join(root, 'projects'))) projects.add(name);
+    }
+    if (commit) {
+      for (const name of run(['ls-tree', '-z', '--name-only', `${commit}:projects`]).split('\0')) if (name) projects.add(name);
+    }
+    for (const file of run(['ls-files', '-z', 'projects/']).split('\0')) if (file) projects.add(file.split('/')[1]);
+    for (const name of projects) if (name !== 'claude_hub') excluded.add(`projects/${name}`);
+    return ['.', ...Array.from(excluded, entry => `:(top,exclude,literal)${entry}`)];
+  }
+
+  // Only an explicitly confirmed request may discard local code or commits.
+  private static _forcePull(branch: string, onProgress?: UpdateProgress): UpdateApplyResult {
     const git = GitBin.resolve();
-    const run = (args: string[]) =>
-      execFileSync(git, args, { cwd: Paths.PROJECT_ROOT, encoding: 'utf-8', windowsHide: true }).trim();
+    const root = path.resolve(Paths.PROJECT_ROOT, '../..');
+    const run = (args: string[], input?: string) =>
+      execFileSync(git, args, {
+        cwd: root, encoding: 'utf-8', windowsHide: true, timeout: 180000, input,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', LC_ALL: 'C' },
+      }).trim();
     try {
-      if (run(['status', '--porcelain'])) {
-        return { ok: false, output: '[git pull] 无法快进，且工作区有本地改动：请先提交或丢弃改动再更新' };
-      }
-      onProgress?.('[git] 检出历史与远端不一致，工作区干净，改为直接对齐远端');
-      run(['fetch', 'origin', branch]);
-      const out = run(['reset', '--hard', `origin/${branch}`]);
+      const actual = fs.realpathSync(run(['rev-parse', '--show-toplevel']));
+      const expected = fs.realpathSync(root);
+      const canonical = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value;
+      if (canonical(actual) !== canonical(expected)) throw new Error('Refusing to update a repository outside the Clootee installation');
+      run(['check-ref-format', `refs/heads/${branch}`]);
+      // Fetch must succeed before touching local changes. Never clean user files
+      // or hard-reset the entire monorepo: it can contain other projects.
+      onProgress?.('[git] Fetching the confirmed update');
+      run(['fetch', '--no-tags', 'origin', `refs/heads/${branch}`]);
+      const commit = run(['rev-parse', '--verify', 'FETCH_HEAD^{commit}']);
+      run(['cat-file', '-e', `${commit}:projects/claude_hub/backend/package.json`]);
+      const specs = this._updateSpecs(root, run, commit);
+      // Restore only Clootee code. Other projects retain both their working files
+      // and index entries, including partially staged edits and local commits.
+      run(['-c', 'submodule.recurse=false', 'restore', `--source=${commit}`, '--staged', '--worktree',
+        '--pathspec-from-file=-', '--pathspec-file-nul'], specs.join('\0') + '\0');
+      const mergeState = path.resolve(root, run(['rev-parse', '--git-path', 'MERGE_HEAD']));
+      if (fs.existsSync(mergeState)) run(['merge', '--quit']);
+      run(['reset', '--soft', commit]);
+      const out = `Updated Clootee to ${commit}`;
       onProgress?.(out);
-      Logger.info('UpdateChecker', 'hard reset to origin', { branch, out });
+      Logger.info('UpdateChecker', 'confirmed force update', { branch, commit });
       return { ok: true, output: out };
     } catch (e: any) {
-      return { ok: false, output: `[git pull] 无法快进，对齐远端也失败: ${e?.message || e}` };
+      return { ok: false, output: ErrorHandler.handle(e, 'UpdateChecker.forcePull') };
     }
   }
 
-  protected static _pull(onProgress?: UpdateProgress): Promise<UpdateApplyResult> {
+  protected static _pull(onProgress?: UpdateProgress, force = false): Promise<UpdateApplyResult> {
     return new Promise((resolve) => {
       const git = GitBin.find();
       if (!git) {
@@ -168,9 +205,10 @@ export class UpdateChecker extends UpdateCheckerStruct {
       }
       Logger.info('UpdateChecker', 'git pull start');
       const root = path.resolve(Paths.PROJECT_ROOT, '../..');
-      const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' };
+      const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', LC_ALL: 'C' };
       // Release ZIPs have no .git. Establish tracking without touching ignored user data.
       if (!this._hasRepo()) {
+        if (!force) { resolve(this._confirmation()); return; }
         try {
           const run = (args: string[]) => execFileSync(git, args, {
             cwd: root, encoding: 'utf-8', windowsHide: true, env, timeout: 180000,
@@ -181,8 +219,9 @@ export class UpdateChecker extends UpdateCheckerStruct {
           try { run(['remote', 'get-url', 'origin']); } catch {
             run(['remote', 'add', 'origin', 'https://github.com/clootee/clootee.git']);
           }
-          run(['fetch', '--depth=1', 'origin', 'main']);
-          run(['checkout', '-f', '-B', 'main', 'FETCH_HEAD']);
+          const updated = this._forcePull('main', onProgress);
+          if (!updated.ok) { resolve(updated); return; }
+          run(['branch', '-M', 'main']);
           run(['branch', '--set-upstream-to=origin/main', 'main']);
           fs.unlinkSync(path.join(root, '.git', 'clootee-bootstrap'));
           resolve({ ok: true, output: 'Release package updated' });
@@ -191,6 +230,12 @@ export class UpdateChecker extends UpdateCheckerStruct {
         }
         return;
       }
+      if (force) { resolve(this._forcePull(this._currentBranch(), onProgress)); return; }
+      const inspect = (args: string[]) => execFileSync(git, args, {
+        cwd: root, encoding: 'utf-8', windowsHide: true, env, timeout: 10000,
+      }).trim();
+      const localChanges = inspect(['status', '--porcelain', '--untracked-files=no', '--', ...this._updateSpecs(root, inspect)]);
+      if (localChanges) { resolve(this._confirmation()); return; }
       const child = spawn(git, ['pull', '--ff-only'], {
         cwd: Paths.PROJECT_ROOT, windowsHide: true, env, timeout: 180000,
       });
@@ -217,11 +262,19 @@ export class UpdateChecker extends UpdateCheckerStruct {
           resolve({ ok: true, output: out.trim() || 'ok' });
           return;
         }
-        const fallback = this._hardResetIfClean(this._currentBranch(), onProgress);
-        resolve({
-          ok: fallback.ok,
-          output: [out.trim() || `git pull 退出码 ${code}`, fallback.output].filter(Boolean).join('\n'),
-        });
+        // A failed fast-forward must never silently discard local commits.
+        // Keep network/auth errors as ordinary errors, rather than offering reset.
+        let localCommits = false;
+        try {
+          localCommits = Number(execFileSync(git, ['rev-list', '--count', '@{u}..HEAD'], {
+            cwd: root, encoding: 'utf8', windowsHide: true, env, timeout: 10000,
+          }).trim()) > 0;
+        } catch (e) { ErrorHandler.handle(e, 'UpdateChecker.localCommits'); }
+        if (localCommits || /untracked working tree files|local changes.*overwritten|not possible to fast-forward|diverging branches|refusing to merge unrelated histories/i.test(out)) {
+          resolve(this._confirmation());
+        } else {
+          resolve({ ok: false, output: out.trim() || `git pull exited ${code}` });
+        }
       });
     });
   }

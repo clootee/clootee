@@ -1038,6 +1038,11 @@ const DICT = {
   },
   updateApplying: { en: 'Updating, please do not close this page…', zh: '正在更新，请勿关闭此页面…' },
   updateApplyFail: { en: 'Update failed: {err}', zh: '更新失败：{err}' },
+  updateConflictTitle: { en: 'Local changes affect this update', zh: '本地修改影响更新' },
+  updateConflictNote: { en: 'Force updating will discard your local changes to Clootee. Your other projects will not be affected. You can cancel the update to keep your changes.', zh: '继续强制更新将丢失本地对 Clootee 的修改，不会影响你的其他项目。也可以放弃更新，保留本地修改。' },
+  updateConflictCancel: { en: 'Cancel update', zh: '放弃更新' },
+  updateConflictForce: { en: 'Force update', zh: '强制更新' },
+  updateCancelled: { en: 'Update cancelled. Local changes have been kept.', zh: '已放弃更新，本地修改已保留。' },
   updateRestartTimeout: { en: 'Restart timed out. Check the update log before retrying.', zh: '等待重启超时，请检查更新日志后重试。' },
   updateApplyDone: {
     en: 'Update sent. The service is recompiling and restarting; this page will reconnect automatically.',

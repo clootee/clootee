@@ -289,9 +289,9 @@ export class Server {
       this._wrapAsync(res, 'update.check', () => UpdateChecker.check(String(req.query.lang || ''))),
     );
     app.get('/api/update/status', (_req, res) => this._ok(res, UpdateChecker.status()));
-    app.post('/api/update/apply', (_req, res) =>
+    app.post('/api/update/apply', (req, res) =>
       this._wrapAsync(res, 'update.apply', () =>
-        UpdateChecker.apply((line) => EventBus.broadcast({ kind: 'updateApply', line })),
+        UpdateChecker.apply((line) => EventBus.broadcast({ kind: 'updateApply', line }), req.body?.force === true),
       ),
     );
 

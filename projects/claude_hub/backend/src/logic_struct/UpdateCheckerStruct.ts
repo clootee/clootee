@@ -44,6 +44,7 @@ export type UpdateProgress = (line: string) => void;
 export interface UpdateApplyResult {
   ok: boolean;
   output: string;
+  requiresConfirmation?: boolean;
 }
 
 export class UpdateCheckerStruct {
@@ -78,12 +79,16 @@ export class UpdateCheckerStruct {
   }
 
   // 拉取最新代码并触发重新编译 + 重启；重启脚本会杀掉当前进程，因此这里不等重启跑完
-  static async apply(onProgress?: UpdateProgress): Promise<UpdateApplyResult> {
+  static async apply(onProgress?: UpdateProgress, force = false): Promise<UpdateApplyResult> {
     if (this._applying) return { ok: true, output: 'Update already in progress; reconnecting to current update' };
     this._applying = true;
     this._error = '';
     try {
-      const pull = await this._pull(onProgress);
+      const pull = await this._pull(onProgress, force);
+      if (pull.requiresConfirmation) {
+        this._applying = false;
+        return pull;
+      }
       // 拉取失败必须抛出：接口层只把抛错映射成 success=false，返回 ok=false 的话前端会
       // 当成「更新成功」→ 等重启 → 首个探测就通（进程根本没重启过）→ 刷新后又弹更新，
       // 表现就是「点了更新永远在更新」。
@@ -127,7 +132,7 @@ export class UpdateCheckerStruct {
   protected static _repoUrl(): string {
     throw new Error('UpdateCheckerStruct._repoUrl: Not implemented');
   }
-  protected static _pull(_onProgress?: UpdateProgress): Promise<UpdateApplyResult> {
+  protected static _pull(_onProgress?: UpdateProgress, _force?: boolean): Promise<UpdateApplyResult> {
     throw new Error('UpdateCheckerStruct._pull: Not implemented');
   }
   protected static _triggerRestart(_onFailure: (error: string) => void): void | Promise<void> {

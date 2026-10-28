@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
   <link rel="stylesheet" href="dog.css?v=20261026e" />
-  <link rel="stylesheet" href="styles.css?v=20261028credit" />
+  <link rel="stylesheet" href="styles.css?v=20261028force" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -1182,7 +1182,16 @@
     <p id="promptCacheError" role="alert"></p>
     <div class="prompt-cache-actions"><button type="button" id="promptCacheCancel"></button><button type="button" id="promptCacheConfirm"></button></div>
   </dialog>
-  <script src="trans.js?v=20261028update19"></script>
+  <dialog id="updateConflictModal" class="update-conflict-modal" aria-labelledby="updConflictTitle" aria-describedby="updConflictNote">
+    <h3 id="updConflictTitle"></h3>
+    <p id="updConflictNote"></p>
+    <div class="update-conflict-actions">
+      <button type="button" id="updConflictCancel" autofocus></button>
+      <button type="button" id="updConflictForce"></button>
+    </div>
+  </dialog>
+
+  <script src="trans.js?v=20261028force"></script>
   <script src="workspace.js?v=20260825a"></script>
   <script src="rootwizard.js?v=20260804a"></script>
   <script src="health.js?v=20260911a"></script>
@@ -1203,6 +1212,6 @@
   <script src="prompt-cache.js?v=20261012e"></script>
   <script src="cost-optimization.js?v=20261015a"></script>
   <script src="session-limit.js?v=20261016c"></script>
-  <script src="app.js?v=20261028update"></script>
+  <script src="app.js?v=20261028force"></script>
 </body>
 </html>
