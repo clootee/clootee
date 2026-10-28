@@ -44,6 +44,8 @@ export class AuthManagerStruct {
     '/toolchain/install',
     // 一键开始：领取 Clootee 默认服务商的设备令牌并切过去
     '/console/activate',
+    '/console/login/start',
+    '/console/login/poll',
     '/console/status',
   ];
 

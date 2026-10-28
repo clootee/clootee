@@ -160,7 +160,7 @@ function renderOnboardQuick() {
 
 function formatUsd(micro) {
   const usd = Number(micro || 0) / 1e6;
-  return currentLang() === 'zh' ? `$${usd.toFixed(2)}（约 ¥${(usd * 7.2).toFixed(2)}）` : `$${usd.toFixed(2)}`;
+  return new Intl.NumberFormat(currentLang(),{style:'currency',currency:'CNY'}).format(usd);
 }
 
 async function runQuickStart() {
@@ -185,7 +185,11 @@ async function runQuickStart() {
     // ② 领体验额度 + 两个引擎都切到 clootee
     if (q.stage === 1) {
       let st;
-      try { st = await api('/api/console/activate', {}); }
+      try {
+        const status=await api('/api/console/status');
+        if(!status.registered||status.error)await Clootee.signIn();
+        st = await api('/api/console/activate', {});
+      }
       catch (e) { throw new Error(`${T('obQuickFailNet')}\n${e.message || ''}`); }
       q.grantedMicro = st && st.balanceMicro;
       stageDone();
@@ -540,6 +544,7 @@ async function onboardNext() {
     return;
   }
   // 第 5 步：原版 Claude 走登录，第三方走 API Key
+  if (Onboard.provider === 'clootee') { await onboardFinish(''); return; }
   if (onboardNeedsLogin()) { await onboardFinish(''); return; }
   const key = ($('onboardKey').value || '').trim();
   if (!key) { $('onboardKeyMsg').textContent = T('obNeedKeyOrOfficial'); return; }
@@ -558,6 +563,10 @@ async function onboardFinish(key) {
   btn.disabled = true;
   btn.textContent = T('obSaving');
   try {
+    if (Onboard.provider === 'clootee') {
+      const status=await api('/api/console/status');
+      if(!status.registered||status.error)await Clootee.signIn();
+    }
     await api('/api/engine/config', {
       engine: Onboard.engine,
       provider: Onboard.provider,

@@ -18,6 +18,28 @@ import { ErrorHandler } from '../helper/ErrorHandler';
 const TIMEOUT_MS = 15_000;
 
 export class ConsoleAccount extends ConsoleAccountStruct {
+  private static _loginRequests = new Map<string,{deviceCode:string;expires:number}>();
+  protected static async _beginLogin() {
+    const result = await this._call('POST','/api/device/start','',{name:`Clootee · ${os.hostname()}`.slice(0,60)});
+    if (!result.device_code || !/^[0-9]{8}$/.test(String(result.user_code))) throw new Error('ConsoleAccount: invalid login response');
+    for (const [key,value] of this._loginRequests) if(value.expires<Date.now()) this._loginRequests.delete(key);
+    if (this._loginRequests.size>=10) throw new Error('ConsoleAccount: too many pending logins');
+    const loginId=crypto.randomBytes(24).toString('base64url');
+    this._loginRequests.set(loginId,{deviceCode:String(result.device_code),expires:Date.now()+600000});
+    return {loginId,url:`${CLOOTEE_CONSOLE_BASE}/connect?user_code=${encodeURIComponent(result.user_code)}`,userCode:String(result.user_code)};
+  }
+  protected static async _finishLogin(loginId:string) {
+    const request=this._loginRequests.get(loginId);
+    if(!request||request.expires<Date.now()) throw new Error('ConsoleAccount: login expired');
+    const result=await this._call('POST','/api/device/token','',{device_code:request.deviceCode});
+    if(result.pending)return {pending:true};
+    if(!/^ck-[A-Za-z0-9_-]{20,128}$/.test(String(result.token)))throw new Error('ConsoleAccount: invalid login token');
+    const record=this._readRecord();
+    this._writeRecord({...record,token:String(result.token)});
+    this._syncEngines(String(result.token));
+    this._loginRequests.delete(loginId);
+    return {pending:false};
+  }
   protected static _readRecord(): ConsoleRecord {
     let rec: Partial<ConsoleRecord> = {};
     try {
@@ -36,14 +58,6 @@ export class ConsoleAccount extends ConsoleAccountStruct {
   protected static _writeRecord(rec: ConsoleRecord): void {
     fs.mkdirSync(Paths.DATA_ROOT, { recursive: true });
     fs.writeFileSync(Paths.CONSOLE_FILE, JSON.stringify(rec, null, 2), { encoding: 'utf8', mode: 0o600 });
-  }
-
-  protected static async _register(installId: string): Promise<string> {
-    const r = await this._call('POST', '/api/v1/devices', '', { installId, name: `Clootee · ${os.hostname()}`.slice(0, 60) });
-    if (!r.token || !String(r.token).startsWith('ck-'))
-      throw new Error(`ConsoleAccount._register: console 没有返回有效令牌 token=${String(r.token).slice(0, 6)}`);
-    Logger.info('ConsoleAccount', `device registered, granted=${r.grantedMicro} reused=${r.reused}`);
-    return String(r.token);
   }
 
   protected static async _fetchStatus(token: string, active: boolean): Promise<ConsoleStatus> {
@@ -105,11 +119,8 @@ export class ConsoleAccount extends ConsoleAccountStruct {
     } catch (e: any) {
       if (e && e.status === 401) {
         const rec = this._readRecord();
-        const fresh = await this._register(rec.installId);
-        this._writeRecord({ installId: rec.installId, token: fresh });
-        this._syncEngines(fresh);
-        Logger.warn('ConsoleAccount', 'device token was rejected, re-registered and synced engines');
-        return this._call(method, p, fresh);
+        this._writeRecord({ installId: rec.installId, token: '' });
+        throw new Error('CLOOTEE_LOGIN_REQUIRED');
       }
       throw e;
     }

@@ -46,10 +46,13 @@ export class ConsoleAccountStruct {
   static async ensureToken(): Promise<string> {
     const rec = this._readRecord();
     if (rec.token) return rec.token;
-    const token = await this._register(rec.installId);
-    this._writeRecord({ installId: rec.installId, token });
-    return token;
+    throw new Error('CLOOTEE_LOGIN_REQUIRED');
   }
+
+  static async beginLogin(): Promise<{loginId:string;url:string;userCode:string}> { return this._beginLogin(); }
+  static async finishLogin(loginId:string): Promise<{pending:boolean}> { return this._finishLogin(loginId); }
+  protected static _beginLogin(): Promise<{loginId:string;url:string;userCode:string}> { throw new Error('Not implemented'); }
+  protected static _finishLogin(_loginId:string): Promise<{pending:boolean}> { throw new Error('Not implemented'); }
 
   // 余额与状态（前端顶部的余额徽章、额度耗尽弹层都读这个）
   static async status(): Promise<ConsoleStatus> {
@@ -102,9 +105,6 @@ export class ConsoleAccountStruct {
     throw new Error('Not implemented');
   }
   protected static _writeRecord(_rec: ConsoleRecord): void {
-    throw new Error('Not implemented');
-  }
-  protected static _register(_installId: string): Promise<string> {
     throw new Error('Not implemented');
   }
   protected static _fetchStatus(_token: string, _active: boolean): Promise<ConsoleStatus> {

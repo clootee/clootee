@@ -102,7 +102,7 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
     anthropicBase: CLOOTEE_CONSOLE_BASE,
     chatBase: `${CLOOTEE_CONSOLE_BASE}/v1`,
     modelsUrl: `${CLOOTEE_CONSOLE_BASE}/v1/models`,
-    label: 'Clootee（默认，免注册）',
+    label: 'Clootee',
     signupUrl: CLOOTEE_CONSOLE_BASE,
     docsUrl: CLOOTEE_CONSOLE_BASE,
     note: '开箱即用：DeepSeek Flash / Pro、MiniMax M3，按上游原价计费，新用户送体验额度',

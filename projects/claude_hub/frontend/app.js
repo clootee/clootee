@@ -3163,13 +3163,30 @@ const ApiBill = {
 // 只是一个普通服务商的「账户视图」：数据都来自 console.clootee.com（经后端 /api/console/* 转述），
 // 不用 clootee 时整个模块静默（徽章不显示、不发任何请求）。
 const Clootee = {
+  async signIn() {
+    const login=await api('/api/console/login/start',{});
+    const box=document.createElement('div');
+    box.className='login-overlay';
+    box.innerHTML=`<div class="onboard-card" style="max-width:460px"><h2>${escapeHtml(T('clooteeLoginTitle'))}</h2><p>${escapeHtml(T('clooteeLoginBody'))}</p><p><b>${escapeHtml(login.userCode)}</b></p><p><a class="primary" href="${escapeHtml(login.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(T('clooteeLoginOpen'))} ↗</a></p><button type="button" data-cancel>${escapeHtml(T('clooteeLoginCancel'))}</button><p data-error></p></div>`;
+    document.body.appendChild(box);
+    let cancelled=false;box.querySelector('[data-cancel]').onclick=()=>{cancelled=true;box.remove();};
+    try {
+      const deadline=Date.now()+600000;
+      while(!cancelled&&Date.now()<deadline){
+        await new Promise(resolve=>setTimeout(resolve,5000));
+        if(cancelled)break;
+        const state=await api('/api/console/login/poll',{loginId:login.loginId});
+        if(!state.pending)return;
+      }
+      throw new Error(T('clooteeLoginExpired'));
+    } finally {box.remove();}
+  },
   st: null,          // /api/console/status 的结果
   turns: {},         // taskId → { costMicro, calls, balanceMicro } | 'loading' | 'fail'
   usd(micro, fine) {
     const v = Number(micro || 0) / 1e6;
     // fine：小于 $1 显示 4 位小数，否则一次几厘钱的消耗在数字上根本看不出变化
-    const s = fine && v > 0 && v < 1 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`;
-    return currentLang() === 'zh' && !fine ? `${s}（约 ¥${(v * 7.2).toFixed(2)}）` : s;
+    return new Intl.NumberFormat(currentLang(),{style:'currency',currency:'CNY',minimumFractionDigits:fine?4:2,maximumFractionDigits:fine?4:2}).format(v);
   },
   active() { return !!(this.st && this.st.active && this.st.registered); },
   async refresh() {
@@ -8779,6 +8796,10 @@ async function saveEngineProvider(engine) {
     return { msg: T('modelPickFirst') };
   }
   try {
+    if (provider === 'clootee') {
+      const status=await api('/api/console/status');
+      if(!status.registered||status.error)await Clootee.signIn();
+    }
     await api('/api/engine/config', {
       engine, provider, apiKey: u.key.value.trim(), model,
       effort: u.effort ? u.effort.value : '',
