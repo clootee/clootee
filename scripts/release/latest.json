@@ -1,9 +1,9 @@
 {
-  "version": "3.1.16",
-  "sourceCommit": "2b36a67",
-  "file": "clootee-3.1.16.zip",
-  "bytes": 4465632,
-  "sha256": "d07f5867200303fce4d0ea2cdef6036ed9bf64300052682ef785864e2d0d87f0",
-  "url": "https://devok-1256047633.cos.na-siliconvalley.myqcloud.com/clootee/clootee-3.1.16.zip",
+  "version": "3.1.17",
+  "sourceCommit": "3aa7e93",
+  "file": "clootee-3.1.17.zip",
+  "bytes": 4466284,
+  "sha256": "a8e9384031821c6cf37f994f2b3bd5f6e0b645c6a3293d6899f4873a8f92e520",
+  "url": "https://devok-1256047633.cos.na-siliconvalley.myqcloud.com/clootee/clootee-3.1.17.zip",
   "latestUrl": "https://devok-1256047633.cos.na-siliconvalley.myqcloud.com/clootee/clootee-latest.zip"
 }
