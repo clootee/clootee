@@ -20,7 +20,7 @@ const TIMEOUT_MS = 15_000;
 export class ConsoleAccount extends ConsoleAccountStruct {
   private static _loginRequests = new Map<string,{deviceCode:string;expires:number}>();
   protected static async _beginLogin() {
-    const result = await this._call('POST','/api/device/start','',{name:`Clootee · ${os.hostname()}`.slice(0,60)});
+    const result = await this._call('POST','/api/device/start','',{name:`Clootee · ${os.hostname()}`.slice(0,60),previousToken:this._readRecord().token});
     if (!result.device_code || !/^[0-9]{8}$/.test(String(result.user_code))) throw new Error('ConsoleAccount: invalid login response');
     for (const [key,value] of this._loginRequests) if(value.expires<Date.now()) this._loginRequests.delete(key);
     if (this._loginRequests.size>=10) throw new Error('ConsoleAccount: too many pending logins');
