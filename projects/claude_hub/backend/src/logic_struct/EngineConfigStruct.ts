@@ -105,7 +105,7 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
     label: 'Clootee（邮箱登录）',
     signupUrl: CLOOTEE_CONSOLE_BASE,
     docsUrl: CLOOTEE_CONSOLE_BASE,
-    note: '邮箱登录后领取约 ¥5 体验额度；DeepSeek Flash 按官方原价计费',
+    note: '邮箱登录后领取$0.50 体验额度；DeepSeek Flash 按官方原价计费',
     recommended: true,
     // 三个模型都是 1M 上下文（实测 Claude Code 不认识这些模型名时会按 200K 截断并告警）
     extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000' },

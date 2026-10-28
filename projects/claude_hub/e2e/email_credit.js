@@ -20,7 +20,7 @@ const assert=require('node:assert/strict');
  `});
  await page.addScriptTag({path:'projects/claude_hub/frontend/onboard.js'});
  await page.evaluate(()=>{setLang('zh');renderOnboard();});
- assert.match(await page.locator('#onboardSub').innerText(),/邮箱登录.*¥5/);
+ assert.match(await page.locator('#onboardSub').innerText(),/邮箱登录.*\$0\.50/);
  assert.equal(await page.locator('#onboardSkip').innerText(),'使用自己的供应商');
  await page.evaluate(()=>runQuickStart());
  assert.equal(await page.locator('#onboardBody a').getAttribute('target'),'_blank');
@@ -42,6 +42,6 @@ const assert=require('node:assert/strict');
  assert.match(await page.locator('#onboardBody').innerText(),/HTTP 404/);
  assert.doesNotMatch(await page.locator('#onboardBody').innerText(),/Check your network/);
  assert.equal(await page.locator('#onboardSkip').isEnabled(),true);
- console.log('PASS: bilingual email/¥5 disclosure, explicit own-provider path, external sign-in link/code, pending gate, authorization resume, installation/settings completion, actionable errors.');
+ console.log('PASS: bilingual email/$0.50 disclosure, explicit own-provider path, external sign-in link/code, pending gate, authorization resume, installation/settings completion, actionable errors.');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

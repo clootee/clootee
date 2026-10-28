@@ -454,12 +454,12 @@ const DICT = {
   // ── 一键开始（默认引导）──
   obQuickTitle: { en: 'Welcome to Clootee', zh: '欢迎使用 Clootee' },
   obQuickSub: {
-    en: 'Sign in with your email to claim about ¥5 in starter credit. Clootee offers DeepSeek Flash at its official price, with no markup. You can also use your own provider.',
-    zh: '邮箱登录后领取约 ¥5 体验额度。Clootee 云端 DeepSeek Flash 与官方价格一致，不加价；也可以直接使用自己的供应商。',
+    en: 'Sign in with your email to claim $0.50 in starter credit. Clootee offers DeepSeek Flash at its official price, with no markup. You can also use your own provider.',
+    zh: '邮箱登录后领取 $0.50 体验额度。Clootee 云端 DeepSeek Flash 与官方价格一致，不加价；也可以直接使用自己的供应商。',
   },
   obQuickStart: { en: 'Sign in with email & claim credit', zh: '邮箱登录，领取体验额度' },
   obEmailOpen: { en: 'Open Clootee to sign in with email', zh: '打开 Clootee，使用邮箱登录' },
-  obEmailWait: { en: 'Sign in with your email in the new page, then approve this computer. Clootee will continue automatically. New accounts receive about ¥5 once; signing in again does not grant more credit.', zh: '在新页面用邮箱登录，再确认授权本机。完成后这里会自动继续。新账号可领取约 ¥5，重复登录不会重复发放。' },
+  obEmailWait: { en: 'Sign in with your email in the new page, then approve this computer. Clootee will continue automatically. Verified email accounts receive $0.50 once, including existing accounts that have not received a grant; signing in again does not grant more credit.', zh: '在新页面用邮箱登录，再确认授权本机。完成后这里会自动继续。新老邮箱账号统一赠送 $0.50，未领取的老账号也会补发，重复登录不会重复发放。' },
   obEmailCode: { en: 'Authorization code:', zh: '本机授权码：' },
   obEmailCheck: { en: 'Check authorization', zh: '检查授权状态' },
   obQuickRetry: { en: 'Retry', zh: '重试' },
@@ -480,7 +480,8 @@ const DICT = {
   clooteeKeyAuto: { en: 'Sign in with your email first, or enter your Clootee API key', zh: '请先邮箱登录授权，或填写 Clootee API Key' },
   clooteeBalance: { en: 'Clootee credit', zh: 'Clootee 余额' },
   clooteeTopup: { en: 'Top up / billing', zh: '充值 / 账单' },
-  clooteeOutTitle: { en: 'Your Clootee credit is used up', zh: 'Clootee 额度用完了' },
+  clooteeReserveHint: { en: 'Available credit cannot cover this request. Add credits, lower the maximum output tokens, or use your own provider.', zh: '当前可用额度不足以支付本次请求。请充值、调低最大输出 Token 数，或使用自己的供应商。' },
+  clooteeOutTitle: { en: 'Insufficient Clootee credit for this request', zh: 'Clootee 可用额度不足' },
   clooteeOutBody: {
     en: 'Top up to continue (sign in with your email, pay with WeChat or PayPal — it takes a minute), or switch to your own account / API key.',
     zh: '充值后即可继续（邮箱登录，微信或 PayPal 付款，一分钟搞定）；也可以改用自己的账号或 API Key。',

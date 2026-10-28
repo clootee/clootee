@@ -15,6 +15,7 @@ export interface ConsoleRecord {
 }
 
 export interface ConsoleStatus {
+  engines?: string[];
   registered: boolean;      // 是否已领到设备令牌
   active: boolean;          // 当前 Claude 引擎是否正在用 clootee
   balanceMicro: number | null; // 余额（微美元）；null = 没联网/没注册，查不到
@@ -49,7 +50,7 @@ export class ConsoleAccountStruct {
     this._writeRecord({ ...rec, token });
     this._useForEngine('claude', token);
     this._useForEngine('codex', token);
-    return { ...status, active: true };
+    return { ...status, active: true, engines: ['claude', 'codex'] };
   }
 
   static async ensureToken(): Promise<string> {
@@ -64,9 +65,11 @@ export class ConsoleAccountStruct {
   // 余额与状态（前端顶部的余额徽章、额度耗尽弹层都读这个）
   static async status(): Promise<ConsoleStatus> {
     const rec = this._readRecord();
-    const active = EngineConfig.get().claude.provider === 'clootee';
-    if (!rec.token) return { registered: false, active, balanceMicro: null, email: null, consoleUrl: this._consoleUrl() };
-    return this._fetchStatus(rec.token, active);
+    const cfg = EngineConfig.get();
+    const engines = ['claude', 'codex'].filter((engine) => cfg[engine as 'claude' | 'codex'].provider === 'clootee');
+    const active = engines.length > 0;
+    if (!rec.token) return { registered: false, active, engines, balanceMicro: null, email: null, consoleUrl: this._consoleUrl() };
+    return { ...await this._fetchStatus(rec.token, active), engines };
   }
 
   // 最近 N 笔用量（每一笔都能在 console 里点开看单价与 token 构成）

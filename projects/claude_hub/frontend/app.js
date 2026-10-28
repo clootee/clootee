@@ -2855,6 +2855,7 @@ function addAssistantGroupEl(unit) {
 
   div.appendChild(head);
   div.appendChild(body);
+  Clootee.attachCreditActions(div, unit.messages.map((m) => m.text || '').join('\n'));
 
   // 底部明确的「展开」按钮（图标 + 文字），让用户知道这条 AI 消息可点开
   const foot = document.createElement('div');
@@ -3175,6 +3176,12 @@ const Clootee = {
   async refresh() {
     try { this.st = await api('/api/console/status'); } catch { this.st = null; }
     this.renderBadge();
+    (State.session?.messages || []).filter((m) => m.role !== 'user').forEach((m) => {
+      const box = $('messages');
+      const node = box?.querySelector(`[data-mid="${CSS.escape(m.id)}"]`)
+        || [...(box?.querySelectorAll('[data-group-key]') || [])].find((g) => g.dataset.groupKey.split(':').includes(m.id));
+      if (node) this.attachCreditActions(node, m.text);
+    });
   },
   renderBadge() {
     const b = $('clooteeBal');
@@ -3187,16 +3194,31 @@ const Clootee = {
     b.classList.toggle('low', this.st.balanceMicro < 50000);
     b.onclick = () => this.openBilling();
   },
-  // 先同步开一个空窗口再填地址：异步拿到地址后再 window.open 会被浏览器当成弹窗拦掉
-  async openBilling() {
-    const w = window.open('about:blank', '_blank');
+  billingUrl() {
     try {
-      const r = await api('/api/console/link', {});
-      if (w) w.location.href = r.url; else location.href = r.url;
-    } catch (e) {
-      if (w) w.close();
-      alert(T('clooteeLinkFail') + (e.message || ''));
-    }
+      const url = new URL(this.st?.consoleUrl || 'https://console.clootee.com');
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid billing URL');
+      url.pathname = '/billing'; url.search = ''; url.hash = '';
+      url.searchParams.set('lang', currentLang());
+      return url.toString();
+    } catch { return 'https://console.clootee.com/billing'; }
+  },
+  openBilling() { window.open(this.billingUrl(), '_blank', 'noopener,noreferrer'); },
+  usesClootee() {
+    const engine = State.session?.engine || State.settings?.defaultEngine || 'claude';
+    return this.st?.engines ? this.st.engines.includes(engine) : this.active();
+  },
+  attachCreditActions(node, text) {
+    if (!this.usesClootee() || !this.isOutOfCredit(text) || node.querySelector('.credit-actions')) return;
+    const actions = document.createElement('div'); actions.className = 'credit-actions';
+    const hint = document.createElement('p'); hint.textContent = T('clooteeReserveHint');
+    const link = document.createElement('a');
+    link.href = this.billingUrl(); link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = T('clooteeTopupNow');
+    link.addEventListener('click', (e) => e.stopPropagation());
+    const own = document.createElement('button'); own.type = 'button'; own.textContent = T('clooteeUseOwn');
+    own.addEventListener('click', (e) => { e.stopPropagation(); openSettings(); });
+    actions.append(hint, link, own); node.appendChild(actions);
   },
   // 这一轮对应的任务：开始时间落在「本轮用户消息 ~ 下一轮用户消息」之间的最后一条。
   // 两端各放宽 5 秒：任务常比它的用户消息早几毫秒入账，结束端不收窄就会把下一轮的任务算进来
@@ -3229,7 +3251,7 @@ const Clootee = {
     return '';
   },
   onTaskEnd(task) {
-    if (!this.active()) return;
+    if (!this.usesClootee()) return;
     // 本会话最后一轮的缓存作废（任务刚结束，最后几个请求可能还没落账），稍等片刻再取
     setTimeout(() => {
       delete this.turns[task.id];
@@ -3240,11 +3262,12 @@ const Clootee = {
   },
   isOutOfCredit(text) {
     const s = String(text || '');
-    return s.includes('billing_error') || s.includes('balance is used up') || s.includes('余额已用完');
+    return /billing_error|insufficient[_ ](?:available[_ ])?(?:balance|credit)|balance is used up|余额(?:不足|已用完)|额度(?:不足|已用完)/i.test(s)
+      || /(?:API Error[:：]?\s*402|\b(?:HTTP|status)\s*[:=]?\s*402\b)/i.test(s);
   },
   // 额度用完：就地弹层，「充值」与「改用自己的服务商」两条路并列，都是一步到位
   showOutOfCredit() {
-    if ($('clooteeOut')) return;
+    if (!this.usesClootee() || $('clooteeOut')) return;
     const box = document.createElement('div');
     box.className = 'login-overlay';
     box.id = 'clooteeOut';
@@ -3381,6 +3404,7 @@ function noticeEl(item) {
   body.textContent = item.message;
   div.appendChild(head);
   div.appendChild(body);
+  Clootee.attachCreditActions(div, item.message);
   return div;
 }
 
@@ -3537,6 +3561,7 @@ function addMessageEl(m) {
 
   div.appendChild(head);
   div.appendChild(body);
+  if (m.role !== 'user') Clootee.attachCreditActions(div, m.text);
   // AI 消息：挂「🔍 过程」按钮，点开即在本条下方内联展开这一轮的完整轨迹
   if (m.role !== 'user') attachTraceBtn(div, m);
   // AI 内联图表：每个 <chart> 渲染为一张图表卡片（ECharts），追加在正文之后
