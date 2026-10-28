@@ -1,6 +1,6 @@
 // Clootee 默认服务商的本机账户（调度骨架）。
 // 松耦合：对引擎来说 clootee 只是一个普通的 Anthropic/OpenAI 兼容服务商（见 EngineConfigStruct.PROVIDERS.clootee），
-// 本模块只多做一件事——首次使用时向 console.clootee.com 匿名领一把设备令牌，当作 API Key 填进服务商槽。
+// 本模块只多做一件事——邮箱登录并批准本机后，由 console.clootee.com 颁发密钥填进服务商槽。
 // 余额、用量、充值都在 console.clootee.com，这里只转述，不计费、不存钱。
 // 具体 IO（读写 data/console.json、HTTP 调 console）由 Realize 实现。
 import { EngineConfig } from '../logic_realize/EngineConfig';
@@ -34,21 +34,31 @@ export interface ConsoleUsageItem {
 }
 
 export class ConsoleAccountStruct {
-  // 一键开通：领令牌 → 两个引擎都切到 clootee + 默认模型。重复调用是幂等的（令牌已领就直接用）。
-  static async activate(): Promise<ConsoleStatus> {
-    const token = await this.ensureToken();
-    this._useForEngine('claude', token);
-    this._useForEngine('codex', token);
-    return this.status();
+  // 只允许使用邮箱登录后由云端授权的密钥；不再匿名注册或补发额度。
+  static async startLogin(): Promise<{ userCode: string; url: string; expiresAt: number; interval: number }> {
+    return this._startLogin();
   }
 
-  // 拿到设备令牌：本机已有就用，没有就匿名注册一把（同时领取新用户体验额度）
+  static async activate(): Promise<ConsoleStatus | { pending: true }> {
+    const token = await this._completeLogin();
+    if (!token) return { pending: true };
+    const status = await this._fetchStatus(token, false);
+    if (status.error) throw new Error(status.error);
+    if (!status.email) throw new Error('Clootee: 请先使用邮箱登录 / Please sign in with your email first.');
+    const rec = this._readRecord();
+    this._writeRecord({ ...rec, token });
+    this._useForEngine('claude', token);
+    this._useForEngine('codex', token);
+    return { ...status, active: true };
+  }
+
   static async ensureToken(): Promise<string> {
     const rec = this._readRecord();
-    if (rec.token) return rec.token;
-    const token = await this._register(rec.installId);
-    this._writeRecord({ installId: rec.installId, token });
-    return token;
+    if (!rec.token) throw new Error('Clootee: 请先使用邮箱登录，或配置自己的供应商 / Sign in with your email, or use your own provider.');
+    const status = await this._fetchStatus(rec.token, false);
+    if (status.error) throw new Error(status.error);
+    if (!status.email) throw new Error('Clootee: 请先使用邮箱登录 / Please sign in with your email first.');
+    return rec.token;
   }
 
   // 余额与状态（前端顶部的余额徽章、额度耗尽弹层都读这个）
@@ -104,7 +114,10 @@ export class ConsoleAccountStruct {
   protected static _writeRecord(_rec: ConsoleRecord): void {
     throw new Error('Not implemented');
   }
-  protected static _register(_installId: string): Promise<string> {
+  protected static _startLogin(): Promise<{ userCode: string; url: string; expiresAt: number; interval: number }> {
+    throw new Error('Not implemented');
+  }
+  protected static _completeLogin(): Promise<string | null> {
     throw new Error('Not implemented');
   }
   protected static _fetchStatus(_token: string, _active: boolean): Promise<ConsoleStatus> {

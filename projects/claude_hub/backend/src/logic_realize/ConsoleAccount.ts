@@ -1,4 +1,4 @@
-// Clootee 默认服务商的本机账户（实现）：data/console.json 读写 + 调 console.clootee.com 的三个账户接口。
+// 本机账户：邮箱授权设备登录、私有凭据存储、余额与用量查询。
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import * as os from 'os';
@@ -9,7 +9,6 @@ import {
   ConsoleUsageItem,
 } from '../logic_struct/ConsoleAccountStruct';
 import { CLOOTEE_CONSOLE_BASE } from '../logic_struct/EngineConfigStruct';
-import { EngineConfig } from './EngineConfig';
 import { Paths } from '../paths';
 import { Session, Task } from '../models/Types';
 import { Logger } from '../helper/Logger';
@@ -38,12 +37,59 @@ export class ConsoleAccount extends ConsoleAccountStruct {
     fs.writeFileSync(Paths.CONSOLE_FILE, JSON.stringify(rec, null, 2), { encoding: 'utf8', mode: 0o600 });
   }
 
-  protected static async _register(installId: string): Promise<string> {
-    const r = await this._call('POST', '/api/v1/devices', '', { installId, name: `Clootee · ${os.hostname()}`.slice(0, 60) });
-    if (!r.token || !String(r.token).startsWith('ck-'))
-      throw new Error(`ConsoleAccount._register: console 没有返回有效令牌 token=${String(r.token).slice(0, 6)}`);
-    Logger.info('ConsoleAccount', `device registered, granted=${r.grantedMicro} reused=${r.reused}`);
-    return String(r.token);
+  private static _pending: { code: string; userCode: string; url: string; expiresAt: number; interval: number } | null = null;
+  private static _starting: Promise<{ userCode: string; url: string; expiresAt: number; interval: number }> | null = null;
+
+  protected static async _startLogin() {
+    if (this._pending && this._pending.expiresAt > Date.now()) {
+      const { userCode, url, expiresAt, interval } = this._pending;
+      return { userCode, url, expiresAt, interval };
+    }
+    if (this._starting) return this._starting;
+    this._starting = (async () => {
+      const rec = this._readRecord();
+      const r = await this._call('POST', '/api/device/start', '', { installId: rec.installId, name: `Clootee · ${os.hostname()}`.slice(0, 60) });
+      const url = new URL(r.verification_uri || '/connect', CLOOTEE_CONSOLE_BASE);
+      if (url.origin !== new URL(CLOOTEE_CONSOLE_BASE).origin || !r.device_code || !/^\d{8}$/.test(r.user_code)) {
+        throw new Error('Clootee: invalid device authorization response');
+      }
+      url.searchParams.set('user_code', r.user_code);
+      const pending = { code: String(r.device_code), userCode: String(r.user_code), url: url.toString(),
+        expiresAt: Date.now() + Math.min(Number(r.expires_in) || 600, 600) * 1000,
+        interval: Math.max(Number(r.interval) || 5, 5) };
+      this._pending = pending;
+      const { userCode, expiresAt, interval } = pending;
+      return { userCode, url: pending.url, expiresAt, interval };
+    })();
+    try { return await this._starting; }
+    finally { this._starting = null; }
+  }
+
+  private static _completing: Promise<string | null> | null = null;
+
+  protected static async _completeLogin(): Promise<string | null> {
+    if (this._completing) return this._completing;
+    this._completing = this._exchangeLogin();
+    try { return await this._completing; }
+    finally { this._completing = null; }
+  }
+
+  private static async _exchangeLogin(): Promise<string | null> {
+    const pending = this._pending;
+    if (!pending) return this.ensureToken();
+    if (pending.expiresAt <= Date.now()) {
+      this._pending = null;
+      throw new Error('Clootee: 授权已过期，请重新登录 / Authorization expired. Please sign in again.');
+    }
+    const r = await this._call('POST', '/api/device/token', '', { device_code: pending.code });
+    if (r.pending || r.error === 'authorization_pending') return null;
+    const token = r.token || r.access_token;
+    if (typeof token !== 'string' || !token.startsWith('ck-')) throw new Error('Clootee: invalid authorization token');
+    // 先持久化云端的一次性结果，避免随后的余额请求超时导致密钥丢失。
+    this._writeRecord({ ...this._readRecord(), token });
+    this._pending = null;
+    Logger.info('ConsoleAccount', 'email-authorized device connected');
+    return token;
   }
 
   protected static async _fetchStatus(token: string, active: boolean): Promise<ConsoleStatus> {
@@ -67,9 +113,7 @@ export class ConsoleAccount extends ConsoleAccountStruct {
   }
 
   protected static async _requestLinkUrl(token: string): Promise<string> {
-    const r = await this._authed('POST', '/api/v1/devices/link-code', token);
-    if (!r.url) throw new Error('ConsoleAccount._requestLinkUrl: console 没有返回绑定地址');
-    return String(r.url);
+    return `${CLOOTEE_CONSOLE_BASE}/billing`;
   }
 
   protected static _consoleUrl(): string {
@@ -97,34 +141,13 @@ export class ConsoleAccount extends ConsoleAccountStruct {
     };
   }
 
-  // 带令牌调用；令牌失效（401：在网页上被作废、或 console 换库）时用同一个 installId 重新领一把，
-  // 并把新令牌同步进正在使用 clootee 的引擎槽，然后重试一次。
+  // 已撤销的密钥必须重新邮箱授权，不能用安装 ID 绕过登录换取新密钥。
   private static async _authed(method: string, p: string, token: string): Promise<any> {
-    try {
-      return await this._call(method, p, token);
-    } catch (e: any) {
-      if (e && e.status === 401) {
-        const rec = this._readRecord();
-        const fresh = await this._register(rec.installId);
-        this._writeRecord({ installId: rec.installId, token: fresh });
-        this._syncEngines(fresh);
-        Logger.warn('ConsoleAccount', 'device token was rejected, re-registered and synced engines');
-        return this._call(method, p, fresh);
-      }
-      throw e;
-    }
-  }
-
-  private static _syncEngines(token: string): void {
-    const cfg = EngineConfig.get();
-    for (const engine of ['claude', 'codex'] as const) {
-      if (cfg[engine].provider !== 'clootee') continue;
-      EngineConfig.setProvider(engine, { ...cfg[engine], provider: 'clootee', apiKey: token });
-    }
+    return this._call(method, p, token);
   }
 
   private static async _call(method: string, p: string, token: string, body?: unknown): Promise<any> {
-    const headers: Record<string, string> = { accept: 'application/json' };
+    const headers: Record<string, string> = { accept: 'application/json', 'x-console-request': '1' };
     if (token) headers.authorization = `Bearer ${token}`;
     if (body !== undefined) headers['content-type'] = 'application/json';
     let res: Response;

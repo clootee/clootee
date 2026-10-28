@@ -1,6 +1,6 @@
 // 新手引导（首次进入）。默认是「一键开始」一屏：
-//   本机随机密码（免设）→ 领 Clootee 默认服务商的体验额度 → 后台装 Claude Code → 进主界面。
-//   不问网络、不问引擎、不问服务商；想用自己账号/别家服务商的点「高级」走下面的五步引导。
+//   本机随机密码（免设）→ 邮箱登录并授权 Clootee 后领取体验额度 → 后台装 Claude Code → 进主界面。
+//   不问网络、不问引擎；想用自己账号/别家服务商的点「高级」走下面的五步引导。
 // 高级引导五步：
 //   ① 语言 + 明暗主题  ② 网络体检  ③ 选执行引擎  ④ 选模型服务商
 //   ⑤ 原版（Claude / Codex）→ 登录账号；第三方 → 填 API Key 并选模型
@@ -17,6 +17,7 @@ const OB_STEPS = 5;
 // 强制引导：新用户必须逐项显式选择（语言/主题/引擎/服务商/模型），不提供「以后再说」。
 const Onboard = {
   mode: 'quick',         // 'quick' = 一键开始；'advanced' = 五步引导
+  quickTimer: null,
   quick: null,           // 一键开始的进度：{ stage, error, grantedMicro }
   step: 1,
   langSet: false,        // 语言是否已显式选择（浏览器默认值不算）
@@ -38,6 +39,7 @@ const Onboard = {
 };
 
 async function showOnboard() {
+  clearTimeout(Onboard.quickTimer);
   Onboard.mode = 'quick';
   Onboard.quick = null;
   Onboard.step = 1;
@@ -60,11 +62,12 @@ async function showOnboard() {
 }
 
 function hideOnboard() {
+  clearTimeout(Onboard.quickTimer);
   $('onboardOverlay').hidden = true;
 }
 
 function onboardProviderList() {
-  return Onboard.providers.filter((p) => p.id !== 'custom' && (!p.engines || p.engines.includes(Onboard.engine)));
+  return Onboard.providers.filter((p) => p.id !== 'custom' && p.id !== 'clootee' && (!p.engines || p.engines.includes(Onboard.engine)));
 }
 
 function onboardProviderMeta(id) {
@@ -128,7 +131,7 @@ function renderOnboardQuick() {
   let stages = '';
   if (q) {
     stages = '<ol class="ob-quick-stages">' + QUICK_STAGES.map((k, i) => {
-      const st = i < q.stage ? 'done' : i === q.stage ? (q.error ? 'err' : 'run') : 'todo';
+      const st = i < q.stage ? 'done' : i === q.stage ? (q.error ? 'err' : q.login ? 'wait' : 'run') : 'todo';
       const icon = st === 'done' ? '✓' : st === 'err' ? '✕' : st === 'run' ? '<span class="ob-spin"></span>' : '·';
       let extra = '';
       if (i === 1 && q.grantedMicro) extra = ` <span class="ob-badge ok">${T('obQuickGranted').replace('{v}', formatUsd(q.grantedMicro))}</span>`;
@@ -138,7 +141,15 @@ function renderOnboardQuick() {
     stages += `<div class="ob-inst-msg ob-pre" id="obQuickLog"${q.stage === 2 || q.error ? '' : ' hidden'}></div>`;
     if (q.error) stages += `<div class="ob-quick-err">${escapeHtml(q.error)}</div>`;
   }
-  $('onboardBody').innerHTML = langRow + stages;
+  let login = '';
+  if (q && q.stage === 1 && q.login) {
+    const loginUrl = new URL(q.login.url);
+    loginUrl.searchParams.set('lang', currentLang());
+    login = `<div class="ob-note" role="status">${T('obEmailWait')}</div>
+      <p><a href="${escapeHtml(loginUrl.toString())}" target="_blank" rel="noopener noreferrer">${T('obEmailOpen')}</a></p>
+      <p>${T('obEmailCode')} <strong>${escapeHtml(q.login.userCode)}</strong></p>`;
+  }
+  $('onboardBody').innerHTML = langRow + stages + login;
   $('onboardBody').querySelectorAll('[data-lang]').forEach((el) => {
     el.onclick = () => { if (Onboard.busy) return; setLang(el.dataset.lang); renderOnboard(); };
   });
@@ -150,6 +161,7 @@ function renderOnboardQuick() {
   adv.disabled = Onboard.busy;
   adv.onclick = () => {
     if (Onboard.busy) return;
+    clearTimeout(Onboard.quickTimer);
     Onboard.mode = 'advanced';
     Onboard.step = 1;
     adv.onclick = null;
@@ -159,7 +171,7 @@ function renderOnboardQuick() {
   $('onboardBack').hidden = true;
   const next = $('onboardNext');
   next.disabled = Onboard.busy;
-  next.textContent = q && q.error ? T('obQuickRetry') : T('obQuickStart');
+  next.textContent = q && q.error ? T('obQuickRetry') : q && q.login ? T('obEmailCheck') : T('obQuickStart');
 }
 
 function formatUsd(micro) {
@@ -168,9 +180,10 @@ function formatUsd(micro) {
 }
 
 async function runQuickStart() {
+  clearTimeout(Onboard.quickTimer);
   Onboard.busy = true;
   // 失败重试时从出错的那一步继续，已完成的不再重做
-  const q = Onboard.quick && Onboard.quick.error ? Onboard.quick : { stage: 0, error: '', grantedMicro: 0 };
+  const q = Onboard.quick || { stage: 0, error: '', grantedMicro: 0 };
   q.error = '';
   Onboard.quick = q;
   renderOnboard();
@@ -186,12 +199,32 @@ async function runQuickStart() {
       }
       stageDone();
     }
-    // ② 领体验额度 + 两个引擎都切到 clootee
+    // ② 邮箱登录并在云端确认授权；确认完成后才切换供应商。
     if (q.stage === 1) {
-      let st;
-      try { st = await api('/api/console/activate', {}); }
-      catch (e) { throw new Error(`${T('obQuickFailNet')}\n${e.message || ''}`); }
+      if (!q.login || q.login.expiresAt <= Date.now()) {
+        q.login = await api('/api/console/login', {});
+        const loginUrl = new URL(q.login.url);
+        loginUrl.searchParams.set('lang', currentLang());
+        q.login.url = loginUrl.toString();
+        Onboard.busy = false;
+        renderOnboard();
+        Onboard.quickTimer = setTimeout(() => {
+          if (Onboard.mode === 'quick' && Onboard.quick === q && !Onboard.busy) runQuickStart();
+        }, q.login.interval * 1000);
+        return;
+      }
+      const st = await api('/api/console/activate', {});
+      if (st.pending) {
+        Onboard.busy = false;
+        renderOnboard();
+        Onboard.quickTimer = setTimeout(() => {
+          if (Onboard.mode === 'quick' && Onboard.quick === q && !Onboard.busy) runQuickStart();
+        }, q.login.interval * 1000);
+        return;
+      }
+      if (Onboard.mode !== 'quick' || Onboard.quick !== q) return;
       q.grantedMicro = st && st.balanceMicro;
+      q.login = null;
       stageDone();
     }
     // ③ 装 Claude Code（已装就跳过）

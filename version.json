@@ -1,10 +1,10 @@
 {
-  "version": "3.1.13",
+  "version": "3.1.14",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-10-28",
   "notesI18n": {
-    "zh": "新手引导进入选择工具步骤后自动安装 Claude Code 和 Codex，实时显示进度，无需手动确认；失败可重试。",
-    "en": "Onboarding automatically installs missing Claude Code and Codex engines with live progress, without confirmation. Failed installations can be retried."
+    "zh": "Clootee 改为邮箱登录并授权本机后使用，取消匿名领取与失效密钥自动重领；也可直接配置自己的供应商。",
+    "en": "Clootee now requires email sign-in and device authorization. Anonymous activation and silent key renewal are removed; your own provider remains available."
   }
 }

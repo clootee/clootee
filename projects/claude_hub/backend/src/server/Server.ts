@@ -162,6 +162,9 @@ export class Server {
       this._ok(res, { providers: EngineConfig.providerList() }),
     );
     // ── Clootee 默认服务商（console.clootee.com）：一键开通 / 余额 / 用量 / 充值入口 ──
+    app.post('/api/console/login', (_req, res) =>
+      this._wrapAsync(res, 'console.login', () => ConsoleAccount.startLogin()),
+    );
     app.post('/api/console/activate', (_req, res) =>
       this._wrapAsync(res, 'console.activate', () => ConsoleAccount.activate()),
     );
