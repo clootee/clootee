@@ -10,36 +10,52 @@ const { FsHelper } = require('../backend/dist/helper/FsHelper');
 const app = fs.readFileSync(path.join(__dirname, '../frontend/app.js'), 'utf8');
 function segment(start, end) { return app.slice(app.indexOf(start), app.indexOf(end, app.indexOf(start))); }
 
-test('automatic folders: missing parent, retry, separate projects, unavailable base, invalid request', () => {
+test('automatic folders stay below home, increase numbers, preserve existing entries and deduplicate retries', () => {
+  const { Paths } = require('../backend/dist/paths');
+  const { EngineAccess } = require('../backend/dist/helper/EngineAccess');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-root-'));
-  const original = { base: FsHelper.preferredBase, home: FsHelper.home, ensure: RootManager.ensureRoot };
-  const roots = new Map();
-  FsHelper.preferredBase = () => path.join(dir, 'preferred');
+  const original = { base: FsHelper.preferredBase, home: FsHelper.home,
+    rootsFile: Paths.ROOTS_FILE, access: EngineAccess.ensureDir, mkdir: fs.mkdirSync };
+  FsHelper.preferredBase = () => { throw Error('must not inspect other drives'); };
   FsHelper.home = () => path.join(dir, 'home');
-  RootManager.ensureRoot = (target) => {
-    if (!roots.has(target)) roots.set(target, { id: String(roots.size + 1), path: target });
-    return roots.get(target);
-  };
+  Paths.ROOTS_FILE = path.join(dir, 'roots.json');
+  EngineAccess.ensureDir = () => {};
+  const parent = path.join(dir, 'home', 'projects');
   try {
     const first = RootManager.quickStart('11111111-1111-4111-8111-111111111111');
+    assert.equal(first.path, path.join(parent, 'project_1'));
     assert.ok(fs.statSync(first.path).isDirectory());
     fs.writeFileSync(path.join(first.path, 'keep.txt'), 'preserve me');
-    assert.equal(RootManager.quickStart('11111111-1111-4111-8111-111111111111'), first);
+    assert.deepEqual(RootManager.quickStart('11111111-1111-4111-8111-111111111111'), first);
     assert.equal(fs.readFileSync(path.join(first.path, 'keep.txt'), 'utf8'), 'preserve me');
     const second = RootManager.quickStart('22222222-2222-4222-8222-222222222222');
-    assert.notEqual(second.path, first.path);
+    assert.equal(second.path, path.join(parent, 'project_2'));
+    fs.writeFileSync(path.join(parent, 'project_5'), 'existing file');
+    const third = RootManager.quickStart('33333333-3333-4333-8333-333333333333');
+    assert.equal(third.path, path.join(parent, 'project_6'));
+    assert.equal(fs.readFileSync(path.join(parent, 'project_5'), 'utf8'), 'existing file');
+    // Another creator takes the next name after listing and before mkdir.
+    fs.mkdirSync = (target, ...args) => {
+      if (target === path.join(parent, 'project_7')) original.mkdir(target);
+      return original.mkdir(target, ...args);
+    };
+    const raced = RootManager.quickStart('44444444-4444-4444-8444-444444444444');
+    assert.equal(raced.path, path.join(parent, 'project_8'));
+    fs.mkdirSync = original.mkdir;
+    fs.symlinkSync(first.path, path.join(parent, 'project_10'));
+    assert.equal(RootManager.quickStart('55555555-5555-4555-8555-555555555555').path,
+      path.join(parent, 'project_11'));
+    assert.throws(() => RootManager.quickStart('../escape'), /invalid requestId/);
     const blocked = path.join(dir, 'blocked');
     fs.writeFileSync(blocked, 'not a directory');
-    FsHelper.preferredBase = () => blocked;
-    const fallback = RootManager.quickStart('33333333-3333-4333-8333-333333333333');
-    assert.ok(fallback.path.startsWith(path.join(dir, 'home', 'projects')));
-    assert.throws(() => RootManager.quickStart('../escape'), /invalid requestId/);
     FsHelper.home = () => blocked;
-    assert.throws(() => RootManager.quickStart('44444444-4444-4444-8444-444444444444'));
+    assert.throws(() => RootManager.quickStart('66666666-6666-4666-8666-666666666666'));
   } finally {
     FsHelper.preferredBase = original.base;
     FsHelper.home = original.home;
-    RootManager.ensureRoot = original.ensure;
+    Paths.ROOTS_FILE = original.rootsFile;
+    EngineAccess.ensureDir = original.access;
+    fs.mkdirSync = original.mkdir;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

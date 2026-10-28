@@ -80,30 +80,38 @@ export class RootManagerStruct {
     return this.addRoot(clean, target);
   }
 
-  // requestId 同时作为目录名的一部分：重试复用同一个目录，不覆盖其它项目。
+  // 自动目录只建在用户主目录的 projects 下；已有编号继续递增，requestId 用于重试去重。
   static quickStart(requestId: string): Root {
     if (!/^[a-f0-9-]{36}$/.test(requestId)) throw new Error('quickStart: invalid requestId');
-    const name = 'project_' + requestId.replace(/-/g, '');
-    const parents = [...new Set([
-      path.join(FsHelper.preferredBase(), 'projects'),
-      path.join(FsHelper.home(), 'projects'),
-    ])];
-    let lastError: unknown;
-    for (const parent of parents) {
-      const target = path.join(parent, name);
+    const parent = path.join(FsHelper.home(), 'projects');
+    const previous = this.listRoots().find((r) => r.quickStartRequestId === requestId);
+    if (previous && path.dirname(previous.path) === parent && fs.existsSync(previous.path)
+      && fs.statSync(previous.path).isDirectory()) return previous;
+    fs.mkdirSync(parent, { recursive: true });
+    fs.accessSync(parent, fs.constants.W_OK | fs.constants.X_OK);
+    let number = fs.readdirSync(parent).reduce((max, name) => {
+      const match = /^project_([0-9]+)$/.exec(name);
+      const value = match ? Number(match[1]) : 0;
+      return Number.isSafeInteger(value) ? Math.max(max, value) : max;
+    }, 0) + 1;
+    while (Number.isSafeInteger(number)) {
+      const target = path.join(parent, 'project_' + number);
       try {
-        fs.mkdirSync(parent, { recursive: true });
-        fs.accessSync(parent, fs.constants.W_OK | fs.constants.X_OK);
-        if (!fs.existsSync(target)) fs.mkdirSync(target);
-        if (!fs.statSync(target).isDirectory()) throw new Error('quickStart: target is not a directory');
-        fs.accessSync(target, fs.constants.W_OK | fs.constants.X_OK);
+        // 非递归 mkdir 原子占用名字；同名文件、目录、符号链接都视为已占用。
+        fs.mkdirSync(target);
       } catch (error) {
-        lastError = error;
-        continue;
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          number++;
+          continue;
+        }
+        throw error;
       }
-      return this.ensureRoot(target, false);
+      const root = this.ensureRoot(target, false);
+      root.quickStartRequestId = requestId;
+      JsonStore.write(Paths.ROOTS_FILE, this.listRoots().map((r) => r.id === root.id ? root : r));
+      return root;
     }
-    throw lastError || new Error('quickStart: no writable project directory');
+    throw new Error('quickStart: project numbering exhausted');
   }
 
   private static _baseName(p: string): string {
