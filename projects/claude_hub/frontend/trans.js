@@ -1021,7 +1021,7 @@ const DICT = {
   paneUpdateUpToDate: { en: 'Up to date', zh: '已是最新' },
   paneUpdateUnknown: { en: 'Not checked yet', zh: '尚未检测' },
   updateCheckBtn: { en: 'Check for updates', zh: '检查更新' },
-  updateCheckingNow: { en: 'Checking for updates…', zh: '正在检测更新…' },
+  updateCheckingNow: { en: 'Checking for a new version…', zh: '正在检查是否有新版本…' },
   updateCheckFail: { en: 'Check failed: {err}', zh: '检测失败：{err}' },
   updateCurrentLabel: { en: 'Current version', zh: '当前版本' },
   updateLatestLabel: { en: 'Latest version', zh: '最新版本' },

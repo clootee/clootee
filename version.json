@@ -1,10 +1,10 @@
 {
-  "version": "3.1.18",
+  "version": "3.1.19",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-10-28",
   "notesI18n": {
-    "zh": "?? Windows ???????????? Node ????????????Windows ????????????????",
-    "en": "Fix Windows automatic updates and restarts: Node supervises restart after building, failures allow retry, and the Windows launcher always stops the previous instance before starting."
+    "zh": "微调检查更新时的提示文案，用于验证从 3.1.18 自动更新到新版本的流程。",
+    "en": "Polish the update-check message to verify automatic updates from version 3.1.18."
   }
 }
