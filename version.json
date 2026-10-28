@@ -1,10 +1,10 @@
 {
-  "version": "3.1.19",
+  "version": "3.1.20",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-10-28",
   "notesI18n": {
-    "zh": "微调检查更新时的提示文案，用于验证从 3.1.18 自动更新到新版本的流程。",
-    "en": "Polish the update-check message to verify automatic updates from version 3.1.18."
+    "zh": "Linux 和 macOS 启动时统一先停止旧实例，再检查环境并启动；停止失败立即中止，支持识别尚未监听端口的旧实例，避免误停其他程序。",
+    "en": "Linux and macOS launchers now stop the previous instance before setup and startup, abort on stop failures, detect instances still booting, and avoid stopping unrelated applications."
   }
 }

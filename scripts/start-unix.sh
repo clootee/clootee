@@ -3,16 +3,17 @@
 #  claude-hub 启动器 —— macOS / Linux 实现（与 start-windows.bat 对应）
 #  不要直接跑这个文件：请双击仓库根目录的 Mac_Start.command，
 #  或在 Linux 上执行 ./Linux_Start.sh。
+#    0) 每次先停止当前安装的旧实例；停止失败立即中止
 #    1) 解析 Node（out_end 内置便携版 → 系统 Node 18+ → 自动下载）
 #    2) 启动前自检：缺依赖就装、dist 过期就重编译（与 install.sh 同一套逻辑，
 #       见 backend/scripts/setup.js）
-#    3) 端口被占用时自动先跑 stop-unix.sh 释放端口，再继续启动；释放不掉才报错
+#    3) 确认端口已释放，再继续启动
 #    4) 运行**编译产物** dist —— TypeScript 只在构建时需要，运行期不需要
 # =============================================================================
 set -u
 
-SELF="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$SELF/.." && pwd)"
+SELF="$(cd "$(dirname "$0")" && pwd -P)"
+ROOT="$(cd "$SELF/.." && pwd -P)"
 HUB="$ROOT/projects/claude_hub"
 PORT=8970
 
@@ -25,6 +26,10 @@ hold() {
   fi
 }
 die() { echo; echo "[ERROR] $*"; hold; exit 1; }
+
+echo
+echo "==> 启动前先停止旧实例 / Stopping the previous instance before starting ..."
+bash "$SELF/stop-unix.sh" || die "旧实例未能停止，已取消启动 / Failed to stop the previous instance; startup aborted."
 
 # shellcheck source=scripts/node-env.sh
 . "$ROOT/scripts/node-env.sh" || { hold; exit 1; }
@@ -39,26 +44,17 @@ if [ "$SETUP" -eq 1 ]; then
 fi
 
 # ============================================================
-#  端口占用检查：被占用就先跑一遍 stop-unix.sh 释放端口，然后继续启动；
-#  只有释放不掉时才停下报错。
+#  停止后再次检查端口；仍被占用时禁止继续启动。
 # ============================================================
 port_pid() {
   if command -v lsof >/dev/null 2>&1; then
     lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1 || true
+  elif command -v ss >/dev/null 2>&1; then
+    ss -lptnH "sport = :$PORT" 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1 || true
   fi
 }
 
 PORTPID="$(port_pid)"
-WASBUSY=""
-if [ -n "$PORTPID" ]; then
-  WASBUSY=1
-  echo
-  echo "[warn] 端口 $PORT 已被占用（PID $PORTPID），先执行停止脚本释放 / port in use, running the stop script first ..."
-  echo
-  bash "$SELF/stop-unix.sh" || true
-  echo
-  PORTPID="$(port_pid)"
-fi
 if [ -n "$PORTPID" ]; then
   echo
   echo "[ERROR] 执行停止脚本后端口 $PORT 仍被占用 / port $PORT is STILL in use."
@@ -73,7 +69,6 @@ if [ -n "$PORTPID" ]; then
   hold
   exit 1
 fi
-[ -z "$WASBUSY" ] || echo "    [OK] 端口 $PORT 已释放，继续启动 / port freed, continuing startup"
 
 cd "$HUB/backend" || die "找不到目录 / missing directory: $HUB/backend"
 
@@ -101,9 +96,9 @@ echo "==> 首次打开会有引导：设置访问密码 -> 选引擎 -> 选模�
 
 if [ "$SETUP" -eq 2 ]; then
   echo "[warn] 编译产物不可用，降级用 ts-node 直跑源码 / running from source via ts-node"
-  "$NODE_EXE" node_modules/ts-node/dist/bin.js src/index.ts
+  "$NODE_EXE" "$HUB/backend/node_modules/ts-node/dist/bin.js" "$HUB/backend/src/index.ts"
 else
-  "$NODE_EXE" dist/index.js
+  "$NODE_EXE" "$HUB/backend/dist/index.js"
 fi
 EXITCODE=$?
 
