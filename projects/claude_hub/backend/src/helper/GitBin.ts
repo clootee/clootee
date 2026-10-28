@@ -14,7 +14,7 @@ export class GitBin {
     if (!bin) {
       throw new Error(
         'GitBin: 未找到 git（环境变量 GIT_BIN、系统 PATH、out_end 内置便携版都没有）。' +
-          '请安装 git，或在项目根目录运行 install 脚本时加 --with-git 自动下载便携版。',
+          '请重新运行启动脚本自动安装 git，或手动安装后重启软件。',
       );
     }
     return bin;

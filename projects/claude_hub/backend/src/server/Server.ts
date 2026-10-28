@@ -54,7 +54,7 @@ export class Server {
 
     // ── 首启密码状态（无需鉴权）：needsSetup=true 表示尚未设定密码，前端引导用户创建 ──
     app.get('/api/auth/status', (_req, res) =>
-      this._wrap(res, 'auth.status', () => ({ needsSetup: AuthManager.needsSetup() })),
+      this._wrap(res, 'auth.status', () => ({ needsSetup: AuthManager.needsSetup(), instance: `${process.pid}:${SERVER_STARTED_AT}` })),
     );
     // ── 首次设定密码（仅在尚未设定时可用，无需鉴权） ──
     app.post('/api/auth/setup', (req, res) =>
@@ -288,6 +288,7 @@ export class Server {
     app.get('/api/update/check', (req, res) =>
       this._wrapAsync(res, 'update.check', () => UpdateChecker.check(String(req.query.lang || ''))),
     );
+    app.get('/api/update/status', (_req, res) => this._ok(res, UpdateChecker.status()));
     app.post('/api/update/apply', (_req, res) =>
       this._wrapAsync(res, 'update.apply', () =>
         UpdateChecker.apply((line) => EventBus.broadcast({ kind: 'updateApply', line })),

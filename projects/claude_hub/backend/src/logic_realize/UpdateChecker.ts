@@ -16,6 +16,7 @@ import { PackageInfo } from '../helper/PackageInfo';
 import { SemVer } from '../helper/SemVer';
 import { Paths } from '../paths';
 import { Logger } from '../helper/Logger';
+import { ErrorHandler } from '../helper/ErrorHandler';
 
 const GITHUB_API_TIMEOUT_MS = 10000;
 const MANIFEST_FILE = 'version.json';
@@ -191,7 +192,7 @@ export class UpdateChecker extends UpdateCheckerStruct {
         return;
       }
       const child = spawn(git, ['pull', '--ff-only'], {
-        cwd: Paths.PROJECT_ROOT, windowsHide: true, env,
+        cwd: Paths.PROJECT_ROOT, windowsHide: true, env, timeout: 180000,
       });
       let out = '';
       const cap = (c: Buffer) => {
@@ -206,8 +207,12 @@ export class UpdateChecker extends UpdateCheckerStruct {
       child.stdout?.on('data', cap);
       child.stderr?.on('data', cap);
       child.on('error', (e) => resolve({ ok: false, output: `[git pull] FAILED: ${e.message}` }));
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
         Logger.info('UpdateChecker', 'git pull done', { code });
+        if (signal) {
+          resolve({ ok: false, output: `${out}\nGit pull interrupted (${signal}); please retry.` });
+          return;
+        }
         if (code === 0) {
           resolve({ ok: true, output: out.trim() || 'ok' });
           return;
@@ -222,23 +227,49 @@ export class UpdateChecker extends UpdateCheckerStruct {
   }
 
   // Restart through the Windows background service; keep diagnostics on disk.
-  protected static _triggerRestart(): void {
+  protected static _triggerRestart(onFailure: (error: string) => void): Promise<void> {
     const isWin = process.platform === 'win32';
     const script = isWin
-      ? path.resolve(Paths.PROJECT_ROOT, '../../scripts/restart-update.ps1')
+      ? path.resolve(Paths.PROJECT_ROOT, '../../scripts/restart-update.js')
       : path.join(Paths.PROJECT_ROOT, 'restart.sh');
     fs.mkdirSync(Paths.LOGS_DIR, { recursive: true });
     const log = fs.openSync(path.join(Paths.LOGS_DIR, 'update-restart.log'), 'a');
+    fs.writeSync(log, `\n[${new Date().toISOString()}] Launching restart for server ${process.pid}: ${script}\n`);
     Logger.info('UpdateChecker', 'trigger restart', { script });
     const child = isWin
-      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
-          '-File', script, '-NodeExe', process.execPath, '-ServerPid', String(process.pid), '-Port', String(process.env.PORT || 8970)], {
-          cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log], windowsHide: true,
+      ? spawn(process.execPath, [script, String(process.env.PORT || 8970)], {
+          cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log, 'ipc'], windowsHide: true,
         })
       : spawn('bash', [script], { cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log] });
     fs.closeSync(log);
-    child.on('error', (e) => Logger.error('UpdateChecker', 'restart launch failed', e));
-    child.unref();
+    return new Promise((resolve, reject) => {
+      if (isWin) child.on('message', (message: any) => {
+        if (message?.type !== 'ready-to-stop') return;
+        Logger.info('UpdateChecker', 'build complete; handing restart over to Node supervisor');
+        child.send({ type: 'stop-approved' }, (error) => {
+          if (error) { onFailure(ErrorHandler.handle(error, 'UpdateChecker.restartHandoff')); return; }
+          // Stop only this server. The independent supervisor survives and starts
+          // the new service; no WMI permissions or process-tree killing required.
+          setTimeout(() => process.exit(0), 300);
+        });
+      });
+      child.once('spawn', () => { child.unref(); resolve(); });
+      child.once('error', (e) => {
+        Logger.error('UpdateChecker', 'restart launch failed', e);
+        onFailure(e.message);
+        reject(e);
+      });
+      child.once('exit', (code, signal) => {
+        // A successful restart terminates this server. If we observe exit here,
+        // the old process survived and must allow a retry (even for exit 0).
+        let detail = '';
+        try { detail = fs.readFileSync(path.join(Paths.LOGS_DIR, 'update-restart.log'), 'utf8').slice(-3000); }
+        catch (e) { ErrorHandler.handle(e, 'UpdateChecker.restartLog'); }
+        const error = `Restart failed (exit=${code}, signal=${signal || ''}). ${detail}`;
+        Logger.error('UpdateChecker', error);
+        onFailure(error);
+      });
+    });
   }
 
   private static _parseLocalLog(raw: string): UpdateCommitInfo {

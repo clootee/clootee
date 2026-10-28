@@ -1,10 +1,10 @@
 {
-  "version": "3.1.17",
+  "version": "3.1.18",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-10-28",
   "notesI18n": {
-    "zh": "修复工作目录自动创建位置，新增项目统一放在用户主目录；保留邮箱授权和余额不足时的充值入口。",
-    "en": "Automatically created projects now stay under the user home directory. Includes email authorization and direct top-up links for insufficient credit."
+    "zh": "?? Windows ???????????? Node ????????????Windows ????????????????",
+    "en": "Fix Windows automatic updates and restarts: Node supervises restart after building, failures allow retry, and the Windows launcher always stops the previous instance before starting."
   }
 }

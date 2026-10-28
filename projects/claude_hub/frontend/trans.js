@@ -1038,6 +1038,7 @@ const DICT = {
   },
   updateApplying: { en: 'Updating, please do not close this page…', zh: '正在更新，请勿关闭此页面…' },
   updateApplyFail: { en: 'Update failed: {err}', zh: '更新失败：{err}' },
+  updateRestartTimeout: { en: 'Restart timed out. Check the update log before retrying.', zh: '等待重启超时，请检查更新日志后重试。' },
   updateApplyDone: {
     en: 'Update sent. The service is recompiling and restarting; this page will reconnect automatically.',
     zh: '更新已提交，服务正在重新编译并重启，页面会自动重新连接。',

@@ -6,6 +6,7 @@ title claude-hub
 REM ============================================================================
 REM  claude-hub launcher - Windows implementation
 REM  Do not run this directly: double-click Windows_Start.bat in the repo root.
+REM    0) always stop this installation first; abort if stopping fails
 REM    1) resolve Node (bundled portable -> system 18+ -> auto-download)
 REM    2) preflight: install/repair dependencies + rebuild backend\dist if stale
 REM       (same engine as install.bat - see backend\scripts\setup.js)
@@ -22,7 +23,6 @@ set "BACKEND=%HUB%\backend"
 set "RUNDIR=%HUB%\data\run"
 set "PORT=8970"
 set "PS1=%~dp0win-service.ps1"
-set "FREED="
 
 if not exist "%PS1%" (
   echo.
@@ -31,6 +31,11 @@ if not exist "%PS1%" (
   pause
   exit /b 1
 )
+
+echo.
+echo ==^> Stopping the previous instance before starting / 启动前先停止旧实例 ...
+call "%~dp0stop-windows.bat" --no-pause
+if errorlevel 1 goto :stopfail
 
 call "%ROOT%scripts\node-env.bat"
 if errorlevel 1 goto :fail
@@ -67,8 +72,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -Action start ^
 set "SVC=%ERRORLEVEL%"
 
 if "%SVC%"=="0"  goto :up
-if "%SVC%"=="10" goto :already
-if "%SVC%"=="12" goto :booting
+if "%SVC%"=="10" goto :startfail
+if "%SVC%"=="12" goto :startfail
 if "%SVC%"=="11" goto :foreign
 goto :startfail
 
@@ -89,52 +94,16 @@ ping -n 6 127.0.0.1 >nul
 exit /b 0
 
 REM ---------------------------------------------------------------------------
-:already
-echo.
-echo ==^> claude-hub 已经在运行 / is already running on http://localhost:%PORT%
-echo     没有重启它，正在打开的只是界面 / nothing was restarted, just opening the UI
-echo     停止服务请双击 / to stop it, double-click:  Windows_Stop.bat
-echo.
-start "" "http://localhost:%PORT%"
-ping -n 4 127.0.0.1 >nul
-exit /b 0
-
-REM ---------------------------------------------------------------------------
-REM  An instance is still booting (it holds the port but has not answered yet).
-REM  Wait for it instead of starting a second one.
-REM ---------------------------------------------------------------------------
-:booting
-echo.
-echo ==^> 上一个实例还在启动中，正在等它就绪 / an instance is still starting up, waiting ...
-set /a TRIES=0
-:bwait
-call :checkport
-if defined PORTPID goto :bready
-set /a TRIES+=1
-if %TRIES% GEQ 45 goto :startfail
-ping -n 2 127.0.0.1 >nul
-goto :bwait
-:bready
-echo     [OK] ready
-goto :up
-
-REM ---------------------------------------------------------------------------
 REM  The port is held by something that is NOT claude-hub (win-service.ps1 will
-REM  not kill a process it cannot prove belongs to this install). Free the port
-REM  the careful way, once, then retry. If it is still taken, stop and say so.
+REM  not kill a process it cannot prove belongs to this install). Stop was already
+REM  attempted; report the occupied port and abort without starting another copy.
 REM ---------------------------------------------------------------------------
 :foreign
 call :checkport
 echo.
 echo [warn] Port %PORT% is in use by a process that is not claude-hub ^(PID %PORTPID%^).
 for /f "tokens=1,2 delims=," %%a in ('tasklist /fi "PID eq %PORTPID%" /fo csv /nh 2^>nul') do echo        image = %%~a
-if defined FREED goto :portbusy
-echo.
-echo        Trying Windows_Stop.bat once to clear it ^(it also cleans up pm2^) ...
-echo.
-set "FREED=1"
-call "%~dp0stop-windows.bat" --no-pause
-goto :spawn
+goto :portbusy
 
 :portbusy
 echo.
@@ -150,6 +119,13 @@ pause
 exit /b 1
 
 REM ---------------------------------------------------------------------------
+:stopfail
+echo.
+echo [ERROR] Failed to stop the previous instance. Startup aborted.
+echo         旧实例未能停止，已取消启动。请检查停止服务时的错误信息。
+pause
+exit /b 1
+
 :startfail
 echo.
 echo [ERROR] claude-hub did not come up.

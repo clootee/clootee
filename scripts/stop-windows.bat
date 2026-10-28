@@ -58,6 +58,7 @@ if not exist "%PS1%" (
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -Action stop ^
   -WorkDir "%BACKEND%" -Entry "%BACKEND%\dist\index.js" -Port %PORT% -RunDir "%RUNDIR%"
+if errorlevel 1 goto :stopfailed
 
 REM ============================================================================
 REM  Step 3: verify. If something is listening again, a supervisor is respawning it.
@@ -79,6 +80,12 @@ echo.
 echo ==^> claude-hub 已停止 / stopped, port %PORT% is free
 if not defined NOPAUSE pause
 exit /b 0
+
+:stopfailed
+echo.
+echo [ERROR] Could not stop the background service. Startup must not continue.
+if not defined NOPAUSE pause
+exit /b 1
 
 REM ============================================================================
 REM  Fallback used only when win-service.ps1 is missing.

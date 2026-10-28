@@ -266,14 +266,19 @@ function Do-Start {
 
 function Do-Stop {
   $killed = 0
+  $stopTargets = New-Object 'System.Collections.Generic.HashSet[int]'
 
   # 1) the launcher process recorded at startup (verified before touching it)
   $pf = Read-PidFile
   if ($pf) {
     $old = ConvertTo-Pid $pf['pid']
     $info = Get-ProcessInfo $old
+    if (-not $info -and (Test-Alive $old)) {
+      Write-Line ("cannot-verify live recorded PID=" + $old + "; stop aborted")
+      return 1
+    }
     if ($info) {
-      if (Test-IsOurs $info) { Stop-Tree $old 'recorded launcher process'; $killed++ }
+      if (Test-IsOurs $info) { [void]$stopTargets.Add($old); Stop-Tree $old 'recorded launcher process'; $killed++ }
       else { Write-Line ("      PID " + $old + " is alive but is not claude-hub - left alone") }
     }
     Remove-Item -LiteralPath $PidFile -Force -ErrorAction SilentlyContinue
@@ -282,6 +287,7 @@ function Do-Stop {
   # 2) anything still carrying this install's paths (the node child of that cmd)
   foreach ($p in (Get-OurProcesses)) {
     if (Test-Alive ([int]$p.ProcessId)) {
+      [void]$stopTargets.Add([int]$p.ProcessId)
       Stop-Tree ([int]$p.ProcessId) 'matches this install path'
       $killed++
     }
@@ -292,6 +298,7 @@ function Do-Stop {
   if ($owner -gt 0) {
     $info = Get-ProcessInfo $owner
     if (Test-IsPortOwnerOurs $info) {
+      [void]$stopTargets.Add($owner)
       Stop-Tree $owner 'owns the port'
       $killed++
     } else {
@@ -301,10 +308,17 @@ function Do-Stop {
     }
   }
 
-  Start-Sleep -Milliseconds 800
-  $still = Get-PortOwner $Port
-  if ($still -gt 0) {
-    Write-Line ("still-listening pid=" + $still)
+  # A booting process may not own a port yet. Wait for both the known processes
+  # to exit and the port to be free before a caller is allowed to start again.
+  $stopDeadline = (Get-Date).AddSeconds(20)
+  do {
+    $survivors = @($stopTargets | Where-Object { Test-Alive $_ })
+    $still = Get-PortOwner $Port
+    if ($survivors.Count -eq 0 -and $still -le 0) { break }
+    Start-Sleep -Milliseconds 250
+  } while ((Get-Date) -lt $stopDeadline)
+  if ($still -gt 0 -or $survivors.Count -gt 0) {
+    Write-Line ("stop-incomplete listening-pid=" + $still + " surviving-pids=" + ($survivors -join ','))
     return 1
   }
   Write-Line ("stopped killed=" + $killed)

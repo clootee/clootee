@@ -26,6 +26,7 @@
  *   node scripts/setup.js --no-tools    一律不碰引擎（优先级最高）
  *   node scripts/setup.js --with-git    缺 git 就装：Windows 下便携版 MinGit 到 out_end/git（走镜像），
  *                                       Linux/macOS 走系统包管理器
+ *   node scripts/setup.js --no-git      Skip automatic Git installation
  *   node scripts/setup.js --with-git-full  同上，但 Windows 装完整版 PortableGit（含 Git Bash / 凭据管理器）
  *
  * 退出码：0 = 就绪（用 dist 运行）  2 = 降级就绪（dist 不可用，请用 ts-node 运行）  1 = 失败
@@ -63,7 +64,7 @@ const WANT_ENGINE = {
 };
 const QUIET = has('--quiet');
 const WANT_GIT_FULL = has('--with-git-full');
-const WANT_GIT = WANT_GIT_FULL || has('--with-git');
+const WANT_GIT = !has('--no-git');
 
 // 选定的 npm 源（启动时探测一次，见 scripts/registry.js）
 let REGISTRY = null;
@@ -381,7 +382,7 @@ async function checkEngines() {
 }
 
 // ── 8. git（会话里的「推送到云端」功能依赖它）────────────────────────────────
-// 默认只报告不下载（同引擎的策略）：加 --with-git 才装。Windows 装便携版到 out_end/git，
+// 默认缺失即安装；--check 只检查，--no-git 跳过。Windows 装便携版到 out_end/git，
 // 免管理员、不写注册表、下载源在国内镜像与 GitHub 之间竞速；Linux/macOS 走系统包管理器。
 // macOS 的坑：没装 Command Line Tools 时 /usr/bin/git 也一直在（它只是个会弹安装窗口的壳），
 // 光看 which 会误判成「已安装」。所以这里必须真跑一次 git --version，跑得通才算数。
@@ -401,8 +402,8 @@ async function checkGit() {
   }
   if (!WANT_GIT || MODE === 'check') {
     warn(
-      '未检测到 git / git not found —— 会话内的 git 推送功能将不可用（其余功能不受影响）。' +
-        `加 --with-git 可自动安装${process.platform === 'win32' ? '便携版（约 41MB，走镜像）' : ''}，` +
+      '未检测到 git / git not found —— 软件更新与 git 推送功能将不可用 / software updates and git push unavailable. ' +
+        `重新运行启动脚本可自动安装 / run the start script to install ${process.platform === 'win32' ? '便携版（约 41MB，走镜像）' : ''}，` +
         `或手动：${gitInstaller.manualHint()}`
     );
     return true;

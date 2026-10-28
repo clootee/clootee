@@ -4,7 +4,7 @@
 // git commit 对比（本地 HEAD vs GitHub 同名分支）只作为展示信息：告诉用户本地代码和远端
 // 差了哪些提交。它**不参与**判定，否则开发机上任何一个未推送的本地提交都会被当成「有新版本」，
 // 于是已经是最新版也照样弹窗、照样显示「拉取更新并重启」。
-// 确认更新后拉取 + 触发重新编译与重启（脚本由 Realize 复用 restart.sh/restart.bat）。
+// 确认更新后拉取 + 触发重新编译与重启（Windows 使用 Node supervisor，Unix 复用 restart.sh）。
 
 export interface UpdateCommitInfo {
   sha: string;
@@ -48,6 +48,10 @@ export interface UpdateApplyResult {
 
 export class UpdateCheckerStruct {
   private static _applying = false;
+  private static _error = '';
+  static status(): { applying: boolean; error: string } {
+    return { applying: this._applying, error: this._error };
+  }
   // 对比本地与 GitHub：先读版本清单，再读远端 commit，两者交给 _decide 汇总成结论
   static async check(lang?: string): Promise<UpdateCheckResult> {
     const branch = this._currentBranch();
@@ -75,18 +79,24 @@ export class UpdateCheckerStruct {
 
   // 拉取最新代码并触发重新编译 + 重启；重启脚本会杀掉当前进程，因此这里不等重启跑完
   static async apply(onProgress?: UpdateProgress): Promise<UpdateApplyResult> {
-    if (this._applying) throw new Error('Update already in progress');
+    if (this._applying) return { ok: true, output: 'Update already in progress; reconnecting to current update' };
     this._applying = true;
+    this._error = '';
     try {
       const pull = await this._pull(onProgress);
       // 拉取失败必须抛出：接口层只把抛错映射成 success=false，返回 ok=false 的话前端会
       // 当成「更新成功」→ 等重启 → 首个探测就通（进程根本没重启过）→ 刷新后又弹更新，
       // 表现就是「点了更新永远在更新」。
       if (!pull.ok) throw new Error(`UpdateCheckerStruct.apply: git pull 失败 -> ${pull.output}`);
-      this._triggerRestart();
+      await this._triggerRestart((error) => {
+        this._error = error;
+        this._applying = false;
+        onProgress?.(error);
+      });
       return { ok: true, output: `${pull.output}\n[restart] 已触发重新编译与重启，请稍候刷新页面` };
     } catch (e) {
       this._applying = false;
+      this._error = e instanceof Error ? e.message : String(e);
       throw e;
     }
   }
@@ -120,7 +130,7 @@ export class UpdateCheckerStruct {
   protected static _pull(_onProgress?: UpdateProgress): Promise<UpdateApplyResult> {
     throw new Error('UpdateCheckerStruct._pull: Not implemented');
   }
-  protected static _triggerRestart(): void {
+  protected static _triggerRestart(_onFailure: (error: string) => void): void | Promise<void> {
     throw new Error('UpdateCheckerStruct._triggerRestart: Not implemented');
   }
 }
