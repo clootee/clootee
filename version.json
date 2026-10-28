@@ -1,10 +1,10 @@
 {
-  "version": "3.1.14",
+  "version": "3.1.16",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-10-28",
   "notesI18n": {
-    "zh": "Clootee 改为邮箱登录并授权本机后使用，取消匿名领取与失效密钥自动重领；也可直接配置自己的供应商。",
-    "en": "Clootee now requires email sign-in and device authorization. Anonymous activation and silent key renewal are removed; your own provider remains available."
+    "zh": "余额或请求预留额度不足时，在错误下方显示充值链接；支持历史消息、收拢消息及错误提示。邮箱体验额度说明统一为 $0.50。",
+    "en": "Billing and reservation errors now show a top-up link beside the error, including historical and collapsed messages. Email starter credit is stated as USD 0.50."
   }
 }
