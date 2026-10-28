@@ -3323,3 +3323,10 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 .credit-actions { padding: 10px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .credit-actions p { margin: 0; flex-basis: 100%; }
 .credit-actions a { color: var(--accent); text-decoration: underline; }
+
+/* 未选择工作目录：持续标记，直到用户完成选择。 */
+.root-needs-choice {
+  outline: 2px solid var(--accent, #528bff) !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent, #528bff) 20%, transparent);
+}

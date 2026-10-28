@@ -1,5 +1,11 @@
 // 国际化字典与翻译函数。至少支持 zh / en
 const DICT = {
+  argQuickT: { en: "I'm new — start right away", zh: '我是小白、我要立即开始' },
+  argQuickD: { en: 'Automatically create and select a folder for you', zh: '自动创建并选好文件夹，直接开始使用' },
+  quickRootReady: { en: 'Your folder is ready: {path}', zh: '已为你准备好目录：{path}' },
+  quickRootFailed: { en: 'Could not prepare a folder. Please try again or choose a location with “Create a new project”.', zh: '暂时无法创建目录，请重试，或通过“新建项目”选择其他位置。' },
+  rootChoiceHint: { en: 'Choose a folder in the highlighted box, then send your message. Your text is still here.', zh: '请先在高亮的选择框中选一个目录，再发送消息。你输入的内容已保留。' },
+  rootAddHint: { en: 'Add a folder with + first. Choose “I’m new” to start right away. Your text is still here.', zh: '请先点高亮的加号添加目录；选择“我是小白”即可立即开始。你输入的内容已保留。' },
   sessionLimitQueued: { en: '{queued} queued', zh: '另有 {queued} 条排队' },
   sessionLimitCount: { en: 'Messages used / limit', zh: '已用消息数 / 上限' },
   sessionLimitSettingsHint: { en: 'You can change the thresholds in {settings}.', zh: '您可以在{settings}中修改阈值。' },

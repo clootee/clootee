@@ -80,6 +80,32 @@ export class RootManagerStruct {
     return this.addRoot(clean, target);
   }
 
+  // requestId 同时作为目录名的一部分：重试复用同一个目录，不覆盖其它项目。
+  static quickStart(requestId: string): Root {
+    if (!/^[a-f0-9-]{36}$/.test(requestId)) throw new Error('quickStart: invalid requestId');
+    const name = 'project_' + requestId.replace(/-/g, '');
+    const parents = [...new Set([
+      path.join(FsHelper.preferredBase(), 'projects'),
+      path.join(FsHelper.home(), 'projects'),
+    ])];
+    let lastError: unknown;
+    for (const parent of parents) {
+      const target = path.join(parent, name);
+      try {
+        fs.mkdirSync(parent, { recursive: true });
+        fs.accessSync(parent, fs.constants.W_OK | fs.constants.X_OK);
+        if (!fs.existsSync(target)) fs.mkdirSync(target);
+        if (!fs.statSync(target).isDirectory()) throw new Error('quickStart: target is not a directory');
+        fs.accessSync(target, fs.constants.W_OK | fs.constants.X_OK);
+      } catch (error) {
+        lastError = error;
+        continue;
+      }
+      return this.ensureRoot(target, false);
+    }
+    throw lastError || new Error('quickStart: no writable project directory');
+  }
+
   private static _baseName(p: string): string {
     return path.basename(p.replace(/[\\/]+$/, '')) || p;
   }

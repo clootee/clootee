@@ -691,7 +691,7 @@ async function loadRoots() {
     sel.appendChild(o);
   });
   if (!State.roots.find((r) => r.id === State.rootId)) {
-    setTabRootId('');
+    setTabRootId(State.roots.length === 1 ? State.roots[0].id : '');
   }
   sel.value = State.rootId;
   renderWorkdirBar();
@@ -726,6 +726,36 @@ function sortedRoots() {
 // 当前选中的根目录对象
 function currentRoot() {
   return State.roots.find((r) => r.id === State.rootId) || null;
+}
+
+// 就近提示并聚焦实际可见的控件，保留输入内容，移动端必要时展开侧栏。
+function requestRootSelection() {
+  showMiniToast(T(State.roots.length ? 'rootChoiceHint' : 'rootAddHint'));
+  let control = State.roots.length
+    ? [...document.querySelectorAll('.favorite-root-required select, .gs-root-chooser select, #rootSelect')]
+        .find((el) => el.getClientRects().length)
+    : $('addRootBtn');
+  control ||= $('rootSelect');
+  if (!control.getClientRects().length) document.body.classList.add('drawer-open');
+  control.classList.add('root-needs-choice');
+  control.setAttribute('aria-invalid', 'true');
+  control.scrollIntoView({ block: 'center' });
+  control.focus();
+  const clear = () => {
+    control.classList.remove('root-needs-choice');
+    control.removeAttribute('aria-invalid');
+  };
+  control.addEventListener(State.roots.length ? 'change' : 'click', clear, { once: true });
+}
+
+function selectOnlyRoot() {
+  if (currentRoot()) return true;
+  if (State.roots.length !== 1) return false;
+  setTabRootId(State.roots[0].id);
+  $('rootSelect').value = State.rootId;
+  renderWorkdirBar();
+  renderRootMeta();
+  return true;
 }
 
 // 选中某个根目录（下拉框 change / 引导按钮共用）：同步下拉框、切换 tab 根目录、刷新会话列表
@@ -2334,8 +2364,8 @@ async function newSession() {
     openWsDir();
     return;
   }
-  if (!State.rootId) {
-    alert(T('selectRootFirst'));
+  if (!selectOnlyRoot()) {
+    requestRootSelection();
     return;
   }
   // 当前已是空的新会话（未发起、无任务）则不再重复创建，直接复用并聚焦输入框
@@ -2362,6 +2392,7 @@ function isFavoriteDraftId(id) {
 }
 
 function createFavoriteDraftSession(preferredRootId = '') {
+  if (!preferredRootId && State.roots.length === 1) preferredRootId = State.roots[0].id;
   const prevKey = State.sessionId;
   const now = Date.now();
   const draft = {
@@ -5610,9 +5641,10 @@ async function ensureSession() {
   if (State.sessionId) {
     if (!isFavoriteDraftId(State.sessionId)) return true;
     // 发消息/上传即认可选择器中的目录；显式清空时不能回退到其他目录。
-    const rootId = State.session?.pendingRootId ?? State.session?.preferredRootId ?? '';
+    const rootId = State.roots.length === 1 ? State.roots[0].id
+      : State.session?.pendingRootId ?? State.session?.preferredRootId ?? '';
     if (!rootId || !State.roots.some((r) => r.id === rootId)) {
-      alert(T('favoriteRootRequired'));
+      requestRootSelection();
       return false;
     }
     await bindFavoriteDraftRoot(rootId);
@@ -5630,8 +5662,8 @@ async function ensureSession() {
     return false;
   }
   // 经典模式：已选根目录即可直接创建真实会话。
-  if (!State.rootId) {
-    alert(T('selectRootFirst'));
+  if (!selectOnlyRoot()) {
+    requestRootSelection();
     return false;
   }
   const s = await api('/api/session/create', {

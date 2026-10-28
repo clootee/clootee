@@ -333,7 +333,7 @@ export class FsHelper {
     return full;
   }
 
-  // 平台推荐的项目基准盘/目录：Windows 优先 D:\ 存在则用之，否则 C:\；类 Unix 用用户主目录。
+  // 平台推荐的项目基准盘/目录：Windows 尝试已有 D/C 盘，均不可用则回退主目录；Unix 用主目录。
   // 仅返回“基准”（不含 projects 子目录），业务侧自行拼接需要的子目录名。
   static preferredBase(): string {
     if (process.platform === 'win32') {
@@ -345,7 +345,7 @@ export class FsHelper {
           /* 无此盘符，试下一个 */
         }
       }
-      return 'C:\\';
+      return os.homedir();
     }
     return os.homedir();
   }
