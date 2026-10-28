@@ -1,10 +1,10 @@
 {
-  "version": "3.1.16",
+  "version": "3.1.17",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-10-28",
   "notesI18n": {
-    "zh": "余额或请求预留额度不足时，在错误下方显示充值链接；支持历史消息、收拢消息及错误提示。邮箱体验额度说明统一为 $0.50。",
-    "en": "Billing and reservation errors now show a top-up link beside the error, including historical and collapsed messages. Email starter credit is stated as USD 0.50."
+    "zh": "修复工作目录自动创建位置，新增项目统一放在用户主目录；保留邮箱授权和余额不足时的充值入口。",
+    "en": "Automatically created projects now stay under the user home directory. Includes email authorization and direct top-up links for insufficient credit."
   }
 }
