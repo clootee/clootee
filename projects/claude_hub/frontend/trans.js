@@ -1,5 +1,14 @@
 // 国际化字典与翻译函数。至少支持 zh / en
 const DICT = {
+  messageLinkRestartNeeded: { en: 'The running service has not loaded this feature yet. Restart Clootee and try again.', zh: '当前服务尚未加载此功能，请重启 Clootee 后重试。' },
+  apiUnexpectedResponse: { en: 'The service returned an invalid response. Refresh the page and try again.', zh: '服务返回了异常内容，请刷新页面后重试。' },
+  messageLinkFolder: { en: 'Open folder', zh: '打开所在文件夹' },
+  messageLinkFolderOpened: { en: 'Folder opened on this Windows computer.', zh: '已在 Windows 电脑上打开文件夹。' },
+  messageLinkFolderFailed: { en: 'Could not open folder', zh: '打开文件夹失败' },
+  messageLinkCopyText: { en: 'Copy text', zh: '复制文字' },
+  messageLinkCopyPath: { en: 'Copy path', zh: '复制路径' },
+  messageLinkOpen: { en: 'Open link', zh: '打开网址' },
+  messageLinkOutsideRoot: { en: 'This file is outside the current project. Copy its path to open it locally.', zh: '此文件不在当前项目目录内，可复制路径在本机打开。' },
   argQuickT: { en: "I'm new — start right away", zh: '我是小白、我要立即开始' },
   argQuickD: { en: 'Automatically create and select a folder for you', zh: '自动创建并选好文件夹，直接开始使用' },
   quickRootReady: { en: 'Your folder is ready: {path}', zh: '已为你准备好目录：{path}' },

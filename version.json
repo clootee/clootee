@@ -1,10 +1,10 @@
 {
-  "version": "3.1.21",
+  "version": "3.1.22",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-10-28",
+  "releasedAt": "2026-10-29",
   "notesI18n": {
-    "zh": "更新遇到本地修改或合并冲突时，可选择放弃更新或确认强制更新；强制更新仅覆盖 Clootee 代码，保护其他项目和用户数据。",
-    "en": "When local changes or merge conflicts block an update, choose Cancel update or confirm Force update. Confirmed updates replace only Clootee code while preserving other projects and user data."
+    "zh": "修复消息中的本地文件链接，新增适配手机的文件操作弹窗，支持下载、复制路径及 Windows 打开所在文件夹；优化接口异常提示。",
+    "en": "Fix local file links in messages with a mobile-friendly action dialog, downloads, path copying and Windows containing-folder access. Improve API error messages."
   }
 }

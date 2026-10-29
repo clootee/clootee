@@ -3345,3 +3345,30 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
   outline-offset: 3px;
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent, #528bff) 20%, transparent);
 }
+
+/* Message link actions: desktop card and mobile bottom sheet. */
+.message-link-dialog { box-sizing: border-box; width: min(480px, calc(100vw - 40px)); max-width: none; max-height: calc(100dvh - 40px); overflow: auto; padding: 24px; border: 1px solid var(--border); border-radius: 22px; background: var(--panel); color: var(--text); box-shadow: 0 24px 90px #0005; }
+.message-link-dialog::backdrop { background: #070d1b80; backdrop-filter: blur(5px); }
+.message-link-dialog .ml-head { display: flex; gap: 12px; align-items: center; }
+.message-link-dialog .ml-badge { flex-shrink: 0; display: grid; place-items: center; width: 48px; height: 52px; border-radius: 13px; background: color-mix(in srgb, var(--accent) 14%, var(--panel)); color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .5px; }
+.message-link-dialog h3 { flex: 1; min-width: 0; margin: 0; font-size: 16px; line-height: 1.5; font-weight: 650; overflow-wrap: anywhere; }
+.message-link-dialog .ml-close { align-self: flex-start; flex-shrink: 0; display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: none; border-radius: 50%; background: var(--panel2); color: var(--muted); font-size: 22px; cursor: pointer; }
+.message-link-dialog .ml-path { margin: 18px 0 22px; padding: 12px 14px; border-radius: 10px; background: var(--bg); color: var(--muted); font: 12px/1.7 ui-monospace, monospace; overflow-wrap: anywhere; user-select: text; }
+.message-link-dialog .ml-primary { display: flex; gap: 10px; }
+.message-link-dialog .ml-secondary { display: flex; justify-content: center; gap: 8px; margin-top: 12px; }
+.message-link-dialog .ml-action { box-sizing: border-box; display: flex; justify-content: center; align-items: center; min-height: 46px; padding: 10px 14px; border: 1px solid transparent; border-radius: 11px; font: inherit; font-size: 14px; font-weight: 600; line-height: 1.4; text-align: center; text-decoration: none; cursor: pointer; transition: background .15s, transform .15s; }
+.message-link-dialog .ml-primary .ml-action { flex: 1; min-width: 0; }
+.message-link-dialog .ml-download { background: var(--accent); color: #fff; box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 20%, transparent); }
+.message-link-dialog .ml-folder { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
+.message-link-dialog .ml-secondary .ml-action { min-height: 44px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 500; }
+.message-link-dialog .ml-action:hover { filter: brightness(1.08); }
+.message-link-dialog .ml-secondary .ml-action:hover, .message-link-dialog .ml-close:hover { background: var(--hover); color: var(--text); }
+.message-link-dialog .ml-action:active { transform: translateY(1px); }
+.message-link-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.message-link-dialog button:disabled { opacity: .55; cursor: wait; }
+.message-link-dialog .ml-status { margin: 12px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+@media (max-width: 540px) {
+  .message-link-dialog { width: 100%; max-height: calc(100dvh - 24px); margin: auto 0 0; padding: 22px 20px calc(20px + env(safe-area-inset-bottom)); border-radius: 24px 24px 0 0; border-bottom: 0; }
+  .message-link-dialog .ml-close { width: 36px; height: 36px; }
+  .message-link-dialog .ml-action { min-height: 50px; }
+}

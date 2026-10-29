@@ -220,6 +220,10 @@ async function api(path, body) {
     showLogin();
     throw new Error('unauthorized');
   }
+  if (!(res.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
+    throw new Error(T(path === '/api/fm/open-containing' && res.status === 404
+      ? 'messageLinkRestartNeeded' : 'apiUnexpectedResponse'));
+  }
   const json = await res.json();
   if (!json.success) throw new Error(json.locked ? T('lockedHint') : (json.error || 'request failed'));
   return json.data;
@@ -6257,12 +6261,104 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
 
-// 一次性初始化 markdown 渲染（marked + DOMPurify）。所有链接强制 _blank 新标签打开。
+// 本地路径通过 data 属性保留，避免 Windows 盘符被当成不安全的 URL 协议移除。
+function markdownLocalPath(href) {
+  let value = String(href || '').trim();
+  if (/^file:\/\//i.test(value)) value = value.replace(/^file:\/\//i, '');
+  try { value = decodeURIComponent(value); } catch { /* 保留含字面百分号的路径 */ }
+  value = value.replace(/^\/([a-z]:[\\/])/i, '$1');
+  if (/^[a-z]:[\\/]/i.test(value)) return value.replace(/\\/g, '/');
+  if (!value || value.startsWith('#') || value.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(value)) return '';
+  return value.replace(/\\/g, '/');
+}
+
+function showMarkdownLink(link) {
+  const path = link.dataset.localPath || '';
+  const href = link.getAttribute('href') || '';
+  const dialog = document.createElement('dialog');
+  dialog.className = 'message-link-dialog';
+  dialog.setAttribute('aria-labelledby', 'messageLinkTitle');
+  const head = document.createElement('div');
+  head.className = 'ml-head';
+  const badge = document.createElement('span');
+  badge.className = 'ml-badge';
+  badge.textContent = path ? (path.split('.').pop() || 'FILE').replace(/:\d+.*$/, '').toUpperCase().slice(0, 6) : 'LINK';
+  const title = document.createElement('h3');
+  title.id = 'messageLinkTitle';
+  title.textContent = path ? path.replace(/\\/g, '/').split('/').pop() : link.textContent || href;
+  const close = document.createElement('button');
+  close.className = 'ml-close'; close.type = 'button'; close.textContent = '×';
+  close.setAttribute('aria-label', T('close')); close.onclick = () => dialog.close();
+  head.append(badge, title, close);
+  const detail = document.createElement('p');
+  detail.className = 'ml-path'; detail.textContent = path || href;
+  const primary = document.createElement('div'); primary.className = 'ml-primary';
+  const secondary = document.createElement('div'); secondary.className = 'ml-secondary';
+  const status = document.createElement('p'); status.className = 'ml-status'; status.hidden = true;
+  status.setAttribute('role', 'status');
+  const button = (parent, label, action, className = '') => {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'ml-action ' + className; btn.textContent = label;
+    btn.onclick = () => action(btn); parent.appendChild(btn); return btn;
+  };
+  if (path) {
+    const rootId = State.rootId;
+    const root = State.roots.find((r) => r.id === rootId);
+    const base = (root?.path || '').replace(/\\/g, '/').replace(/\/$/, '');
+    let rel = path.replace(/(?::\d+(?::\d+)?)$/, '');
+    const insensitive = /^[a-z]:\//i.test(base);
+    const compare = (v) => insensitive ? v.toLowerCase() : v;
+    if (base && compare(rel).startsWith(compare(base) + '/')) rel = rel.slice(base.length + 1);
+    if (/^(?:[a-z]:\/|\/)/i.test(rel)) {
+      status.textContent = T('messageLinkOutsideRoot'); status.hidden = false;
+    } else {
+      if (State.settings.platform === 'win32') {
+        button(primary, T('messageLinkFolder'), async (btn) => {
+          btn.disabled = true; status.hidden = true;
+          try {
+            await api('/api/fm/open-containing', { rootId, rel });
+            status.textContent = T('messageLinkFolderOpened'); status.hidden = false;
+          } catch (e) {
+            status.textContent = T('messageLinkFolderFailed') + ': ' + e.message; status.hidden = false;
+          } finally { btn.disabled = false; }
+        }, 'ml-folder');
+      }
+      const target = document.createElement('a');
+      target.className = 'ml-action ml-download'; target.textContent = T('download');
+      target.href = fmFileUrl(rel, true); target.setAttribute('download', ''); primary.appendChild(target);
+    }
+    button(secondary, T('messageLinkCopyPath'), (btn) => copyText(path, btn, T('messageLinkCopyPath')));
+  } else {
+    const target = document.createElement('a');
+    target.className = 'ml-action ml-download'; target.textContent = T('messageLinkOpen');
+    target.href = href; target.target = '_blank'; target.rel = 'noopener noreferrer'; primary.appendChild(target);
+  }
+  button(secondary, T('messageLinkCopyText'), (btn) => copyText(link.textContent, btn, T('messageLinkCopyText')));
+  dialog.append(head, detail, primary, secondary, status);
+  dialog.addEventListener('close', () => { dialog.remove(); link.focus(); });
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) {
+    const rect = dialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
+  } });
+  document.body.appendChild(dialog);
+  dialog.showModal();
+}
+
+// 一次性初始化 markdown 渲染（marked + DOMPurify）。
 let _mdReady = false;
 function initMarkdown() {
   if (_mdReady) return;
   if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') return;
   marked.setOptions({ gfm: true, breaks: true });
+  DOMPurify.addHook('beforeSanitizeAttributes', (node) => {
+    if (node.tagName !== 'A') return;
+    const path = markdownLocalPath(node.getAttribute('href'));
+    node.removeAttribute('data-local-path');
+    if (path) {
+      node.setAttribute('data-local-path', path);
+      node.setAttribute('href', '#');
+    }
+  });
   // 净化后处理：外链 target=_blank + rel 防止 window.opener 利用；本页锚点保持原样
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (node.tagName === 'A' && node.getAttribute('href')) {
@@ -6284,6 +6380,15 @@ function renderMarkdown(el, text) {
     const html = DOMPurify.sanitize(marked.parse(String(text || '')), { ADD_ATTR: ['target'] });
     el.innerHTML = html;
     el.classList.add('md');
+    el.onclick = (event) => {
+      const link = event.target.closest('a');
+      if (!link || !el.contains(link)) return;
+      const href = link.getAttribute('href') || '';
+      if (!link.dataset.localPath && !/^(https?:|mailto:)/i.test(href)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      showMarkdownLink(link);
+    };
   } catch {
     el.textContent = text;
   }

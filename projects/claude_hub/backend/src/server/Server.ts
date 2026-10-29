@@ -612,6 +612,9 @@ export class Server {
     });
 
     // ── 文件管理器（右侧抽屉：按根目录浏览/编辑/搜索/重点文件夹） ──
+    app.post('/api/fm/open-containing', (req, res) =>
+      this._wrapAsync(res, 'fm.openContaining', () => FolderOpener.openContaining(req.body.rootId, req.body.rel)),
+    );
     app.get('/api/fm/browse', (req, res) =>
       this._wrap(res, 'fm.browse', () =>
         FileManager.browse(String(req.query.rootId), String(req.query.rel || '')),
