@@ -13,7 +13,9 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
   // Exercise the same blocking dependency phase invoked by the Windows installer.
   const { spawn } = require('node:child_process');
   await new Promise((resolve, reject) => {
-    const installer = spawn(exe, ['--install-only', '--user-data-dir=' + profile], { stdio: 'inherit' });
+    const installEnv = { ...process.env };
+    if (process.platform === 'win32') installEnv.PATH = (process.env.PATH || '').split(path.delimiter).filter(dir => !/[\\/]git(?:[\\/]|$)/i.test(dir)).join(path.delimiter);
+    const installer = spawn(exe, ['--install-only', '--user-data-dir=' + profile], { stdio: 'inherit', env: installEnv });
     const timer = setTimeout(() => { installer.kill(); reject(new Error('Dependency installation timed out')); }, 1200000);
     installer.once('error', e => { clearTimeout(timer); reject(e); });
     installer.once('exit', code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error('Dependency installation failed: ' + code)); });
@@ -45,6 +47,11 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
     const resolved = fs.existsSync(file) ? file : name;
     const command = process.platform === 'win32' ? '"' + resolved + '"' : resolved;
     assert.ok(execFileSync(command, ['--version'], { env, shell: process.platform === 'win32', encoding: 'utf8', timeout: 30000 }).trim());
+  }
+  if (process.platform === 'win32') {
+    const gitRoot = path.join(profile, 'out_end', 'git');
+    assert.match(execFileSync(path.join(gitRoot, 'cmd', 'git.exe'), ['--version'], { encoding: 'utf8' }), /git version/);
+    assert.match(execFileSync(path.join(gitRoot, 'bin', 'bash.exe'), ['--version'], { encoding: 'utf8' }), /bash/i);
   }
   const firstOrigin = new URL(win.url()).origin;
   const quickstart = await win.evaluate(async () => (await fetch('/api/auth/quickstart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json());

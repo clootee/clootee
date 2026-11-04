@@ -14,7 +14,8 @@
   <link rel="stylesheet" href="styles.css?v=20261104runtime" />
 </head>
 <body class="dark">
-  <!-- 登录遮罩 -->
+  <div id="gitInstallStatus" class="sx-note sx-pre" role="status" aria-live="polite" hidden style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(620px,90vw);max-height:35vh;overflow:auto;padding:16px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:12px;z-index:10050"></div>
+  <!-- 安全解锁（仅在主动启用安全密码后显示） -->
   <div class="login-overlay" id="loginOverlay" hidden>
     <form class="login-card" id="loginForm">
       <h2 id="loginTitle"></h2>
@@ -1197,7 +1198,7 @@
     </div>
   </dialog>
 
-  <script src="trans.js?v=20261104security"></script>
+  <script src="trans.js?v=20261104git"></script>
   <script src="workspace.js?v=20261029sessionfix"></script>
   <script src="rootwizard.js?v=20261031quickstart"></script>
   <script src="health.js?v=20261104runtime"></script>
@@ -1219,6 +1220,6 @@
   <script src="cost-optimization.js?v=20261015a"></script>
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
-  <script src="app.js?v=20261104security"></script>
+  <script src="app.js?v=20261104git"></script>
 </body>
 </html>
