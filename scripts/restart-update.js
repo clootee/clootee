@@ -92,7 +92,7 @@ async function main() {
   const runDir = path.join(root, 'projects/claude_hub/data/run');
   const port = Number(process.argv[2]);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid server port');
-  const previous = legacy ? await status(port) : null;
+  const previous = await status(port);
   const previousPid = Number(String(previous?.instance || '').split(':')[0]);
   if (legacy && (!Number.isSafeInteger(previousPid) || previousPid <= 1)) throw new Error('No Clootee server found on the update port');
   const env = { ...process.env, PORT: String(port), CLOOTEE_LOG_CONSOLE: '0' };
@@ -112,13 +112,15 @@ async function main() {
       if (current?.instance !== previous.instance) throw new Error('Server identity changed; restart cancelled');
       process.kill(previousPid, 'SIGTERM');
     } else await approveStop();
-    await waitUntil(async () => !(await portOpen(port)), 20000, 'Original server did not release its port');
-    note('Original server stopped; starting updated server');
     if (env.pm_id !== undefined) {
       // PM2 owns the replacement process; do not start a second server.
-      await waitUntil(async () => !!(await status(port)), 60000, 'PM2 did not restart the updated server');
+      await waitUntil(async () => { const current = await status(port); return !!current?.instance && current.instance !== previous?.instance; }, 60000, 'PM2 did not restart the updated server');
       note('UPDATE COMPLETE: PM2 replacement is healthy');
-    } else await startServer(backend, runDir, port, env, log);
+    } else {
+      await waitUntil(async () => !(await portOpen(port)), 20000, 'Original server did not release its port');
+      note('Original server stopped; starting updated server');
+      await startServer(backend, runDir, port, env, log);
+    }
   } finally { fs.closeSync(log); }
 }
 if (require.main === module) {
