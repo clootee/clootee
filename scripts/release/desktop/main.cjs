@@ -5,8 +5,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
+const { bindUpdates } = require('./updater.cjs');
 let win, child, quitting = false, installationComplete = false;
 const installOnly = process.argv.includes('--install-only');
+if (installOnly && process.env.CLOOTEE_UPDATE_PROFILE) app.setPath('userData', process.env.CLOOTEE_UPDATE_PROFILE);
 const single = app.requestSingleInstanceLock();
 if (!single) app.exit(installOnly ? 1 : 0);
 else {
@@ -77,7 +79,7 @@ async function start() {
   // language, theme and drafts, even though the backend data is preserved.
   const { port, kimi } = await persistentPorts(home);
   const log = fs.openSync(path.join(home, 'desktop.log'), 'a');
-  const env = { ...process.env, PORT: String(port), KIMI_PROXY_PORT: String(kimi), CLOOTEE_LOG_CONSOLE: '1', npm_config_prefix: path.join(hub, 'out_end', 'tools'), PATH: [bin, path.join(hub, 'out_end', 'git', 'cmd'), path.join(hub, 'out_end', 'git', 'bin'), process.platform === 'win32' ? path.join(hub, 'out_end', 'tools') : path.join(hub, 'out_end', 'tools', 'bin'), process.env.PATH || ''].join(path.delimiter) };
+  const env = { ...process.env, PORT: String(port), KIMI_PROXY_PORT: String(kimi), CLOOTEE_LOG_CONSOLE: '1', CLOOTEE_DESKTOP: '1', npm_config_prefix: path.join(hub, 'out_end', 'tools'), PATH: [bin, path.join(hub, 'out_end', 'git', 'cmd'), path.join(hub, 'out_end', 'git', 'bin'), process.platform === 'win32' ? path.join(hub, 'out_end', 'tools') : path.join(hub, 'out_end', 'tools', 'bin'), process.env.PATH || ''].join(path.delimiter) };
   delete env.ELECTRON_RUN_AS_NODE;
   // Use the same required dependency installer as source packages, before serving UI.
   await new Promise((resolve, reject) => {
@@ -106,7 +108,8 @@ async function start() {
     if (fs.existsSync(bash)) env.CLAUDE_CODE_GIT_BASH_PATH = bash;
   }
   if (installOnly) { fs.closeSync(log); app.quit(); return; }
-  child = spawn(node, [path.join(backend, 'dist', 'index.js')], { cwd: backend, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', log, log] });
+  child = spawn(node, [path.join(backend, 'dist', 'index.js')], { cwd: backend, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', log, log, 'ipc'] });
+  bindUpdates(child, { app, home, node, port, stop: () => { quitting = true; stopChild(); }, feed: process.env.CLOOTEE_UPDATE_FEED });
   fs.closeSync(log);
   let failure;
   child.once('error', e => { failure = e; });

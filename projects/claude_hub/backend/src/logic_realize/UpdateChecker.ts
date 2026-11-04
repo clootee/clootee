@@ -17,11 +17,22 @@ import { SemVer } from '../helper/SemVer';
 import { Paths } from '../paths';
 import { Logger } from '../helper/Logger';
 import { ErrorHandler } from '../helper/ErrorHandler';
+import { DesktopUpdate } from '../helper/DesktopUpdate';
 
 const GITHUB_API_TIMEOUT_MS = 10000;
 const MANIFEST_FILE = 'version.json';
 
 export class UpdateChecker extends UpdateCheckerStruct {
+  static async check(lang?: string) {
+    if (DesktopUpdate.active()) return DesktopUpdate.request('check', { lang });
+    return super.check(lang);
+  }
+
+  static async apply(onProgress?: UpdateProgress, force = false): Promise<UpdateApplyResult> {
+    if (DesktopUpdate.active()) return DesktopUpdate.request('apply', {}, onProgress);
+    return super.apply(onProgress, force);
+  }
+
   // 要比较/拉取的分支：本地分支名可能和它实际跟踪的远端分支名不一样
   // （比如本地叫 master 却跟踪 origin/main），git pull 拉的是上游跟踪分支，
   // 所以这里必须查上游而不是本地分支名，否则会拿错分支去比对 GitHub。
@@ -279,24 +290,19 @@ export class UpdateChecker extends UpdateCheckerStruct {
     });
   }
 
-  // Restart through the Windows background service; keep diagnostics on disk.
+  // A platform-independent Node supervisor builds before stopping this server.
   protected static _triggerRestart(onFailure: (error: string) => void): Promise<void> {
-    const isWin = process.platform === 'win32';
-    const script = isWin
-      ? path.resolve(Paths.PROJECT_ROOT, '../../scripts/restart-update.js')
-      : path.join(Paths.PROJECT_ROOT, 'restart.sh');
+    const script = path.resolve(Paths.PROJECT_ROOT, '../../scripts/restart-update.js');
     fs.mkdirSync(Paths.LOGS_DIR, { recursive: true });
     const log = fs.openSync(path.join(Paths.LOGS_DIR, 'update-restart.log'), 'a');
     fs.writeSync(log, `\n[${new Date().toISOString()}] Launching restart for server ${process.pid}: ${script}\n`);
     Logger.info('UpdateChecker', 'trigger restart', { script });
-    const child = isWin
-      ? spawn(process.execPath, [script, String(process.env.PORT || 8970)], {
-          cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log, 'ipc'], windowsHide: true,
-        })
-      : spawn('bash', [script], { cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log] });
+    const child = spawn(process.execPath, [script, String(process.env.PORT || 8970)], {
+      cwd: Paths.PROJECT_ROOT, detached: true, stdio: ['ignore', log, log, 'ipc'], windowsHide: true,
+    });
     fs.closeSync(log);
     return new Promise((resolve, reject) => {
-      if (isWin) child.on('message', (message: any) => {
+      child.on('message', (message: any) => {
         if (message?.type !== 'ready-to-stop') return;
         Logger.info('UpdateChecker', 'build complete; handing restart over to Node supervisor');
         child.send({ type: 'stop-approved' }, (error) => {

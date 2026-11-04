@@ -1,4 +1,4 @@
-// Windows update supervisor. Uses the same Node runtime as the server, no shell/WMI.
+// Cross-platform source-package update supervisor. Uses the same Node runtime as the server, no shell/WMI.
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
@@ -85,12 +85,16 @@ async function startServer(backend, runDir, port, env, log) {
   note(`UPDATE COMPLETE: healthy server PID=${child.pid}, port=${port}`);
 }
 async function main() {
-  if (!process.send) throw new Error('Updater requires its server IPC channel');
+  const legacy = process.argv.includes('--legacy');
+  if (!process.send && !legacy) throw new Error('Updater requires its server IPC channel');
   const root = path.resolve(__dirname, '..');
   const backend = path.join(root, 'projects/claude_hub/backend');
   const runDir = path.join(root, 'projects/claude_hub/data/run');
   const port = Number(process.argv[2]);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid server port');
+  const previous = legacy ? await status(port) : null;
+  const previousPid = Number(String(previous?.instance || '').split(':')[0]);
+  if (legacy && (!Number.isSafeInteger(previousPid) || previousPid <= 1)) throw new Error('No Clootee server found on the update port');
   const env = { ...process.env, PORT: String(port), CLOOTEE_LOG_CONSOLE: '0' };
   fs.mkdirSync(runDir, { recursive: true });
   note(`Updater running with Node ${process.version}; building before stopping server`);
@@ -103,10 +107,18 @@ async function main() {
     if (!fs.fstatSync(log).isFile()) throw new Error('Startup log path is not a regular file');
     fs.writeSync(log, `\n[${new Date().toISOString()}] Preparing updated server output\n`);
     note('Build complete; asking original server to exit');
-    await approveStop();
+    if (legacy) {
+      const current = await status(port);
+      if (current?.instance !== previous.instance) throw new Error('Server identity changed; restart cancelled');
+      process.kill(previousPid, 'SIGTERM');
+    } else await approveStop();
     await waitUntil(async () => !(await portOpen(port)), 20000, 'Original server did not release its port');
     note('Original server stopped; starting updated server');
-    await startServer(backend, runDir, port, env, log);
+    if (env.pm_id !== undefined) {
+      // PM2 owns the replacement process; do not start a second server.
+      await waitUntil(async () => !!(await status(port)), 60000, 'PM2 did not restart the updated server');
+      note('UPDATE COMPLETE: PM2 replacement is healthy');
+    } else await startServer(backend, runDir, port, env, log);
   } finally { fs.closeSync(log); }
 }
 if (require.main === module) {

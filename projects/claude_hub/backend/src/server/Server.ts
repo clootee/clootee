@@ -58,7 +58,7 @@ export class Server {
     app.get('/api/auth/status', (req, res) =>
       this._wrap(res, 'auth.status', () => ({ needsSetup: false,
         passwordEnabled: AuthManager.passwordEnabled(), legacyCredentials: AuthManager.legacyCredentials(),
-        localAccess: this._isLocalRequest(req), instance: `${process.pid}:${SERVER_STARTED_AT}` })),
+        localAccess: this._isLocalRequest(req), version: PackageInfo.version(), instance: `${process.pid}:${SERVER_STARTED_AT}` })),
     );
     app.post('/api/auth/setup', (req, res) =>
       this._wrap(res, 'auth.setup', () => {

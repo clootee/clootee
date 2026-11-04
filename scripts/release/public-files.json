@@ -71,7 +71,11 @@
     "scripts/release/desktop/icon.png",
     "scripts/release/desktop/icon.ico",
     "scripts/release/desktop/icon.icns",
-    ".github/workflows/retire.yml"
+    ".github/workflows/retire.yml",
+    "scripts/release/desktop/updater.cjs",
+    "scripts/release/desktop/install-update.cjs",
+    "scripts/release/update.test.cjs",
+    "scripts/release/smoke-update.cjs"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [

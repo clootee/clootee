@@ -27,7 +27,7 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix projects/claude_hub/backend --include=dev --no-audit --no-fund
       - run: npm run build --prefix projects/claude_hub/backend
-      - run: node --test scripts/release/public-snapshot.test.mjs scripts/release/setup.test.cjs scripts/release/engine-recovery.test.cjs scripts/release/security.test.cjs scripts/release/git-runtime.test.cjs
+      - run: node --test scripts/release/public-snapshot.test.mjs scripts/release/setup.test.cjs scripts/release/engine-recovery.test.cjs scripts/release/security.test.cjs scripts/release/git-runtime.test.cjs scripts/release/update.test.cjs
       - run: python3 scripts/release/source.py
       - uses: actions/upload-artifact@v4
         with:
@@ -46,7 +46,7 @@ jobs:
             target: --mac
             extension: dmg
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -64,6 +64,8 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Smoke test packaged desktop app
         run: node scripts/release/smoke-desktop.cjs
+      - name: Verify full package update and reopen
+        run: node scripts/release/smoke-update.cjs
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.extension }}
