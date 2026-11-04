@@ -1,10 +1,10 @@
 {
-  "version": "3.1.29",
+  "version": "3.1.30",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-04",
   "notesI18n": {
-    "zh": "清理公开源码与分发包，保留产品运行资源，完善发布文件检查。",
-    "en": "Clean public source and packages, retain product runtime assets, and enforce publication checks."
+    "zh": "安装时自动补齐 Node、Git、Claude Code、Codex 与依赖，镜像竞速与失败换源，运行验证通过后完成安装。",
+    "en": "Automatically install Node, Git, Claude Code, Codex and dependencies during setup, with mirror selection, fallback and executable verification."
   }
 }
