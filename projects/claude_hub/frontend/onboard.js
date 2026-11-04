@@ -236,16 +236,8 @@ async function runQuickStart() {
   renderOnboard();
   const stageDone = () => { q.stage += 1; renderOnboard(); };
   try {
-    // ① 本机访问凭据：还没设密码就生成随机密码并直接登录（浏览器记住 token）
-    if (q.stage === 0) {
-      if (NEEDS_SETUP) {
-        const r = await api('/api/auth/quickstart', {});
-        TOKEN = r.token;
-        localStorage.setItem('token', TOKEN);
-        NEEDS_SETUP = false;
-      }
-      stageDone();
-    }
+    // Starting the tool never creates a security password.
+    if (q.stage === 0) stageDone();
     // ② 当前窗口完成邮箱登录后切换供应商。
     if (q.stage === 1) {
       let st;
@@ -650,8 +642,8 @@ async function onboardFinish(key) {
     await api('/api/settings', { defaultEngine: Onboard.engine, onboarded: true, setupDone: true });
     hideOnboard();
     applyText();
-    // 新用户：引导走完，最后一步才设定访问密码（设完由 doSetup 进主界面）
-    if (typeof NEEDS_SETUP !== 'undefined' && NEEDS_SETUP) { showSetup(); return; }
+    // 完成服务商引导即可使用；安全密码只能在设置里主动开启。
+    if (typeof startApp === 'function') await startApp();
     if (typeof loadSettings === 'function') await loadSettings();
   } catch (e) {
     const msg = $('onboardKeyMsg') || $('onboardSub');

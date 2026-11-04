@@ -16,7 +16,7 @@ export const Paths = {
   SESSION_META_FILE: path.join(DATA_ROOT, 'session_meta.json'),
   // 运行期任务队列快照：进程重启后据此恢复各会话的 pending/暂停状态，避免队列丢失
   QUEUE_STATE_FILE: path.join(DATA_ROOT, 'queue_state.json'),
-  // 首启由用户设定的访问密码（盐 + 哈希）持久化于此；不存在=尚未初始化，需先设定密码
+  // 首启由用户设定的访问密码（盐 + 哈希）持久化于此；不存在=本机直接使用，无需密码
   AUTH_FILE: path.join(DATA_ROOT, 'auth.json'),
   // 各引擎（claude/codex）服务商配置（原版 / minimax / kimi + apiKey + model）
   ENGINES_FILE: path.join(DATA_ROOT, 'engines.json'),

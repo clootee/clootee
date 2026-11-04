@@ -75,7 +75,7 @@ cd "$HUB/backend" || die "找不到目录 / missing directory: $HUB/backend"
 echo
 echo "==> Starting claude-hub on http://localhost:$PORT"
 echo "==> 服务启动中，浏览器将自动打开 http://localhost:$PORT"
-echo "==> 首次打开会有引导：设置访问密码 -> 选引擎 -> 选模型服务商"
+echo "==> 首次打开可选择引擎与模型服务商；安全密码默认关闭，可在设置中主动启用"
 # 浏览器要等服务真的监听上再开，否则（尤其 macOS 双击启动时）一打开就是「无法连接」，
 # 用户还得自己刷新。后台等最多 30 秒，端口一通就开；一直不通就不开，让终端里的报错说话。
 (

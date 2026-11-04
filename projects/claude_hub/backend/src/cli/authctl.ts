@@ -22,13 +22,13 @@ function main(): void {
       const removed = AuthManager.clear();
       console.log(
         removed
-          ? '✅ 已解除密码锁定：密码已删除，现在无需密码即可访问，界面将重新引导你设定新密码。'
+          ? '✅ 已解除密码锁定：密码已删除，现在本机可直接使用；可在设置里自愿启用安全密码。'
           : 'ℹ️ 当前本就未设定密码，无需解除。',
       );
       return;
     }
     case 'status': {
-      console.log(AuthManager.needsSetup() ? '未设定密码（needsSetup=true）' : '已设定密码');
+      console.log(AuthManager.passwordEnabled() ? '已启用安全密码' : '未启用安全密码（本机直接使用）');
       return;
     }
     default:
@@ -36,7 +36,7 @@ function main(): void {
         [
           '用法（在仓库根目录执行；Linux / macOS 把 passwd.bat 换成 ./passwd.sh）：',
           '  passwd.bat set <新密码>   设定/修改访问密码（无需旧密码，至少 4 位）',
-          '  passwd.bat clear          解除密码锁定（删除密码，回到首次引导）',
+          '  passwd.bat clear          解除密码锁定（删除密码，恢复本机免密码使用）',
           '  passwd.bat status         查看是否已设密码',
         ].join('\n'),
       );

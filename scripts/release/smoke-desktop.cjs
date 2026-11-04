@@ -23,7 +23,9 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
   await win.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\/$/, { timeout: 1200000 });
   const status = await win.evaluate(async () => (await fetch('/api/auth/status')).json());
   assert.equal(status.success, true);
-  assert.equal(status.data.needsSetup, true);
+  assert.equal(status.data.passwordEnabled, false);
+  assert.equal(status.data.needsSetup, false);
+  assert.equal(fs.existsSync(path.join(profile, 'data/auth.json')), false);
   const info = await desktop.evaluate(({ app }) => ({ version: app.getVersion(), userData: app.getPath('userData') }));
   const expected = require('../../projects/claude_hub/backend/package.json').version;
   assert.equal(info.version, expected);
@@ -47,7 +49,11 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
   const firstOrigin = new URL(win.url()).origin;
   const quickstart = await win.evaluate(async () => (await fetch('/api/auth/quickstart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json());
   assert.equal(quickstart.success, true);
-  const token = quickstart.data.token;
+  assert.equal(quickstart.data.token, '');
+  assert.equal(fs.existsSync(path.join(profile, 'data/auth.json')), false);
+  assert.equal(await win.locator('#loginOverlay').isVisible(), false);
+  assert.equal(await win.locator('#logoutBtn').isVisible(), false);
+  const token = 'workspace-state-survives-restart';
   await win.evaluate(token => localStorage.setItem('clootee-smoke-login', token), token);
   await desktop.close(); desktop = null;
   // Wait for our own backend to release its persisted port before relaunching.
@@ -60,7 +66,9 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
   const secondWindow = await desktop.firstWindow();
   await secondWindow.waitForURL(firstOrigin + '/', { timeout: 1200000 });
   assert.equal(await secondWindow.evaluate(() => localStorage.getItem('clootee-smoke-login')), token);
-  const signedIn = await secondWindow.evaluate(async token => (await fetch('/api/auth/check', { headers: { 'X-Auth-Token': token } })).json(), token);
+  const signedIn = await secondWindow.evaluate(async () => (await fetch('/api/auth/check')).json());
+  assert.equal(await secondWindow.locator('#loginOverlay').isVisible(), false);
+  assert.equal(await secondWindow.locator('#logoutBtn').isVisible(), false);
   assert.equal(signedIn.success, true);
   assert.equal(signedIn.data.version, expected);
   console.log('Packaged desktop: isolated profile, real Node, fresh backend, stable origin and sign-in preserved across restart:', info.version);

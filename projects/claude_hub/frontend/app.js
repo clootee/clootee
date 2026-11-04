@@ -222,10 +222,11 @@ function isDraftSession(s) {
 
 let TOKEN = localStorage.getItem('token') || '';
 // 本次打开是否属于「新用户首启」（尚未设定访问密码）：决定引导结束后是去设密码还是直接进入
-let NEEDS_SETUP = false;
+let SecurityState = { passwordEnabled: false, legacyCredentials: false, localAccess: false };
+let securityKnown = false;
 
 // ── API ──
-async function api(path, body) {
+async function api(path, body, authRetried = false) {
   const headers = { 'x-auth-token': TOKEN };
   if (body) headers['Content-Type'] = 'application/json';
   const res = await fetch(path, {
@@ -234,8 +235,13 @@ async function api(path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401) {
-    showLogin();
-    throw new Error('unauthorized');
+    try {
+      const state = await refreshSecurityState();
+      if (!state.passwordEnabled && state.localAccess && !authRetried) return api(path, body, true);
+      await showLogin();
+    }
+    catch (error) { showAccessError(error.message); }
+    throw new Error(T('securityUnlockRequired'));
   }
   if (!(res.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
     throw new Error(T(['/api/fm/open-containing', '/api/fm/open-file'].includes(path) && res.status === 404
@@ -469,7 +475,8 @@ function applyText() {
   $('loginTitle').textContent = T('loginTitle');
   $('loginPwd').placeholder = T('password');
   $('loginBtn').textContent = T('loginBtn');
-  $('logoutBtn').textContent = T('logout');
+  $('logoutBtn').textContent = T('securityLock');
+  syncSecurityUi();
   $('themeBtn').textContent = '🎨';
   $('themeBtn').title = T('themePick');
   refreshAiCollapseBtn();
@@ -646,9 +653,56 @@ function closeGuide() {
 }
 
 // ── 登录 ──
-function showLogin() {
+async function refreshSecurityState() {
+  const response = await fetch('/api/auth/status', { headers: { 'x-auth-token': TOKEN } });
+  if (!response.ok) throw new Error(T('securityStatusFailed'));
+  const json = await response.json();
+  if (!json.success || typeof json.data?.passwordEnabled !== 'boolean') throw new Error(T('securityStatusFailed'));
+  SecurityState = json.data;
+  securityKnown = true;
+  if (!SecurityState.passwordEnabled) {
+    TOKEN = ''; localStorage.removeItem('token'); hideLogin();
+  }
+  syncSecurityUi();
+  return SecurityState;
+}
+function syncSecurityUi() {
+  const enabled = !!SecurityState.passwordEnabled;
+  if ($('logoutBtn')) $('logoutBtn').parentElement.hidden = !enabled;
+  if ($('legacyAccessReset')) {
+    $('legacyAccessReset').hidden = !(enabled && SecurityState.legacyCredentials && SecurityState.localAccess);
+    $('legacyAccessReset').textContent = T('securityLegacyReset');
+  }
+  if ($('lanForgotLink')) $('lanForgotLink').hidden = !enabled;
+  if ($('securityPasswordStatus')) {
+    $('securityPasswordStatus').textContent = T(enabled ? 'securityEnabled' : 'securityDisabled');
+    $('pwOld').hidden = !enabled;
+    $('pwChangeBtn').textContent = T(enabled ? 'securityChange' : 'securityEnable');
+    $('pwDisableBtn').hidden = !enabled;
+    $('pwDisableBtn').textContent = T('securityDisable');
+    $('pwNew').placeholder = T('securityNewPassword');
+    $('pwConfirm').placeholder = T('securityConfirmPassword');
+  }
+}
+function showAccessError(message) {
+  $('accessErrorTitle').textContent = T('securityStatusFailed');
+  $('accessErrorNote').textContent = message || T('securityStatusFailed');
+  $('accessErrorRetry').textContent = T('hcRetry');
+  $('accessErrorOverlay').hidden = false;
+}
+async function showLogin() {
+  if (!securityKnown) await refreshSecurityState();
+  if (!SecurityState.passwordEnabled) { hideLogin(); return; }
   $('loginOverlay').hidden = false;
+  syncSecurityUi();
   setTimeout(() => $('loginPwd').focus(), 50);
+}
+async function clearLegacyAccess() {
+  if (!SecurityState.localAccess || !SecurityState.legacyCredentials || !confirm(T('securityLegacyConfirm'))) return;
+  try {
+    await api('/api/auth/legacy/disable', { confirm: true });
+    TOKEN = ''; localStorage.removeItem('token'); location.reload();
+  } catch (error) { $('loginErr').textContent = error.message; }
 }
 function hideLogin() {
   $('loginOverlay').hidden = true;
@@ -663,45 +717,15 @@ async function doLogin(e) {
     $('loginPwd').value = '';
     hideLogin();
     await startApp();
-  } catch {
-    $('loginErr').textContent = T('wrongPassword');
+  } catch (error) {
+    $('loginErr').textContent = /invalid password/.test(error.message) ? T('wrongPassword') : error.message;
   }
 }
 function logout() {
+  if (!SecurityState.passwordEnabled) return;
   TOKEN = '';
   localStorage.removeItem('token');
   location.reload();
-}
-
-// ── 首次安装：设定访问密码 ──
-function showSetup() {
-  $('setupTitle').textContent = T('setupTitle');
-  $('setupHint').textContent = T('setupHint');
-  $('setupPwd').placeholder = T('setupPwd');
-  $('setupPwd2').placeholder = T('setupPwd2');
-  $('setupBtn').textContent = T('setupBtn');
-  $('setupOverlay').hidden = false;
-  setTimeout(() => $('setupPwd').focus(), 50);
-}
-async function doSetup(e) {
-  e.preventDefault();
-  $('setupErr').textContent = '';
-  const p1 = $('setupPwd').value;
-  const p2 = $('setupPwd2').value;
-  if (!p1 || p1.length < 4) { $('setupErr').textContent = T('setupTooShort'); return; }
-  if (p1 !== p2) { $('setupErr').textContent = T('setupMismatch'); return; }
-  try {
-    const data = await api('/api/auth/setup', { password: p1 });
-    TOKEN = data.token;
-    NEEDS_SETUP = false;
-    localStorage.setItem('token', TOKEN);
-    $('setupPwd').value = '';
-    $('setupPwd2').value = '';
-    $('setupOverlay').hidden = true;
-    await startApp();
-  } catch (err) {
-    $('setupErr').textContent = err.message || T('setupFail');
-  }
 }
 
 // ── 根目录 ──
@@ -6243,7 +6267,8 @@ function connectWs() {
   clearTimeout(wsReconnectTimer);
   if (hubWs && hubWs.readyState <= WebSocket.OPEN) return;
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
+  const connectionToken = TOKEN;
+  const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(connectionToken)}`);
   hubWs = ws;
   ws.onopen = () => { if (hubWs === ws) resyncVisibleSession(); };
   ws.onmessage = (ev) => {
@@ -6344,7 +6369,19 @@ function connectWs() {
       refreshEngineControl();        // 有任务入队即已开始 → 引擎锁定
     } else if (e.kind === 'taskRemoved') removeTaskLocal(e.taskId);
   };
-  ws.onclose = () => { if (hubWs === ws) wsReconnectTimer = setTimeout(connectWs, 1500); };
+  ws.onclose = async (event) => {
+    if (hubWs !== ws) return;
+    if (event.code === 4001) {
+      try {
+        await refreshSecurityState();
+        if (hubWs !== ws) return;
+        if (SecurityState.passwordEnabled && TOKEN === connectionToken) {
+          TOKEN = ''; localStorage.removeItem('token'); await showLogin(); return;
+        }
+      } catch (error) { showAccessError(error.message); return; }
+    }
+    if (hubWs === ws) wsReconnectTimer = setTimeout(connectWs, 1500);
+  };
 }
 
 // 后台可能漏掉任务结束事件；恢复可见、网络或 WS 后均以服务端快照校准。
@@ -6352,7 +6389,7 @@ let visResyncAt = 0;
 let visResyncRetry = null;
 let visResyncGeneration = 0;
 async function resyncVisibleSession(refreshList = true) {
-  if (document.hidden || !TOKEN) return;
+  if (document.hidden || !securityKnown || (SecurityState.passwordEnabled && !TOKEN)) return;
   if (Date.now() - visResyncAt < 1000) return;
   visResyncAt = Date.now();
   clearTimeout(visResyncRetry);
@@ -6369,7 +6406,7 @@ async function resyncVisibleSession(refreshList = true) {
   ]);
   if (generation !== visResyncGeneration) return;
   clearTimeout(visResyncRetry);
-  if (document.hidden || !TOKEN) return;
+  if (document.hidden || !securityKnown || (SecurityState.passwordEnabled && !TOKEN)) return;
   if (results.some((r) => r.status === 'rejected')) {
     visResyncRetry = setTimeout(() => resyncVisibleSession(refreshList), 3000);
   } else if ((State.session?.tasks || []).some((t) => t.status === 'running' || t.status === 'pending')) {
@@ -7293,6 +7330,9 @@ function bind() {
     if (!e.target.closest('#themePanel') && e.target.id !== 'themeBtn') closeThemePanel();
   });
   $('logoutBtn').addEventListener('click', logout);
+  $('legacyAccessReset').addEventListener('click', clearLegacyAccess);
+  $('accessErrorRetry').addEventListener('click', () => location.reload());
+  $('pwDisableBtn').addEventListener('click', disableSecurityPassword);
   $('aiCollapseBtn').addEventListener('click', toggleAiCollapse);
   $('loginForm').addEventListener('submit', doLogin);
   $('rootSelect').addEventListener('change', (e) => applyRootSelection(e.target.value));
@@ -7376,7 +7416,6 @@ function bind() {
     if (e.target.id === 'templatePickOverlay') closeTemplatePicker();
   });
   // 首次设定密码
-  $('setupForm').addEventListener('submit', doSetup);
   // 新手引导（onboard.js）
   $('onboardBack').addEventListener('click', onboardBack);
   $('onboardNext').addEventListener('click', onboardNext);
@@ -7651,22 +7690,13 @@ function bind() {
   stage.addEventListener('pointercancel', shotUp);
 }
 
-// 已登录后才连接 WS / 加载数据
+// 访问条件已确认后连接 WS / 加载数据（未设安全密码时本机直接使用）
 async function startApp() {
   connectWs();
   Clootee.refresh();
   await loadSettings();
   await loadRoots();
-  await markSetupDone();
   checkAppUpdateSilently(); // 不 await：每次启动静默检测一次，有更新才在齿轮按钮上提示，不打断使用
-}
-
-// 老用户（已有密码即视为老用户）：一律不再弹引导，顺手把 setupDone 补成 true
-async function markSetupDone() {
-  try {
-    const s = await api('/api/settings');
-    if (s && !s.setupDone) await api('/api/settings', { setupDone: true, onboarded: true });
-  } catch { /* 非关键路径，静默跳过 */ }
 }
 
 // ── 设置：默认引擎 ──
@@ -8199,6 +8229,8 @@ async function saveEnginePane() {
 function fillNetworkPane() {
   $('allowLanChk').checked = !!State.settings.allowLan;
   renderLanGuide();
+  void refreshSecurityState().catch(error => { $('pwStatus').textContent = error.message; });
+  $('pwConfirm').value = '';
   $('pwStatus').textContent = '';
   $('pwOld').value = '';
   $('pwNew').value = '';
@@ -9265,18 +9297,32 @@ async function updateEngine(engine) {
 async function changePassword() {
   const oldPassword = $('pwOld').value;
   const newPassword = $('pwNew').value;
-  if (!oldPassword || !newPassword) { $('pwStatus').className = 'sx-note err'; $('pwStatus').textContent = '请填写当前密码与新密码'; return; }
-  try {
-    const data = await api('/api/auth/change', { oldPassword, newPassword });
-    TOKEN = data.token;
-    localStorage.setItem('token', TOKEN);
-    $('pwOld').value = ''; $('pwNew').value = '';
-    $('pwStatus').className = 'sx-note ok';
-    $('pwStatus').textContent = '密码已修改。';
-  } catch (e) {
-    $('pwStatus').className = 'sx-note err';
-    $('pwStatus').textContent = '修改失败：' + e.message;
+  const status = $('pwStatus');
+  if (newPassword.length < 4 || newPassword !== $('pwConfirm').value) {
+    status.className = 'sx-note err'; status.textContent = T('securityPasswordMismatch'); return;
   }
+  try {
+    const data = SecurityState.passwordEnabled
+      ? await api('/api/auth/change', { oldPassword, newPassword })
+      : await api('/api/auth/setup', { password: newPassword });
+    TOKEN = data.token; localStorage.setItem('token', TOKEN);
+    await refreshSecurityState();
+    hideLogin();
+    $('pwOld').value = ''; $('pwNew').value = ''; $('pwConfirm').value = '';
+    status.className = 'sx-note ok'; status.textContent = T('securitySaved');
+    if (hubWs) { hubWs.close(); hubWs = null; } connectWs();
+  } catch (error) { status.className = 'sx-note err'; status.textContent = error.message; }
+}
+async function disableSecurityPassword() {
+  if (!confirm(T('securityDisableConfirm'))) return;
+  try {
+    await api('/api/auth/disable', { password: $('pwOld').value });
+    TOKEN = ''; localStorage.removeItem('token');
+    await refreshSecurityState();
+    hideLogin();
+    $('pwOld').value = ''; $('pwStatus').textContent = T('securityDisabled');
+    if (hubWs) { hubWs.close(); hubWs = null; } connectWs();
+  } catch (error) { $('pwStatus').textContent = error.message; }
 }
 
 // 「忘记密码？」→ 展开/收起内联重置框
@@ -9414,29 +9460,23 @@ async function main() {
   applyTheme();
   applyText();
   bind();
-  // 新用户（尚未设定密码）：必须先走完新手引导（语言/主题/引擎/服务商/模型，不可跳过），
-  // 最后一步才设定访问密码。已完成引导但没设密码（中途刷新）则直接到设密码。
   try {
-    const st = await api('/api/auth/status');
-    if (st && st.needsSetup) {
-      NEEDS_SETUP = true;
-      let done = false;
-      try { const s = await api('/api/settings'); done = !!(s && s.setupDone); } catch { /* 视为未完成 */ }
-      if (done) showSetup();
-      else await showOnboard();
-      return;
+    const status = await refreshSecurityState();
+    if (status.passwordEnabled) {
+      if (!TOKEN) { await showLogin(); return; }
+      try { await api('/api/auth/check'); }
+      catch { await showLogin(); return; }
+    } else if (!status.localAccess) {
+      showAccessError(T('securityLocalOnly')); return;
     }
-  } catch { /* 状态接口异常时按普通登录流程处理 */ }
-  // 用持久 token 探测登录态；无效则弹登录框
-  if (!TOKEN) {
-    showLogin();
-    return;
-  }
-  try {
-    await api('/api/auth/check');
+    // Onboarding configures an AI provider; it never creates a tool password.
+    const settings = await api('/api/settings');
     await startApp();
-  } catch {
-    showLogin();
+    if (!settings.setupDone) await showOnboard();
+  } catch (error) {
+    if (securityKnown && SecurityState.passwordEnabled && error.message === T('securityUnlockRequired')) await showLogin();
+    else showAccessError(error.message);
   }
+
 }
 main();
