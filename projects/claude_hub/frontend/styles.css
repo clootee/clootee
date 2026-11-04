@@ -2028,6 +2028,11 @@ button.sm { padding: 6px 12px; font-size: 13px; border-radius: 7px; }
 .login-card h2 { margin: 0 0 18px; font-size: 18px; }
 .login-card input { margin-bottom: 12px; }
 .login-card button { width: 100%; }
+.login-language { display: flex; justify-content: flex-end; gap: 6px; margin-bottom: 16px; }
+.login-language button { width: auto; min-height: 44px; padding: 6px 12px; }
+.login-language button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.login-install { margin: 18px 0 0; font-size: 13px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }
+.login-install a { color: var(--accent); }
 .login-err { color: var(--red); font-size: 13px; min-height: 18px; margin-bottom: 8px; }
 
 /* ── 目录选择器 ── */

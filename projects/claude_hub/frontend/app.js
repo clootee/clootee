@@ -473,6 +473,11 @@ function applyText() {
   $('shotConfirm').textContent = T('confirm');
   $('dropHint').textContent = T('dropToUpload');
   $('loginTitle').textContent = T('loginTitle');
+  $('loginInstallNote').textContent = T('loginInstallNote');
+  $('loginLangZh').setAttribute('aria-pressed', String(LANG === 'zh'));
+  $('loginLangEn').setAttribute('aria-pressed', String(LANG === 'en'));
+  $('loginPwd').setAttribute('aria-label', T('password'));
+  if ($('loginErr').dataset.wrongPassword) $('loginErr').textContent = T('wrongPassword');
   $('loginPwd').placeholder = T('password');
   $('loginBtn').textContent = T('loginBtn');
   $('logoutBtn').textContent = T('securityLock');
@@ -714,6 +719,7 @@ function hideLogin() {
 async function doLogin(e) {
   e.preventDefault();
   $('loginErr').textContent = '';
+  delete $('loginErr').dataset.wrongPassword;
   try {
     const data = await api('/api/auth/login', { password: $('loginPwd').value });
     TOKEN = data.token;
@@ -722,7 +728,9 @@ async function doLogin(e) {
     hideLogin();
     await startApp();
   } catch (error) {
-    $('loginErr').textContent = /invalid password/.test(error.message) ? T('wrongPassword') : error.message;
+    const wrongPassword = /invalid password/.test(error.message);
+    if (wrongPassword) $('loginErr').dataset.wrongPassword = 'true';
+    $('loginErr').textContent = wrongPassword ? T('wrongPassword') : error.message;
   }
 }
 function logout() {
@@ -7366,6 +7374,8 @@ function bind() {
   $('accessErrorRetry').addEventListener('click', () => location.reload());
   $('pwDisableBtn').addEventListener('click', disableSecurityPassword);
   $('aiCollapseBtn').addEventListener('click', toggleAiCollapse);
+  $('loginLangZh').onclick = () => setLang('zh');
+  $('loginLangEn').onclick = () => setLang('en');
   $('loginForm').addEventListener('submit', doLogin);
   $('rootSelect').addEventListener('change', (e) => applyRootSelection(e.target.value));
   $('addRootBtn').addEventListener('click', addRoot);
