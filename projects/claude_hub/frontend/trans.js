@@ -1,5 +1,6 @@
 // 国际化字典与翻译函数。至少支持 zh / en
 const DICT = {
+  securityLegacyEnabled: { en: 'Old workspace access credentials were found. Earlier versions sometimes created these automatically. If you never set a password, clear the old credentials here on this computer.', zh: '检测到旧版访问凭据，旧版本可能曾自动生成。如果你从未设置过安全密码，可在这台电脑上清除旧凭据，恢复直接使用。' },
   securityLock: {"en": "Lock workspace", "zh": "锁定工作台"},
   securityEnabled: {"en": "Security password enabled. This protects access to this workspace and is separate from provider accounts.", "zh": "已启用安全密码，用于保护工作台访问，与供应商账号无关。"},
   securityDisabled: {"en": "Security password is off. Open and use this tool locally without signing in. You can enable a password here whenever you need it.", "zh": "未设置安全密码，本机打开即可使用，无需登录。只有在此主动启用后才需要密码验证。"},

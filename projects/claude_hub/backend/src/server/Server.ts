@@ -857,7 +857,10 @@ export class Server {
     const t0 = Date.now();
     try {
       const data = fn();
-      if (['auth.setup', 'auth.change', 'auth.reset', 'auth.disable', 'auth.legacyDisable'].includes(ctx)) EventBus.revalidate();
+      if (['auth.setup', 'auth.change', 'auth.reset', 'auth.disable', 'auth.legacyDisable'].includes(ctx)) {
+        EventBus.revalidate();
+        EventBus.broadcast({ kind: 'workspaceSecurity', passwordEnabled: AuthManager.passwordEnabled() });
+      }
       this._logSlow(ctx, t0);
       this._ok(res, data);
     } catch (e: unknown) {
