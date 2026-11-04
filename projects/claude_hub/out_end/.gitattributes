@@ -1,0 +1,2 @@
+# out_end 下的便携运行时（node/、git/、tools/）不入库，改由「安装时」按需下载/安装，
+# 因此无需再为它们关闭行尾转换。bootstrap.* / README.md 按仓库根规则处理即可。

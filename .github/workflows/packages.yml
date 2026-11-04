@@ -1,0 +1,104 @@
+name: Clootee packages
+run-name: packages-${{ inputs.build_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: Unique portal build identifier
+        required: true
+      source_ref:
+        description: Immutable source commit
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: packages-${{ inputs.build_id }}
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test scripts/release/public-snapshot.test.mjs
+      - run: python3 scripts/release/source.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source
+          path: release-output/*.zip
+          if-no-files-found: error
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+            extension: exe
+          - os: macos-latest
+            target: --mac
+            extension: dmg
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/release/public-snapshot.mjs check
+      - run: node scripts/release/prepare.mjs
+      - run: npm ci --no-audit --no-fund
+        working-directory: scripts/release/desktop
+      - run: npx electron-builder ${{ matrix.target }} --publish never
+        working-directory: scripts/release/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Smoke test packaged desktop app
+        run: node scripts/release/smoke-desktop.cjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.extension }}
+          path: scripts/release/desktop/output/*.${{ matrix.extension }}
+          if-no-files-found: error
+  publish:
+    needs: [source, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      BUILD_ID: ${{ inputs.build_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-output
+          merge-multiple: true
+      - run: node scripts/release/manifest.mjs
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix scripts/release/cdn --no-audit --no-fund
+      - name: Upload all packages directly to Tencent COS CDN
+        run: node scripts/release/cdn/publish.cjs
+        env:
+          COS_SECRET_ID: ${{ secrets.CLOOTEE_COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.CLOOTEE_COS_SECRET_KEY }}
+
+      - name: Publish complete package set
+        shell: bash
+        run: |
+          [[ "$BUILD_ID" =~ ^[a-zA-Z0-9-]{1,70}$ ]] || exit 1
+          VERSION=$(node -p "require('./projects/claude_hub/backend/package.json').version")
+          SOURCE_COMMIT=$(git rev-parse HEAD)
+          gh release create "packages-$BUILD_ID" release-output/* --target "$SOURCE_COMMIT" --title "Clootee $VERSION · $BUILD_ID" --notes "Windows EXE, universal macOS DMG and source ZIP. Built from the same source commit. See release.json and SHA256SUMS.txt." --latest=true

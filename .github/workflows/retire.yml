@@ -1,0 +1,31 @@
+name: Retire old distribution objects
+run-name: retire-${{ inputs.release_tag }}
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Current verified release tag already served by the website
+        required: true
+      apply:
+        description: Delete old product distribution objects
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  retire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix scripts/release/cdn --no-audit --no-fund
+      - run: node scripts/release/cdn/retire.cjs
+        env:
+          KEEP_RELEASE_TAG: ${{ inputs.release_tag }}
+          REALLY_DELETE: ${{ inputs.apply && '1' || '0' }}
+          GH_TOKEN: ${{ github.token }}
+          COS_SECRET_ID: ${{ secrets.CLOOTEE_COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.CLOOTEE_COS_SECRET_KEY }}

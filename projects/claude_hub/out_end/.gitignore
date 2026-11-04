@@ -1,0 +1,16 @@
+# out_end 便携运行时：二进制一律不入库，改由「安装时按需下载/安装」，保持仓库轻量。
+#   - node/   便携 Node：start.bat/start.sh 启动时经 scripts/node-env.bat → out_end/bootstrap
+#             自动下载（官方源与 npmmirror 镜像之间回退，等于自动适配国内外）。
+#   - git/    便携 Git：界面「工具链」里一键安装，带实时进度 + 镜像竞速
+#             （Toolchain._installBundledGit / scripts/git.js；Linux/macOS 走系统包管理器）。
+#   - tools/  npm 全局安装的 claude / codex 引擎（界面里带进度一键安装）。
+# 仓库里只保留脚本与说明（bootstrap.* / README.md / .gitattributes 本文件）。
+node/
+git/
+tools/
+
+# 下载来的安装包属于中间产物，解压后即可删，不入库
+*.zip
+*.tar.gz
+*.tar.xz
+*.7z.exe

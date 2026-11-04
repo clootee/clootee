@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1280" />
+  <title>Clootee 小白教程</title>
+  <link rel="icon" href="favicon.ico?v=20260820c" sizes="any" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=20260820c" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=20260820c" />
+  <!-- 复用主站样式变量（主题色随 Clootee 设置走），布局另起 learn.css -->
+  <link rel="stylesheet" href="styles.css?v=20260810f" />
+  <link rel="stylesheet" href="learn.css?v=20260820a" />
+</head>
+<body class="dark learn-page">
+
+  <header class="lp-top">
+    <button id="lpBack" class="lp-ghost"></button>
+    <div class="lp-brand">
+      <h1 id="lpTitle"></h1>
+      <span id="lpSub"></span>
+    </div>
+    <div class="lp-bar-wrap">
+      <span id="lpBarLabel" class="lp-bar-label"></span>
+      <div class="lp-bar"><span id="lpBarFill"></span></div>
+      <span id="lpBarPct" class="lp-bar-pct"></span>
+    </div>
+    <button id="lpLangBtn" class="lp-ghost"></button>
+    <button id="lpAssistBtn" class="lp-ghost"></button>
+  </header>
+
+  <div class="lp-main">
+    <!-- 左：章节导航 -->
+    <nav class="lp-nav">
+      <div class="lp-nav-title" id="lpNavTitle"></div>
+      <button type="button" class="lp-nav-home" id="lpNavHome"></button>
+      <div id="lpNavList"></div>
+      <button type="button" class="lp-nav-cert" id="lpNavCert"></button>
+    </nav>
+
+    <!-- 中：正文 / 测验 / 结果 / 证书 -->
+    <main class="lp-body" id="lpBody"></main>
+
+    <!-- 右：MiniMax 小助手（独立聊天窗，感知本页与选中文字） -->
+    <aside class="lp-assist" id="lpAssist">
+      <div class="as-head">
+        <div class="as-head-txt">
+          <div class="as-title" id="asTitle"></div>
+          <div class="as-sub" id="asSub"></div>
+        </div>
+        <div class="as-head-btns">
+          <button type="button" id="asNewBtn" class="as-icon" title="new chat">＋</button>
+          <button type="button" id="asListBtn" class="as-icon" title="chats">🗂</button>
+          <button type="button" id="asSettingsBtn" class="as-icon" title="settings">⚙</button>
+        </div>
+      </div>
+
+      <!-- 会话列表：一个话题一个会话，避免越聊越长越贵 -->
+      <div class="as-convs" id="asConvs" hidden>
+        <div class="as-convs-title" id="asConvsTitle"></div>
+        <div id="asConvsList"></div>
+      </div>
+
+      <div class="as-settings" id="asSettings" hidden>
+        <label id="asKeyLabel"></label>
+        <input type="password" id="asKey" spellcheck="false" />
+        <label id="asModelLabel"></label>
+        <input type="text" id="asModel" spellcheck="false" />
+        <label id="asBaseLabel"></label>
+        <input type="text" id="asBase" spellcheck="false" />
+        <div class="as-set-row">
+          <button type="button" class="primary" id="asSaveBtn"></button>
+          <a id="asGetKey" href="https://platform.minimaxi.com/console/plan" target="_blank" rel="noreferrer"></a>
+        </div>
+        <p class="as-note" id="asKeyNote"></p>
+      </div>
+
+      <div class="as-log" id="asLog"></div>
+
+      <!-- 轮次告警：20 轮红字建议换会话，40 轮直接锁死输入 -->
+      <div class="as-warn" id="asWarn" hidden></div>
+
+      <div class="as-ctx" id="asCtx" hidden>
+        <span class="as-ctx-txt" id="asCtxTxt"></span>
+        <button type="button" id="asCtxDrop" class="as-ctx-drop"></button>
+      </div>
+
+      <div class="as-input">
+        <!-- 点「＋」/开新会话时浮出的提示气泡，指向输入框 -->
+        <div class="as-tip" id="asTip" hidden></div>
+        <textarea id="asInput" rows="3"></textarea>
+        <button type="button" class="primary" id="asSendBtn"></button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 选中文字后浮出的「问小助手」小按钮 -->
+  <button type="button" id="lpSelAsk" class="lp-sel-ask" hidden></button>
+
+  <script src="trans.js?v=20260810f"></script>
+  <script src="learn-trans.js?v=20260820a"></script>
+  <script src="learn-figs.js?v=20260820a"></script>
+  <script src="learn/ch01.js?v=20260820a"></script>
+  <script src="learn/ch02.js?v=20260820a"></script>
+  <script src="learn/ch03.js?v=20260820a"></script>
+  <script src="learn/ch04.js?v=20260820a"></script>
+  <script src="learn/ch05.js?v=20260820a"></script>
+  <script src="learn/ch06.js?v=20260820a"></script>
+  <script src="learn/ch07.js?v=20260820a"></script>
+  <script src="learn/ch08.js?v=20260820a"></script>
+  <script src="learn/ch09.js?v=20260820a"></script>
+  <script src="learn-assist.js?v=20260820a"></script>
+  <script src="learn.js?v=20260820a"></script>
+</body>
+</html>
