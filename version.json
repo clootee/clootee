@@ -4,7 +4,7 @@
   "force": false,
   "releasedAt": "2026-11-04",
   "notesI18n": {
-    "zh": "安装时自动补齐 Node、Git、Claude Code、Codex 与依赖，镜像竞速与失败换源，运行验证通过后完成安装。",
-    "en": "Automatically install Node, Git, Claude Code, Codex and dependencies during setup, with mirror selection, fallback and executable verification."
+    "zh": "安装时自动补齐 Node、Git、Claude Code、Codex 与依赖，镜像竞速与失败换源，运行验证通过后完成安装。 修复自动生成未知访问密码的问题：安全密码改为主动启用，未启用时本机直接使用，无登录或退出；提供旧版凭据恢复。",
+    "en": "Automatically install Node, Git, Claude Code, Codex and dependencies during setup, with mirror selection, fallback and executable verification. Remove hidden generated workspace passwords: security passwords are opt-in, local use requires no sign-in, and legacy credentials can be recovered locally."
   }
 }

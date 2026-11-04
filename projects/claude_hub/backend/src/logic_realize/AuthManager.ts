@@ -19,15 +19,13 @@ export class AuthManager extends AuthManagerStruct {
 
   protected static _write(rec: AuthRecord): void {
     fs.mkdirSync(path.dirname(Paths.AUTH_FILE), { recursive: true });
-    fs.writeFileSync(Paths.AUTH_FILE, JSON.stringify(rec, null, 2), 'utf8');
+    const temp = Paths.AUTH_FILE + '.tmp';
+    fs.writeFileSync(temp, JSON.stringify(rec, null, 2), { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(temp, Paths.AUTH_FILE);
   }
 
   protected static _genSalt(): string {
     return crypto.randomBytes(16).toString('hex');
-  }
-
-  protected static _randomPassword(): string {
-    return crypto.randomBytes(24).toString('base64url');
   }
 
   protected static _delete(): void {

@@ -114,7 +114,7 @@ Clootee runs the engines with **permission prompts bypassed** so tasks can run u
 
 - Listens on `127.0.0.1` only by default — keep it that way, and **never expose it to the internet**
   (use an SSH tunnel or VPN if you need remote access)
-- **You set the access password** on first launch — there is no default password
+- **Security password is optional** — local use has no sign-in or sign-out. Enable a password explicitly in Settings when needed; provider accounts are separate.
 - API keys and sessions stay in your local `data/`, never committed, never uploaded
 
 Found a security issue? Please open an issue without publishing exploitable details.

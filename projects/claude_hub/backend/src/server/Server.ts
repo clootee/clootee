@@ -15,6 +15,7 @@ import { TaskQueue } from '../logic_realize/TaskQueue';
 import { CostOptimizer } from '../logic_realize/CostOptimizer';
 import { SessionLimit } from '../helper/SessionLimit';
 import { AuthManager } from '../logic_realize/AuthManager';
+import { LocalAccess } from '../helper/LocalAccess';
 import { FsBrowser } from '../logic_realize/FsBrowser';
 import { TemplateManager } from '../logic_realize/TemplateManager';
 import { SessionFiles } from '../logic_realize/SessionFiles';
@@ -52,24 +53,31 @@ export class Server {
     app.use(express.json({ limit: '4mb' }));
     app.use(express.static(Paths.FRONTEND_DIR));
 
-    // ── 首启密码状态（无需鉴权）：needsSetup=true 表示尚未设定密码，前端引导用户创建 ──
-    app.get('/api/auth/status', (_req, res) =>
-      this._wrap(res, 'auth.status', () => ({ needsSetup: AuthManager.needsSetup(), instance: `${process.pid}:${SERVER_STARTED_AT}` })),
+    // Optional security password is independent of provider accounts.
+    app.get('/api/auth/status', (req, res) =>
+      this._wrap(res, 'auth.status', () => ({ needsSetup: false,
+        passwordEnabled: AuthManager.passwordEnabled(), legacyCredentials: AuthManager.legacyCredentials(),
+        localAccess: this._isLocalRequest(req), instance: `${process.pid}:${SERVER_STARTED_AT}` })),
     );
-    // ── 首次设定密码（仅在尚未设定时可用，无需鉴权） ──
     app.post('/api/auth/setup', (req, res) =>
-      this._wrap(res, 'auth.setup', () => ({ token: AuthManager.setup(req.body.password) })),
+      this._wrap(res, 'auth.setup', () => {
+        if (!this._isLocalRequest(req)) throw new Error('Set a security password on the computer running Clootee');
+        return { token: AuthManager.setup(req.body.password) };
+      }),
     );
-    // ── 一键开始（无需鉴权）：尚未设定密码时生成随机本机密码并直接登录。
-    //    只接受本机回环 + Host 为 localhost/127.0.0.1 的请求：局域网里的其他机器、以及借 DNS 重绑定
-    //    冒充本机的网页都拿不到这个口子（设定后接口立即失效，与 /api/auth/setup 同一条件） ──
     app.post('/api/auth/quickstart', (req, res) =>
       this._wrap(res, 'auth.quickstart', () => {
-        if (!this._isLocalRequest(req)) throw new Error('quickstart: 只能在本机浏览器里使用（请用 http://localhost 打开）');
+        if (!this._isLocalRequest(req)) throw new Error('Local access required');
         return { token: AuthManager.quickstart() };
       }),
     );
-    // ── 登录（无需鉴权） ──
+    app.post('/api/auth/legacy/disable', (req, res) =>
+      this._wrap(res, 'auth.legacyDisable', () => {
+        if (!this._isLocalRequest(req) || req.body.confirm !== true) throw new Error('Local confirmation required');
+        AuthManager.clearLegacy();
+        return { passwordEnabled: false };
+      }),
+    );
     app.post('/api/auth/login', (req, res) =>
       this._wrap(res, 'auth.login', () => ({ token: AuthManager.login(req.body.password) })),
     );
@@ -90,14 +98,9 @@ export class Server {
 
     // ── 鉴权中间件：其余 /api/* 必须携带有效 token ──
     app.use('/api', (req: Request, res: Response, next) => {
-      // 尚未设定密码时：放开新手引导所需的少量接口（引导走完才设密码）
-      if (AuthManager.isOpenDuringSetup(req.path)) {
-        next();
-        return;
-      }
       const token = (req.headers['x-auth-token'] as string) || String(req.query.token || '');
-      if (!AuthManager.verify(token)) {
-        res.status(401).json({ success: false, error: 'unauthorized' });
+      if (!this._canAccess(req, token)) {
+        res.status(AuthManager.passwordEnabled() ? 401 : 403).json({ success: false, error: AuthManager.passwordEnabled() ? 'security_password_required' : 'local_access_required' });
         return;
       }
       next();
@@ -132,6 +135,13 @@ export class Server {
       this._wrap(res, 'auth.reset', () => ({
         token: AuthManager.resetPassword(req.body.newPassword),
       })),
+    );
+
+    app.post('/api/auth/disable', (req, res) =>
+      this._wrap(res, 'auth.disable', () => {
+        AuthManager.disable(req.body.password);
+        return { passwordEnabled: false };
+      }),
     );
 
     // ── 目录浏览（选择根目录用） ──
@@ -761,11 +771,11 @@ export class Server {
     wss.on('connection', (ws, req) => {
       // WebSocket 同样校验 token（通过 query 传入）
       const token = new URL(req.url || '', 'http://x').searchParams.get('token') || undefined;
-      if (!AuthManager.verify(token)) {
+      if (!this._canAccess(req as Request, token)) {
         ws.close(4001, 'unauthorized');
         return;
       }
-      EventBus.register(ws);
+      EventBus.register(ws, () => this._canAccess(req as Request, token));
     });
 
     // 安全：默认仅 localhost 可访问；设置里开启「允许局域网访问」后才绑定 0.0.0.0（需重启生效）。
@@ -831,11 +841,11 @@ export class Server {
   // 统一成功响应
   // 请求是否来自本机浏览器：对端是回环地址，且 Host 头是 localhost / 127.0.0.1 / [::1]（防 DNS 重绑定）
   private static _isLocalRequest(req: Request): boolean {
-    const ip = String(req.socket.remoteAddress || '');
-    const loopIp = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-    const host = String(req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
-    const loopHost = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-    return loopIp && loopHost;
+    return LocalAccess.isLocal(req);
+  }
+
+  private static _canAccess(req: Request, token: string | undefined): boolean {
+    return AuthManager.passwordEnabled() ? AuthManager.verify(token) : this._isLocalRequest(req);
   }
 
   private static _ok(res: Response, data: unknown): void {
@@ -847,6 +857,7 @@ export class Server {
     const t0 = Date.now();
     try {
       const data = fn();
+      if (['auth.setup', 'auth.change', 'auth.reset', 'auth.disable', 'auth.legacyDisable'].includes(ctx)) EventBus.revalidate();
       this._logSlow(ctx, t0);
       this._ok(res, data);
     } catch (e: unknown) {

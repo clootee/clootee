@@ -21,21 +21,13 @@
       <div class="login-err" id="loginErr"></div>
       <input type="password" id="loginPwd" autocomplete="current-password" />
       <button type="submit" class="primary" id="loginBtn"></button>
+      <button type="button" id="legacyAccessReset" hidden></button>
     </form>
   </div>
 
-  <!-- 首次安装：设定访问密码 -->
-  <div class="login-overlay" id="setupOverlay" hidden>
-    <form class="login-card" id="setupForm">
-      <h2 id="setupTitle"></h2>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:10px" id="setupHint"></div>
-      <div class="login-err" id="setupErr"></div>
-      <input type="password" id="setupPwd" autocomplete="new-password" placeholder="" />
-      <input type="password" id="setupPwd2" autocomplete="new-password" placeholder="" />
-      <button type="submit" class="primary" id="setupBtn"></button>
-    </form>
+  <div class="login-overlay" id="accessErrorOverlay" hidden>
+    <div class="login-card"><h2 id="accessErrorTitle"></h2><p id="accessErrorNote"></p><button type="button" id="accessErrorRetry"></button></div>
   </div>
-
   <!-- 首次安装：明确选语言 -> 选供应商 -> 原地登录或配置自己的供应商 -->
   <div class="login-overlay" id="onboardOverlay" hidden>
     <div class="onboard-card">
@@ -383,7 +375,7 @@
       </div>
       <div class="sx-body">
         <div class="sx-nav" id="settingsNav"></div>
-        <div class="sx-logout-row">
+        <div class="sx-logout-row" hidden>
           <button id="logoutBtn" class="sx-logout-btn"></button>
         </div>
       </div>
@@ -612,7 +604,7 @@
           </ol>
           <div class="lan-addr-list" id="lanAddrList"></div>
           <div class="lan-guide-hintrow">
-            <span class="lan-guide-hint" id="lanGuideHint">首次访问需输入本工作台的访问密码；打开后可像本机一样使用。</span>
+            <span class="lan-guide-hint" id="lanGuideHint">局域网访问需先在本机主动设置安全密码；未设置时仅本机可直接使用。</span>
             <a href="#" class="lan-forgot" id="lanForgotLink">忘记密码？</a>
           </div>
           <!-- 忘记密码 → 直接重置（无需旧密码；已在设置面板内即视为本机授权） -->
@@ -627,11 +619,14 @@
           </div>
         </div>
           <!-- 修改访问密码（与局域网访问同属「谁能进来」，归到本板块） -->
-          <div class="sx-sec">修改访问密码</div>
+          <div class="sx-sec">安全密码（可选）</div>
+          <div class="sx-note" id="securityPasswordStatus"></div>
           <div class="sx-row">
             <input class="sx-input sx-grow" id="pwOld" type="password" placeholder="当前密码" />
-            <input class="sx-input sx-grow" id="pwNew" type="password" placeholder="新密码" />
-            <button class="sx-btn sx-btn-auto" id="pwChangeBtn">修改</button>
+            <input class="sx-input sx-grow" id="pwNew" type="password" autocomplete="new-password" placeholder="新安全密码" />
+            <input class="sx-input sx-grow" id="pwConfirm" type="password" autocomplete="new-password" placeholder="再次输入新安全密码" />
+            <button class="sx-btn sx-btn-auto" id="pwChangeBtn">启用安全密码</button>
+            <button class="sx-btn sx-btn-auto" id="pwDisableBtn" hidden>关闭安全密码</button>
           </div>
           <div class="sx-note" id="pwStatus"></div>
         </div>
@@ -1201,11 +1196,11 @@
     </div>
   </dialog>
 
-  <script src="trans.js?v=20261104runtime"></script>
+  <script src="trans.js?v=20261104security"></script>
   <script src="workspace.js?v=20261029sessionfix"></script>
   <script src="rootwizard.js?v=20261031quickstart"></script>
   <script src="health.js?v=20261104runtime"></script>
-  <script src="onboard.js?v=20261103onboard"></script>
+  <script src="onboard.js?v=20261104security"></script>
   <script src="galaxy.js?v=20260801p"></script>
   <script src="cyber.js?v=20260801z1"></script>
   <script src="rain.js?v=20260801i"></script>
@@ -1223,6 +1218,6 @@
   <script src="cost-optimization.js?v=20261015a"></script>
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
-  <script src="app.js?v=20261104runtime"></script>
+  <script src="app.js?v=20261104security"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-// 访问鉴权（调度骨架）。密码由用户首次安装时自行设定，持久化为 {salt, hash}。
+// 可选安全密码：仅在用户主动启用时写入 {salt, hash, kind}，启动不会生成密码。
 // token = 存储的 hash 本身（= sha256(密码 + 盐)），跨重启稳定；客户端持久保存，一次登录长期免登。
 // 具体文件 IO（读写 auth.json、生成随机盐）由 Realize 实现。
 import { Hash } from '../helper/Hash';
@@ -6,58 +6,21 @@ import { Hash } from '../helper/Hash';
 export interface AuthRecord {
   salt: string;
   hash: string;
+  kind?: 'user';
 }
 
 export class AuthManagerStruct {
-  // 是否尚未设定密码（首次安装 → 前端引导用户设定）
-  static needsSetup(): boolean {
-    return this._read() === null;
+  static passwordEnabled(): boolean { return this._read() !== null; }
+  static legacyCredentials(): boolean {
+    const rec = this._read();
+    return !!rec && rec.kind !== 'user';
   }
-
-  // 新手引导（设定密码之前）需要访问的接口白名单（相对 /api 的路径）。
-  // 顺序：先走完引导（语言/主题/引擎/服务商/模型）→ 最后才设定密码，故这些接口必须在无 token 时可用。
-  static readonly SETUP_OPEN_PATHS: string[] = [
-    '/settings',
-    '/engine/status',
-    '/engine/providers',
-    '/engine/models',
-    '/engine/update',
-    '/engine/config',
-    '/codex/key',
-    '/codex/profile',
-    // 引导第一步就是网络体检（没网/连不上 Claude 时先给出路），必须在设密码之前可用
-    '/net/check',
-    '/net/quick',
-    // 引导里的「登录 Claude 账号」整套流程（起流程 / 拿链接 / 交授权码 / 放弃）
-    '/claude/auth/status',
-    '/claude/auth/session',
-    '/claude/auth/login',
-    '/claude/auth/code',
-    '/claude/auth/cancel',
-    // 引导里的「登录 Codex 账号」整套流程（起流程 / 拿链接短码 / 提交 API Key / 放弃）
-    '/codex/auth/status',
-    '/codex/auth/session',
-    '/codex/auth/login',
-    '/codex/auth/cancel',
-    // 引导里缺什么装什么（Node / Git / 引擎）
-    '/toolchain/status',
-    '/toolchain/install',
-    // 一键开始：领取 Clootee 默认服务商的设备令牌并切过去
-    '/console/login',
-    '/console/activate',
-    '/console/login/code',
-    '/console/login/email',
-    '/console/login/start',
-    '/console/login/poll',
-    '/console/status',
-  ];
-
-  // 是否属于「尚未设定密码期间」可免鉴权的引导接口。
-  // 只有 needsSetup()（此时任何人都能 POST /api/auth/setup 接管本实例）才放开，设定密码后立即收紧。
-  static isOpenDuringSetup(path: string): boolean {
-    if (typeof path !== 'string' || !path)
-      throw new Error(`isOpenDuringSetup: invalid path=${path}`);
-    return this.needsSetup() && this.SETUP_OPEN_PATHS.indexOf(path) >= 0;
+  static disable(password: string): void { this.login(password); this.clear(); }
+  // Unmarked records may contain old automatically generated passwords. Only a
+  // local, explicitly confirmed recovery request may clear them (route checks locality).
+  static clearLegacy(): void {
+    if (!this.legacyCredentials()) throw new Error('No legacy credentials to clear');
+    this.clear();
   }
 
   // 首次设定密码：仅在尚未设定时允许；返回登录 token
@@ -68,15 +31,14 @@ export class AuthManagerStruct {
       throw new Error('setup: 密码至少 4 位');
     const salt = this._genSalt();
     const hash = Hash.sha256(password + '::' + salt);
-    this._write({ salt, hash });
+    this._write({ salt, hash, kind: 'user' });
     return hash;
   }
 
-  // 一键开始（免设密码）：生成一个强随机本机密码直接完成首次设定，返回登录 token 让浏览器记住。
-  // 本机依然有密码保护（不会变成「谁都能连上执行命令」），只是用户不用想、不用记；
-  // 以后想换个自己记得住的，在设置里改即可。只允许在尚未设定时调用（路由层还会限制必须本机回环访问）。
+  // Backward-compatible endpoint: starting the tool never creates a password.
   static quickstart(): string {
-    return this.setup(this._randomPassword());
+    if (this.passwordEnabled()) throw new Error('Security password is enabled');
+    return '';
   }
 
   // 校验密码，正确则返回长期有效的 token
@@ -95,7 +57,7 @@ export class AuthManagerStruct {
     if (!newPassword || newPassword.length < 4) throw new Error('changePassword: 新密码至少 4 位');
     const salt = this._genSalt();
     const hash = Hash.sha256(newPassword + '::' + salt);
-    this._write({ salt, hash });
+    this._write({ salt, hash, kind: 'user' });
     return hash;
   }
 
@@ -106,7 +68,7 @@ export class AuthManagerStruct {
     if (!newPassword || newPassword.length < 4) throw new Error('resetPassword: 新密码至少 4 位');
     const salt = this._genSalt();
     const hash = Hash.sha256(newPassword + '::' + salt);
-    this._write({ salt, hash });
+    this._write({ salt, hash, kind: 'user' });
     return hash;
   }
 
@@ -116,12 +78,12 @@ export class AuthManagerStruct {
     if (!newPassword || newPassword.length < 4) throw new Error('cliSetPassword: 新密码至少 4 位');
     const salt = this._genSalt();
     const hash = Hash.sha256(newPassword + '::' + salt);
-    this._write({ salt, hash });
+    this._write({ salt, hash, kind: 'user' });
     return hash;
   }
 
-  // 解除密码锁定：删除已设定的密码，恢复到「尚未设定」状态（needsSetup=true）。
-  // 之后前端重新走引导设定新密码；仅供本机命令行救急，避免忘记密码后彻底无法访问。
+  // 解除密码锁定：删除已设定的密码，恢复到「尚未设定」状态。
+  // 清除后恢复本机直接使用，不再要求设密码。
   // 返回是否确实删除了记录（原本无密码则返回 false）。
   static clear(): boolean {
     if (this._read() === null) return false;
@@ -156,7 +118,5 @@ export class AuthManagerStruct {
   protected static _delete(): void {
     throw new Error('Not implemented');
   }
-  protected static _randomPassword(): string {
-    throw new Error('Not implemented');
-  }
+
 }

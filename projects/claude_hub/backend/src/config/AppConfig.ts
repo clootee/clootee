@@ -61,7 +61,7 @@ export const AppConfig = {
   // /compact 需读取整段对话再压缩，耗时远超普通斜杠命令，单独给 10 分钟超时
   COMMAND_COMPACT_TIMEOUT_MS: Number(process.env.COMMAND_COMPACT_TIMEOUT_MS) || 1000 * 60 * 10,
 
-  // 注意：访问密码不在此配置。密码由用户首次打开界面时自行设定，
+  // 注意：访问密码不在此配置。安全密码仅在用户从设置中主动启用时设定，
   // 以 {随机盐, sha256(密码+盐)} 持久化到 data/auth.json（见 AuthManager）。
   // 本项目不存在任何内置/默认口令。
 
