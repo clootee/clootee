@@ -474,6 +474,7 @@ function applyText() {
   $('dropHint').textContent = T('dropToUpload');
   $('loginTitle').textContent = T('loginTitle');
   $('loginInstallNote').textContent = T('loginInstallNote');
+  $('loginInstallLabel').textContent = T('loginInstallLabel');
   $('loginLangZh').setAttribute('aria-pressed', String(LANG === 'zh'));
   $('loginLangEn').setAttribute('aria-pressed', String(LANG === 'en'));
   $('loginPwd').setAttribute('aria-label', T('password'));
@@ -704,7 +705,6 @@ async function showLogin() {
   if (!SecurityState.passwordEnabled) { hideLogin(); return; }
   $('loginOverlay').hidden = false;
   syncSecurityUi();
-  setTimeout(() => $('loginPwd').focus(), 50);
 }
 async function clearLegacyAccess() {
   if (!SecurityState.localAccess || !SecurityState.legacyCredentials || !confirm(T('securityLegacyConfirm'))) return;
