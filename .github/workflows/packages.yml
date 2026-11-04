@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test scripts/release/public-snapshot.test.mjs
+      - run: node --test scripts/release/public-snapshot.test.mjs scripts/release/setup.test.cjs
       - run: python3 scripts/release/source.py
       - uses: actions/upload-artifact@v4
         with:

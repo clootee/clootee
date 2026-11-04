@@ -8,7 +8,7 @@
 ```
 out_end/
 ├── node/        便携版 Node.js（Windows: node.exe、npm.cmd 直接在此；Linux/macOS: bin/node）
-├── git/         便携版 Git（Windows: cmd/git.exe 的 MinGit；Linux/macOS 走系统包管理器，不落这里）
+├── git/         便携版 Git（Windows: cmd/git.exe 的 PortableGit，含 Git Bash；Linux/macOS 走系统包管理器，不落这里）
 ├── tools/       内置的 claude code / codex（npm --prefix 安装目标）
 │   ├── claude.cmd / bin/claude
 │   ├── codex.cmd  / bin/codex
@@ -18,28 +18,20 @@ out_end/
 └── README.md
 ```
 
-> 二进制文件（node/、git/、tools/）都不进入 git 仓库（见 .gitignore）——保持仓库轻量，改为「安装时」按需装：
-> - **node**：启动时由 `scripts/node-env.bat`（Windows）/`node-env.sh`（Unix）→ `bootstrap` 自动下载。
-> - **git**：在软件界面「工具链」里一键安装，带实时进度与镜像竞速（`Toolchain._installBundledGit`）；Linux/macOS 走系统包管理器。
-> - **tools（引擎）**：界面里带进度一键 `npm install -g`。
->
-> 分发时若把已下好的 `node/`、`git/`、`tools/` 一起拷贝，目标机器就能离线直接跑。
+> 二进制文件不进入 Git 仓库。安装器自动检查 Node、npm、Git、Claude Code、Codex 及对应平台依赖；已可运行的组件直接复用，缺失或损坏的自动补齐。
 
-## 默认只下 Node，不下引擎
+## 自动完成安装
 
-`node/` 约 30MB，是跑起来的必需品；而 `tools/` 里的引擎很大（claude ~500MB、codex ~400MB），
-多数人本机已经装过 claude，没装的人在**界面引导里点一下就能装，还有实时进度**，
-所以 bootstrap **默认不下载引擎**，只有显式 `--with-tools` 才装。
+- **Windows EXE**：在安装过程自动补齐 Git（含 Git Bash）和两个引擎，再结束安装。
+- **macOS DMG**：拖入 Applications 后首次打开，自动完成依赖安装，再进入工作界面。
+- **源码 ZIP（Windows / macOS / Linux）**：运行根目录对应的启动入口，自动获取 Node、安装后端依赖、编译并安装 Git 和两个引擎。
+- 直接运行 `bootstrap.bat` 或 `bash bootstrap.sh` 也会执行完整安装。`--node-only` 是启动器内部用于获取 Node 的选项；`--with-tools` 保留兼容。
 
-## 用法
+官方源与镜像先测速，选择较快来源；安装失败自动切换备用源。引擎通过 `npm --prefix` 安装到 `tools/`，包含可选的平台二进制依赖；不改系统全局 npm 安装。Windows 桌面版和 macOS 桌面版的工具保存在跨版本共享的用户数据目录。
 
-- **Windows**：双击 `bootstrap.bat`（只下便携 Node）；要连引擎一起装用 `bootstrap.bat --with-tools`。
-- **Linux/macOS**：`bash bootstrap.sh`，同样可加 `--with-tools`。
-- 加 `-y` 表示非交互（结束不停顿），start / install 脚本自动调用时用的就是它。
+所有必需组件必须实际运行验证成功，才显示安装完成。失败时保留日志，重新打开会重试。Linux 系统 Git 安装可能需要输入 sudo 密码；macOS 缺少 Git 时自动安装 Command Line Tools，系统可能要求管理员授权。
 
-下载源（官方 / 国内镜像）会先各探测一次响应速度，谁快用谁；下载失败自动换另一个重试。
-
-完成后回到项目根目录双击 `start.bat`（或 `bash start.sh`）即可使用。
+完成后使用根目录 `Windows_Start.bat`、`Mac_Start.command` 或 `Linux_Start.sh` 启动源码版。
 
 ## 与「电脑内置」的关系（优先级）
 

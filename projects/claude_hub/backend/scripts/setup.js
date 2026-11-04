@@ -9,16 +9,13 @@
  * 为什么是 .js 而不是 .ts：本脚本要在「TypeScript / ts-node 还没装」的时刻运行，
  * 必须只依赖 Node 内置模块。
  *
- * AI 引擎（claude / codex）**不随包内置**，一律 `npm install -g`（源在官方与国内镜像间竞速选出）。
- * 默认也**不自动下载**：它们体积很大（各 400~500MB），而且
- *   ① 多数人本机已装过，PATH 命中就什么都不用做；
- *   ② 没装的人在界面引导「选引擎」那一步点一下即可安装，那里有进度显示，
- *      比在这个黑窗口里静默跑几分钟 npm 的体验好得多。
- * 这里只做「报告」，除非你显式要求安装。
+ * 自动补齐 Git、Claude Code 和 Codex；仅在真实命令可运行后报告就绪。
+ * 新下载的引擎安装到应用自己的 out_end/tools，不修改系统全局 npm。
+ * --runtime-only 用于已经编译并附带生产依赖的桌面包。
  *
  * 用法：
  *   node scripts/setup.js               自动模式：缺什么补什么，已就绪则秒退（start 脚本用）
- *   node scripts/setup.js --full        完整安装：校验依赖 + 重新编译（仍不下载引擎）
+ *   node scripts/setup.js --full        完整安装：校验依赖 + 重新编译（包括 Git 和两个引擎）
  *   node scripts/setup.js --check       只体检不改动，打印一份环境报告
  *   node scripts/setup.js --with-claude 顺便 npm 全局安装/更新 claude code
  *   node scripts/setup.js --with-codex  顺便 npm 全局安装/更新 codex
@@ -48,6 +45,7 @@ const FRONTEND = path.join(HUB, 'frontend');
 const DIST_ENTRY = path.join(BACKEND, 'dist', 'index.js');
 
 const MIN_NODE_MAJOR = 18;
+const RUNTIME_ONLY = process.argv.includes('--runtime-only');
 const ENGINE_PKGS = {
   claude: '@anthropic-ai/claude-code@latest',
   codex: '@openai/codex@latest',
@@ -63,7 +61,7 @@ const WANT_ENGINE = {
   codex: !NO_TOOLS && (has('--with-codex') || has('--with-tools')),
 };
 const QUIET = has('--quiet');
-const WANT_GIT_FULL = has('--with-git-full');
+const WANT_GIT_FULL = process.platform === 'win32' || has('--with-git-full');
 const WANT_GIT = !has('--no-git');
 
 // 选定的 npm 源（启动时探测一次，见 scripts/registry.js）
@@ -106,9 +104,9 @@ function runNpm(args, cwd) {
   const env = { ...process.env };
   delete env.NODE_ENV;
   const opts = { cwd: cwd || BACKEND, stdio: 'inherit', env, windowsHide: true };
-  if (cli) return spawnSync(process.execPath, [cli, ...args], opts);
+  if (cli) return spawnSync(process.execPath, [cli, ...args, '--fetch-retries=1', '--fetch-timeout=60000'], { ...opts, timeout: 10 * 60 * 1000 });
   // 兜底：走 PATH 上的 npm（Windows 是 npm.cmd，必须 shell:true）
-  return spawnSync('npm', args, { ...opts, shell: process.platform === 'win32' });
+  return spawnSync('npm', [...args, '--fetch-retries=1', '--fetch-timeout=60000'], { ...opts, shell: process.platform === 'win32', timeout: 10 * 60 * 1000 });
 }
 
 // 选定 npm 源：用户配过就用用户的，否则并发探测官方源与国内镜像，谁快用谁。
@@ -331,54 +329,44 @@ function checkFrontend() {
   return true;
 }
 
-// ── 7. AI 引擎（claude / codex）──────────────────────────────────────────────
-// 引擎不再内置，一律 npm 全局安装。这里保留对老版本 out_end/tools 里那份的识别，
-// 免得已经装过的用户被重复提示「未安装」。
-function legacyBundledEngine(name) {
-  const p =
-    process.platform === 'win32'
-      ? path.join(TOOLS, `${name}.cmd`)
-      : path.join(TOOLS, 'bin', name);
-  return fs.existsSync(p) ? p : null;
+// ── 7. Required AI engines ─────────────────────────────────────────────────
+function bundledEngine(name) {
+  const file = process.platform === 'win32' ? path.join(TOOLS, `${name}.cmd`) : path.join(TOOLS, 'bin', name);
+  return fs.existsSync(file) ? file : null;
 }
-
+function engineUsable(file) {
+  if (!file) return false;
+  const r = spawnSync(process.platform === 'win32' && /\.cmd$/i.test(file) ? `"${file}"` : file, ['--version'], {
+    encoding: 'utf8', windowsHide: true, timeout: 30000,
+    shell: process.platform === 'win32' && /\.cmd$/i.test(file),
+  });
+  return r.status === 0 && !!String(r.stdout || '').trim();
+}
 async function installEngine(name) {
   await pickRegistry();
-  step(`全局安装 ${name} / npm install -g ${ENGINE_PKGS[name]}（约 400-500MB，请耐心）...`);
-  const args = ['install', '-g', ENGINE_PKGS[name], '--no-audit', '--no-fund'];
+  step(`安装 ${name} / installing ${ENGINE_PKGS[name]} ...`);
+  const args = ['install', '-g', ENGINE_PKGS[name], '--prefix', TOOLS,
+    '--include=optional', '--no-audit', '--no-fund'];
   const r = npmInstallWithFallback(args, HUB, name);
-  if (r.status !== 0) {
-    warn(`${name} 安装失败（不影响启动，可稍后在界面里一键安装）/ install failed`);
+  if (r.status !== 0 || !engineUsable(bundledEngine(name))) {
+    fail(`${name} 安装或运行验证失败 / installation or version check failed. 请检查网络后重新启动安装 / retry setup after checking your connection.`);
     return false;
   }
   ok(`${name} 就绪 / ready`);
   return true;
 }
-
-// 引擎缺失只警告不判死：软件能启动，界面引导里可以带进度条一键装。
-// 默认**不下载**（各 400-500MB）：只有显式 --with-claude / --with-codex / --with-tools 才装。
 async function checkEngines() {
+  if (NO_TOOLS) return true;
+  let good = true;
   for (const name of ['claude', 'codex']) {
-    const sys = onPath(name);
-    const bun = legacyBundledEngine(name);
-    if (sys || bun) {
-      ok(`${name}: ${sys ? `已安装 / installed (${sys})` : ''}${sys && bun ? ' + ' : ''}${bun ? '旧内置版 / legacy bundled' : ''}`);
-      if (WANT_ENGINE[name] && MODE !== 'check') await installEngine(name); // 显式要求 = 更新到最新版
-      continue;
-    }
-    if (WANT_ENGINE[name] && MODE !== 'check') {
-      await installEngine(name);
-      continue;
-    }
-    if (name === 'claude') {
-      warn('claude 未安装 / not installed —— 启动后在引导页「选引擎」一步可一键安装（带进度），' +
-        `或此处加 --with-claude 现在装，或自行执行 npm install -g ${ENGINE_PKGS.claude}`);
-    } else {
-      warn('codex 未安装 / not installed —— 只在你要用 Codex 引擎时才需要，界面里可一键安装，' +
-        `或此处加 --with-codex，或自行执行 npm install -g ${ENGINE_PKGS.codex}`);
-    }
+    const file = [onPath(name), bundledEngine(name)].find(engineUsable);
+    if (file && !WANT_ENGINE[name]) { ok(`${name}: ${file}`); continue; }
+    if (MODE === 'check') {
+      if (file) ok(`${name}: ${file}`);
+      else { fail(`${name} 未就绪 / not ready`); good = false; }
+    } else if (!(await installEngine(name))) good = false;
   }
-  return true;
+  return good;
 }
 
 // ── 8. git（会话里的「推送到云端」功能依赖它）────────────────────────────────
@@ -389,31 +377,48 @@ async function checkEngines() {
 function gitUsable() {
   const p = onPath('git');
   if (!p) return null;
-  const r = spawnSync(p, ['--version'], { encoding: 'utf-8', windowsHide: true });
+  const r = spawnSync(p, ['--version'], { encoding: 'utf-8', windowsHide: true, timeout: 30000 });
   return r.status === 0 ? p : null;
+}
+
+function configureGitBash(git) {
+  const root = path.resolve(path.dirname(git), '..');
+  const bash = [process.env.CLAUDE_CODE_GIT_BASH_PATH, path.join(root, 'bin', 'bash.exe'),
+    path.join(root, 'usr', 'bin', 'bash.exe')].find(p => p && fs.existsSync(p));
+  if (!bash) return false;
+  const r = spawnSync(bash, ['--version'], { windowsHide: true, timeout: 15000 });
+  if (r.status !== 0) return false;
+  process.env.CLAUDE_CODE_GIT_BASH_PATH = bash;
+  return true;
 }
 
 async function checkGit() {
   const sys = gitUsable();
-  const bun = gitInstaller.bundled(GIT_DIR);
+  const bundled = gitInstaller.bundled(GIT_DIR);
+  const bun = bundled && spawnSync(bundled, ['--version'], { windowsHide: true, timeout: 30000 }).status === 0 ? bundled : null;
   if (sys || bun) {
-    ok(`git: ${sys || `${bun}（内置 / bundled）`}`);
-    return true;
+    const selected = sys || bun;
+    if (process.platform === 'win32' && !configureGitBash(selected)) {
+      if (MODE === 'check') { fail('Git Bash 未就绪 / Git Bash missing'); return false; }
+    } else {
+      ok(`git: ${sys || `${bun}（内置 / bundled）`}`);
+      return true;
+    }
   }
-  if (!WANT_GIT || MODE === 'check') {
-    warn(
-      '未检测到 git / git not found —— 软件更新与 git 推送功能将不可用 / software updates and git push unavailable. ' +
-        `重新运行启动脚本可自动安装 / run the start script to install ${process.platform === 'win32' ? '便携版（约 41MB，走镜像）' : ''}，` +
-        `或手动：${gitInstaller.manualHint()}`
-    );
-    return true;
+  if (!WANT_GIT) return true;
+  if (MODE === 'check') {
+    fail('git 未就绪 / git not ready');
+    return false;
   }
   step('安装 git / installing git ...');
   const r = await gitInstaller.install(GIT_DIR, { full: WANT_GIT_FULL, log: (s) => step(s) });
   if (!r.ok) {
-    warn(`git 安装失败 / install failed: ${r.error} —— 手动安装：${gitInstaller.manualHint()}`);
-    return true;
+    fail(`git 安装失败 / install failed: ${r.error}`);
+    return false;
   }
+  process.env.PATH = path.dirname(r.bin) + path.delimiter + process.env.PATH;
+  if (process.platform === 'win32' && !configureGitBash(r.bin)) { fail('Git Bash 未就绪 / Git Bash missing'); return false; }
+  if (!gitUsable()) { fail('git 运行验证失败 / Git version check failed'); return false; }
   ok(`git 就绪 / ready: ${r.bin}${r.version ? ` (${r.version})` : ''}`);
   return true;
 }
@@ -431,15 +436,20 @@ async function main() {
   const hard = [checkNode(), checkNpm()];
   if (hard.includes(false)) return finish(false, false);
 
-  if ((await checkDeps()) === false) return finish(false, false);
-
-  const b = checkBuild();
-  if (b === false) return finish(false, false);
-  if (b === 'degraded') degraded = true;
-
+  if (!RUNTIME_ONLY) {
+    if ((await checkDeps()) === false) return finish(false, false);
+    const b = checkBuild();
+    if (b === false) return finish(false, false);
+    if (b === 'degraded') degraded = true;
+  } else {
+    const missing = missingDeps(RUNTIME_DEPS);
+    if (missing.length || !fs.existsSync(DIST_ENTRY)) { fail('桌面运行文件缺失 / incomplete desktop payload'); return finish(false, false); }
+  }
+  process.env.PATH = [path.dirname(process.execPath), process.platform === 'win32' ? TOOLS : path.join(TOOLS, 'bin'),
+    path.join(GIT_DIR, 'cmd'), path.join(GIT_DIR, 'bin'), process.env.PATH || ''].join(path.delimiter);
   const rest = [checkData(), checkFrontend()];
+  if (!(await checkGit())) return finish(false, false);
   await checkEngines();
-  await checkGit();
   return finish(!rest.includes(false), degraded);
 }
 
