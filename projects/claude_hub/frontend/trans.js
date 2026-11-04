@@ -990,6 +990,7 @@ const DICT = {
   obNext: { en: 'Next', zh: '下一步' },
   obDone: { en: 'Finish', zh: '完成' },
   obSelected: { en: 'Selected', zh: '已选' },
+  loginInstallLabel: { en: 'Install Clootee', zh: '安装 Clootee' },
   loginInstallNote: { en: 'To install Clootee, please visit:', zh: '如果需要安装 Clootee，请访问：' },
   loginTitle: { en: 'Unlock workspace', zh: '使用安全密码解锁工作台' },
   password: { en: 'Password', zh: '密码' },
