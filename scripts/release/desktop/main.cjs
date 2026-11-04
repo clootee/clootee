@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
-let win, child, quitting = false;
+let win, child, quitting = false, installationComplete = false;
 const installOnly = process.argv.includes('--install-only');
 const single = app.requestSingleInstanceLock();
 if (!single) app.exit(installOnly ? 1 : 0);
@@ -99,6 +99,7 @@ async function start() {
       else reject(new Error('依赖安装未完成 / Dependency setup incomplete. 请重新打开重试 / Reopen to retry. ' + path.join(home, 'desktop.log') + '\n' + tail.slice(-2000)));
     });
   });
+  installationComplete = true;
   // Setup runs in a separate process. Recreate its Git Bash environment for sessions.
   if (process.platform === 'win32') {
     const bash = path.join(hub, 'out_end', 'git', 'bin', 'bash.exe');
@@ -122,5 +123,8 @@ async function start() {
   win.webContents.on('will-navigate', (event, url) => { if (new URL(url).origin !== base) { event.preventDefault(); if (/^https?:\/\//.test(url)) shell.openExternal(url); } });
   await win.loadURL(base);
 }
-app.on('window-all-closed', () => app.quit());
+app.on('window-all-closed', () => {
+  if (installOnly && !installationComplete) { quitting = true; stopChild(); app.exit(1); }
+  else app.quit();
+});
 app.on('before-quit', () => { quitting = true; stopChild(); });
