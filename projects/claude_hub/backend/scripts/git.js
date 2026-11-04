@@ -175,7 +175,7 @@ function unzip(zip, destDir) {
   const ps = spawnSync(
     'powershell',
     ['-NoProfile', '-NonInteractive', '-Command',
-      `Expand-Archive -LiteralPath '${zip}' -DestinationPath '${destDir}' -Force`],
+      `Expand-Archive -LiteralPath '${zip.replaceAll("'", "''")}' -DestinationPath '${destDir.replaceAll("'", "''")}' -Force`],
     { stdio: 'ignore' }
   );
   return ps.status === 0 ? null : '解压失败 / extract failed（tar 与 Expand-Archive 都不可用）';
@@ -269,31 +269,35 @@ function pickPkgManager() {
 function installUnix(log) {
   const m = pickPkgManager();
   if (!m) {
-    // macOS 没装 Homebrew 时还有一条不需要 root 的路：Xcode Command Line Tools 自带 git。
-    // xcode-select --install 会弹出系统安装窗口，由用户点确认，这里只负责把它拉起来。
     if (process.platform === 'darwin') {
-      log('未检测到 Homebrew，改用 xcode-select --install（会弹出系统安装窗口）...');
-      spawnSync('xcode-select', ['--install'], { stdio: 'inherit' });
-      return {
-        ok: false,
-        error:
-          '已拉起 Xcode Command Line Tools 安装窗口，请在窗口里点「安装」，装完回来点「重新检测」/ ' +
-          'installer window opened - finish it, then re-check',
-      };
+      // softwareupdate installs CLT to completion; no detached installer window.
+      const marker = '/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress';
+      try {
+        fs.closeSync(fs.openSync(marker, 'a'));
+        log('正在查找并安装 Git / Installing Apple Command Line Tools (Git included) ...');
+        const list = spawnSync('softwareupdate', ['--list'], { encoding: 'utf8', timeout: 120000 });
+        const label = String(list.stdout || '').split(/\r?\n/)
+          .map(line => /\*\s*(?:Label:\s*)?(Command Line Tools.*)/.exec(line)?.[1]?.trim()).filter(Boolean).pop();
+        if (!label) return { ok: false, error: '无法获取 Command Line Tools / Command Line Tools unavailable' };
+        const command = '/usr/sbin/softwareupdate --install ' + "'" + label.replaceAll("'", "'\\''") + "' --agree-to-license";
+        const apple = 'do shell script ' + JSON.stringify(command) + ' with administrator privileges';
+        const r = spawnSync('osascript', ['-e', apple], { stdio: 'inherit', timeout: 1200000 });
+        return r.status === 0 ? { ok: true, bin: '/usr/bin/git' } : { ok: false, error: 'Command Line Tools 安装未完成 / installation incomplete' };
+      } finally { try { fs.unlinkSync(marker); } catch {} }
     }
     return { ok: false, error: '未找到可用的包管理器 / no package manager found —— 请手动安装 git' };
   }
   const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
   const cmdline = `${m.bin} ${m.args.join(' ')}`;
-  if (!isRoot && !m.noRoot) {
-    return { ok: false, needsSudo: true, error: `需要 root 权限 / run it yourself: sudo ${cmdline}` };
-  }
+  const elevated = !isRoot && !m.noRoot;
+  if (elevated && !onPath('sudo')) return { ok: false, needsSudo: true, error: '无法获取系统安装权限 / sudo unavailable' };
+  const run = args => spawnSync(elevated ? 'sudo' : m.bin, elevated ? [m.bin, ...args] : args, { stdio: 'inherit', timeout: 1200000 });
   if (m.pre) {
     log(`${m.bin} ${m.pre.join(' ')} ...`);
-    spawnSync(m.bin, m.pre, { stdio: 'inherit' });
+    if (run(m.pre).status !== 0) return { ok: false, error: '软件源更新失败 / package index update failed' };
   }
   log(`${cmdline} ...`);
-  const r = spawnSync(m.bin, m.args, { stdio: 'inherit' });
+  const r = run(m.args);
   if (r.status !== 0) return { ok: false, error: `${cmdline} 失败 / failed` };
   const bin = onPath('git');
   return bin ? { ok: true, bin } : { ok: false, error: '装完仍找不到 git / git still not on PATH' };

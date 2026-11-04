@@ -10,9 +10,17 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
 (async () => {
  let desktop;
  try {
-  desktop = await _electron.launch({ executablePath: exe, args: ['--user-data-dir=' + profile], timeout: 120000 });
+  // Exercise the same blocking dependency phase invoked by the Windows installer.
+  const { spawn } = require('node:child_process');
+  await new Promise((resolve, reject) => {
+    const installer = spawn(exe, ['--install-only', '--user-data-dir=' + profile], { stdio: 'inherit' });
+    const timer = setTimeout(() => { installer.kill(); reject(new Error('Dependency installation timed out')); }, 1200000);
+    installer.once('error', e => { clearTimeout(timer); reject(e); });
+    installer.once('exit', code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error('Dependency installation failed: ' + code)); });
+  });
+  desktop = await _electron.launch({ executablePath: exe, args: ['--user-data-dir=' + profile], timeout: 1200000 });
   const win = await desktop.firstWindow();
-  await win.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\/$/, { timeout: 120000 });
+  await win.waitForURL(/^http:\/\/127\.0\.0\.1:\d+\/$/, { timeout: 1200000 });
   const status = await win.evaluate(async () => (await fetch('/api/auth/status')).json());
   assert.equal(status.success, true);
   assert.equal(status.data.needsSetup, true);
@@ -28,6 +36,14 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
   const runtime = path.join(__dirname, 'desktop/runtimes', process.platform + '-' + process.arch, process.platform === 'win32' ? 'node.exe' : 'bin/node');
   const { execFileSync } = require('node:child_process');
   assert.match(execFileSync(runtime, ['--version'], { encoding: 'utf8' }), /^v22\./);
+  const tools = path.join(profile, 'out_end', 'tools');
+  const env = { ...process.env, PATH: [path.dirname(runtime), process.platform === 'win32' ? tools : path.join(tools, 'bin'), process.env.PATH].join(path.delimiter) };
+  for (const name of ['claude', 'codex']) {
+    const file = process.platform === 'win32' ? path.join(tools, name + '.cmd') : path.join(tools, 'bin', name);
+    const resolved = fs.existsSync(file) ? file : name;
+    const command = process.platform === 'win32' ? '"' + resolved + '"' : resolved;
+    assert.ok(execFileSync(command, ['--version'], { env, shell: process.platform === 'win32', encoding: 'utf8', timeout: 30000 }).trim());
+  }
   const firstOrigin = new URL(win.url()).origin;
   const quickstart = await win.evaluate(async () => (await fetch('/api/auth/quickstart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json());
   assert.equal(quickstart.success, true);
@@ -40,9 +56,9 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
     catch { break; }
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  desktop = await _electron.launch({ executablePath: exe, args: ['--user-data-dir=' + profile], timeout: 120000 });
+  desktop = await _electron.launch({ executablePath: exe, args: ['--user-data-dir=' + profile], timeout: 1200000 });
   const secondWindow = await desktop.firstWindow();
-  await secondWindow.waitForURL(firstOrigin + '/', { timeout: 120000 });
+  await secondWindow.waitForURL(firstOrigin + '/', { timeout: 1200000 });
   assert.equal(await secondWindow.evaluate(() => localStorage.getItem('clootee-smoke-login')), token);
   const signedIn = await secondWindow.evaluate(async token => (await fetch('/api/auth/check', { headers: { 'X-Auth-Token': token } })).json(), token);
   assert.equal(signedIn.success, true);

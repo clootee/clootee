@@ -1,3 +1,5 @@
+import * as path from 'path';
+import * as fs from 'fs';
 // 运行环境工具链（调度骨架）：node / git / claude / codex 四件套的「有没有、用哪个、怎么装」。
 //
 // 两种来源：
@@ -166,12 +168,15 @@ export class ToolchainStruct {
   // 把当前偏好落到 process.env.PATH：子进程（claude/codex 及其调用的命令）据此命中内置版
   static applyPath(): void {
     const wanted: string[] = [];
+    if (process.platform === 'win32' && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {
+      const bash = path.join(OutEnd.gitDir(), 'bin', 'bash.exe');
+      if (fs.existsSync(bash)) process.env.CLAUDE_CODE_GIT_BASH_PATH = bash;
+    }
     for (const id of ['git', 'node'] as ToolId[]) {
       // node 放最前：claude 的 npm 垫片要用它
       if (this.one(id).active === 'bundled') wanted.unshift(...OutEnd.binDirs(id as 'node' | 'git'));
     }
-    // 旧版本把引擎装在 out_end/tools；现在一律全局安装，但老用户的那份仍要能被找到，
-    // 故该目录存在就继续挂在 PATH 末尾（全局安装的版本优先）。
+    // Installer-managed engines live in out_end/tools, with system copies still supported.
     wanted.push(...OutEnd.binDirs('tools'));
     this._applyPath(OutEnd.allBinDirs(), wanted);
   }

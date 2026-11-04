@@ -1,28 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
 #  out_end bootstrap（Linux / macOS）
-#    默认只下载便携版 Node 到 out_end/node（~30MB）。
-#    AI 引擎（claude ~500MB / codex ~400MB）默认不下载：多数人本机已装，
-#    没装的人在界面引导里点一下装更好（那里有进度显示）。需要时才加 --with-tools。
-#  参数：
-#    -y | --yes     非交互（本脚本本来就不交互，保留以便与 Windows 版一致）
-#    --with-tools   顺便把 claude code / codex 装进 out_end/tools
-#    --node-only    兼容旧写法，等同默认行为
-#  两个下载源（官方 / 国内镜像）先探测再选，失败自动换另一个重试。
+#    Downloads Node, then runs the shared Git + Claude Code + Codex installer.
+#    --node-only is reserved for the launcher's Node resolver.
+#    Downloads probe official and mirror sources, then retry the alternate source.
 # =============================================================================
 set -u
 cd "$(dirname "$0")"
 
-WITH_TOOLS=""
+WITH_TOOLS=1
 for a in "$@"; do
   case "$a" in
     --with-tools) WITH_TOOLS=1 ;;
-    --node-only|-y|--yes) : ;;
+    --node-only) WITH_TOOLS="" ;;
+    -y|--yes) : ;;
   esac
 done
 
 NODE_VER="v22.14.0"
-OS="linux"; EXT="tar.xz"
+OS="linux"; EXT="tar.gz"
 case "$(uname -s)" in
   Darwin) OS="darwin" ;;
   Linux)  OS="linux" ;;
@@ -41,11 +37,32 @@ echo "========================================"
 echo "  out_end bootstrap ($OS/$ARCH)"
 echo "========================================"
 
-if [ -x "node/bin/node" ]; then
+if [ -x "node/bin/node" ] && [ -f "node/lib/node_modules/npm/bin/npm-cli.js" ] && node/bin/node -v >/dev/null 2>&1; then
   echo "[node] 已存在，跳过下载 / already present"
 else
-  command -v curl >/dev/null 2>&1 || { echo "[错误] 需要 curl / curl is required"; exit 1; }
-  command -v tar  >/dev/null 2>&1 || { echo "[错误] 需要 tar / tar is required"; exit 1; }
+  if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+    echo "[node] 自动安装下载与解压依赖 / Installing curl and tar ..."
+    bootstrap_elevate=()
+    if [ "$(id -u)" -ne 0 ]; then
+      command -v sudo >/dev/null 2>&1 || { echo "[ERROR] 无法获取依赖安装权限 / sudo unavailable"; exit 1; }
+      bootstrap_elevate=(sudo)
+    fi
+    if command -v apt-get >/dev/null 2>&1; then
+      "${bootstrap_elevate[@]}" apt-get update && "${bootstrap_elevate[@]}" apt-get install -y curl tar ca-certificates || exit 1
+    elif command -v dnf >/dev/null 2>&1; then
+      "${bootstrap_elevate[@]}" dnf install -y curl tar ca-certificates || exit 1
+    elif command -v yum >/dev/null 2>&1; then
+      "${bootstrap_elevate[@]}" yum install -y curl tar ca-certificates || exit 1
+    elif command -v apk >/dev/null 2>&1; then
+      "${bootstrap_elevate[@]}" apk add --no-cache curl tar ca-certificates || exit 1
+    elif command -v pacman >/dev/null 2>&1; then
+      "${bootstrap_elevate[@]}" pacman -S --noconfirm --needed curl tar ca-certificates || exit 1
+    elif command -v zypper >/dev/null 2>&1; then
+      "${bootstrap_elevate[@]}" zypper --non-interactive install curl tar ca-certificates || exit 1
+    else
+      echo "[ERROR] 没有可用的依赖安装器 / No supported package manager for curl and tar"; exit 1
+    fi
+  fi
 
   echo "[node] 正在安装 Node.js，请勿关闭窗口。预计约需 10 分钟（取决于网络速度）。"
   echo "[node] Installing Node.js. Please do not close this window. Allow about 10 minutes (depending on your connection)."
@@ -96,19 +113,7 @@ else
 fi
 
 export PATH="$(pwd)/node/bin:$PATH"
-NPM="$(pwd)/node/bin/npm"
-[ -x "$NPM" ] || NPM="npm"
-
-if [ -z "$WITH_TOOLS" ]; then
-  echo "[tools] 默认不下载 AI 引擎（几百 MB）；需要时加 --with-tools，或启动后在界面里一键安装"
-else
-  echo "[tools] 安装 claude code 与 codex 到 tools/ ..."
-  if ! "$NPM" install -g @anthropic-ai/claude-code@latest @openai/codex@latest --prefix "$(pwd)/tools" --no-audit --no-fund; then
-    echo "[tools] 官方源失败，改用国内镜像重试 / retrying with a China mirror ..."
-    "$NPM" install -g @anthropic-ai/claude-code@latest @openai/codex@latest --prefix "$(pwd)/tools" --no-audit --no-fund --registry="$MIRROR_REG" \
-      || { echo "[错误] 引擎安装失败 / engine install failed"; exit 1; }
-  fi
+if [ -n "$WITH_TOOLS" ]; then
+  exec "$(pwd)/node/bin/node" "../backend/scripts/setup.js"
 fi
-
-echo
-echo "完成！/ done. 回到上级目录运行 bash start.sh 即可使用。"
+echo "[node] Node ready; launcher will install remaining dependencies."

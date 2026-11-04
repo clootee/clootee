@@ -6,11 +6,17 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
 let win, child, quitting = false;
+const installOnly = process.argv.includes('--install-only');
 const single = app.requestSingleInstanceLock();
-if (!single) app.quit();
+if (!single) app.exit(installOnly ? 1 : 0);
 else {
   app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
-  app.whenReady().then(start).catch(error => { dialog.showErrorBox('Clootee', error.message); app.quit(); });
+  app.whenReady().then(start).catch(error => { dialog.showErrorBox('Clootee', error.message); app.exit(1); });
+}
+function stopChild() {
+  if (!child || !child.pid) return;
+  if (process.platform === 'win32') require('node:child_process').spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
+  else { try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill(); } }
 }
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -48,7 +54,7 @@ async function start() {
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
     { label: 'View', submenu: [{ role: 'reload' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { role: 'togglefullscreen' }] }
   ]));
-  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><meta charset="utf-8"><style>body{font:16px system-ui;background:#f8f9ff;color:#30334d;display:grid;place-items:center;height:90vh;text-align:center}h1{color:#7263e8}small{color:#76798c}</style><div><h1>Clootee</h1><p>正在准备你的工作空间…<br>Preparing your workspace…</p><small>首次启动可能需要一点时间 / First launch may take a moment</small></div>'));
+  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><meta charset="utf-8"><style>body{font:16px system-ui;background:#f8f9ff;color:#30334d;display:grid;place-items:center;height:90vh;text-align:center}h1{color:#7263e8}small{color:#76798c}</style><div><h1>Clootee</h1><p>正在准备你的工作空间…<br>Preparing your workspace…</p><small>正在检查 Node、Git、Claude Code 和 Codex；缺失时自动安装。<br>Checking Node, Git, Claude Code and Codex. Missing components install automatically.</small><pre id="progress" style="max-width:85vw;max-height:45vh;overflow:auto;white-space:pre-wrap;text-align:left;font-size:12px"></pre></div>'));
   if (!fs.existsSync(path.join(root, '.ready'))) {
     fs.mkdirSync(root, { recursive: true });
     fs.cpSync(path.join(process.resourcesPath, 'payload'), root, { recursive: true });
@@ -71,9 +77,35 @@ async function start() {
   // language, theme and drafts, even though the backend data is preserved.
   const { port, kimi } = await persistentPorts(home);
   const log = fs.openSync(path.join(home, 'desktop.log'), 'a');
-  const env = { ...process.env, PORT: String(port), KIMI_PROXY_PORT: String(kimi), CLOOTEE_LOG_CONSOLE: '1', npm_config_prefix: path.join(hub, 'out_end', 'tools'), PATH: [bin, process.platform === 'win32' ? path.join(hub, 'out_end', 'tools') : path.join(hub, 'out_end', 'tools', 'bin'), process.env.PATH || ''].join(path.delimiter) };
+  const env = { ...process.env, PORT: String(port), KIMI_PROXY_PORT: String(kimi), CLOOTEE_LOG_CONSOLE: '1', npm_config_prefix: path.join(hub, 'out_end', 'tools'), PATH: [bin, path.join(hub, 'out_end', 'git', 'cmd'), path.join(hub, 'out_end', 'git', 'bin'), process.platform === 'win32' ? path.join(hub, 'out_end', 'tools') : path.join(hub, 'out_end', 'tools', 'bin'), process.env.PATH || ''].join(path.delimiter) };
   delete env.ELECTRON_RUN_AS_NODE;
-  child = spawn(node, [path.join(backend, 'dist', 'index.js')], { cwd: backend, env, windowsHide: true, stdio: ['ignore', log, log] });
+  // Use the same required dependency installer as source packages, before serving UI.
+  await new Promise((resolve, reject) => {
+    let tail = '';
+    child = spawn(node, [path.join(backend, 'scripts', 'setup.js'), '--runtime-only'],
+      { cwd: backend, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    const timer = setTimeout(() => { stopChild(); reject(new Error('安装超时，请检查网络后重试 / Setup timed out. Retry after checking your connection. ' + path.join(home, 'desktop.log'))); }, 30 * 60 * 1000);
+    const output = bytes => {
+      fs.writeSync(log, bytes);
+      tail = (tail + bytes.toString()).slice(-8000);
+      if (win && !win.isDestroyed()) win.webContents.executeJavaScript(
+        `document.getElementById('progress').textContent = ${JSON.stringify(tail)};`).catch(() => {});
+    };
+    child.stdout.on('data', output); child.stderr.on('data', output);
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('exit', code => {
+      clearTimeout(timer); child = null;
+      if (code === 0) resolve();
+      else reject(new Error('依赖安装未完成 / Dependency setup incomplete. 请重新打开重试 / Reopen to retry. ' + path.join(home, 'desktop.log') + '\n' + tail.slice(-2000)));
+    });
+  });
+  // Setup runs in a separate process. Recreate its Git Bash environment for sessions.
+  if (process.platform === 'win32') {
+    const bash = path.join(hub, 'out_end', 'git', 'bin', 'bash.exe');
+    if (fs.existsSync(bash)) env.CLAUDE_CODE_GIT_BASH_PATH = bash;
+  }
+  if (installOnly) { fs.closeSync(log); app.quit(); return; }
+  child = spawn(node, [path.join(backend, 'dist', 'index.js')], { cwd: backend, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', log, log] });
   fs.closeSync(log);
   let failure;
   child.once('error', e => { failure = e; });
@@ -91,4 +123,4 @@ async function start() {
   await win.loadURL(base);
 }
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { quitting = true; if (child && child.pid) child.kill(); });
+app.on('before-quit', () => { quitting = true; stopChild(); });

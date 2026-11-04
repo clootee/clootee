@@ -29,3 +29,15 @@
     !insertmacro clooteeDefaultInstallDir
   FunctionEnd
 !macroend
+
+; Installation is complete only after all required tools pass executable checks.
+!macro customInstall
+  DetailPrint "Installing Node, Git, Claude Code and Codex..."
+  nsExec::ExecToLog '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --install-only'
+  Pop $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "Dependency installation did not complete. Reopen Clootee to retry; see desktop.log in the Clootee user data directory."
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
+!macroend

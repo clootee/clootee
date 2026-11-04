@@ -12,13 +12,13 @@ NODE_EXE=""
 
 node_major() { "$1" -v 2>/dev/null | sed 's/^v//' | cut -d. -f1; }
 
-if [ -x "$OUTEND/node/bin/node" ]; then
+if [ -x "$OUTEND/node/bin/node" ] && [ -f "$OUTEND/node/lib/node_modules/npm/bin/npm-cli.js" ] && "$OUTEND/node/bin/node" -v >/dev/null 2>&1; then
   NODE_EXE="$OUTEND/node/bin/node"
   echo "[node] 使用内置便携版 / using bundled Node"
 elif command -v node >/dev/null 2>&1; then
   _sys="$(command -v node)"
   _maj="$(node_major "$_sys")"
-  if [ -n "$_maj" ] && [ "$_maj" -ge 18 ] 2>/dev/null; then
+  if [ -n "$_maj" ] && [ "$_maj" -ge 18 ] 2>/dev/null && command -v npm >/dev/null 2>&1 && npm --version >/dev/null 2>&1; then
     NODE_EXE="$_sys"
     echo "[node] 使用系统 Node v${_maj}.x / using system Node"
   else

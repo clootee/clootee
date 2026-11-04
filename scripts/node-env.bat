@@ -13,12 +13,14 @@ set "OUTEND=%HUB%\out_end"
 set "NODE_EXE="
 set "NODEMAJ="
 
-if exist "%OUTEND%\node\node.exe" (
+if exist "%OUTEND%\node\node.exe" if exist "%OUTEND%\node\node_modules\npm\bin\npm-cli.js" (
   set "NODE_EXE=%OUTEND%\node\node.exe"
   echo [node] using bundled portable Node
   goto :done
 )
 
+where npm >nul 2>nul
+if errorlevel 1 goto :bootstrap
 where node >nul 2>nul
 if errorlevel 1 goto :bootstrap
 
