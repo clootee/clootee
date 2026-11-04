@@ -1070,8 +1070,8 @@ const DICT = {
   // ── 软件本身的版本更新（对比本地 git 与 GitHub 最新 commit）──
   paneUpdate: { en: 'App update', zh: '软件更新' },
   paneUpdateDesc: {
-    en: 'Check GitHub for a newer version and update with one click',
-    zh: '检测 GitHub 上是否有新版本，一键更新',
+    en: 'Check for a newer version and update with one click',
+    zh: '检查是否有新版本，一键更新',
   },
   paneUpdateChecking: { en: 'Checking…', zh: '检测中…' },
   paneUpdateAvailable: { en: 'New version available', zh: '有新版本' },
@@ -1085,13 +1085,13 @@ const DICT = {
   updateBranchLabel: { en: 'Branch', zh: '分支' },
   updateUpToDateHint: { en: 'You are on the latest version.', zh: '当前已是最新版本。' },
   updateAvailableHint: {
-    en: 'A new version is available. Pulling will recompile and restart the service.',
-    zh: '检测到新版本。更新会重新拉取代码、编译并重启服务。',
+    en: 'A new version is available. Updating will install it and restart Clootee.',
+    zh: '检测到新版本。更新完成后会自动重启 Clootee。',
   },
-  updateApplyBtn: { en: 'Pull update & restart', zh: '拉取更新并重启' },
+  updateApplyBtn: { en: 'Update & restart', zh: '更新并重启' },
   updateConfirm: {
-    en: 'Pull the latest code now? The service will recompile and restart automatically, and you will be briefly disconnected.',
-    zh: '现在拉取最新代码？服务会自动重新编译并重启，期间会短暂断开连接。',
+    en: 'Install the latest version now? Clootee will restart automatically. Your connection will pause briefly.',
+    zh: '现在安装最新版本？Clootee 会自动重启，期间会短暂断开连接。',
   },
   updateApplying: { en: 'Updating, please do not close this page…', zh: '正在更新，请勿关闭此页面…' },
   updateApplyFail: { en: 'Update failed: {err}', zh: '更新失败：{err}' },
@@ -1102,14 +1102,14 @@ const DICT = {
   updateCancelled: { en: 'Update cancelled. Local changes have been kept.', zh: '已放弃更新，本地修改已保留。' },
   updateRestartTimeout: { en: 'Restart timed out. Check the update log before retrying.', zh: '等待重启超时，请检查更新日志后重试。' },
   updateApplyDone: {
-    en: 'Update sent. The service is recompiling and restarting; this page will reconnect automatically.',
-    zh: '更新已提交，服务正在重新编译并重启，页面会自动重新连接。',
+    en: 'Update ready. Clootee is restarting and will reconnect automatically.',
+    zh: '更新已就绪，Clootee 正在重启，随后会自动重新连接。',
   },
   updateReconnecting: { en: 'Restarting… reconnecting in {s}s', zh: '重启中…{s} 秒后重新连接' },
   updateViewChanges: { en: 'View changes on GitHub', zh: '在 GitHub 上查看改动' },
   updateManifestUnavailable: {
-    en: 'Could not read the release manifest (version.json) from GitHub, so update status is unknown. Check your network and try again.',
-    zh: '没能从 GitHub 读到发布清单 version.json，无法确认是否有新版本。请检查网络后重试。',
+    en: 'Could not check the latest release. Check your network and try again.',
+    zh: '暂时无法获取最新版本信息，请检查网络后重试。',
   },
   updateCommitNote: {
     en: 'Note: local code ({local}) differs from the remote branch ({remote}). This does not by itself mean a new release.',
@@ -1124,8 +1124,8 @@ const DICT = {
     zh: '本次为必须更新，请更新后继续使用 Clootee。',
   },
   updateModalOptionalHint: {
-    en: 'Updating recompiles and restarts the service; you will be briefly disconnected.',
-    zh: '更新会重新编译并重启服务，期间会短暂断开连接。',
+    en: 'Clootee will restart after updating. Your connection will pause briefly.',
+    zh: '更新完成后会自动重启 Clootee，期间会短暂断开连接。',
   },
   updateModalNow: { en: 'Update now', zh: '立即更新' },
   updateModalLater: { en: 'Later', zh: '稍后再说' },
