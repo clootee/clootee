@@ -1,5 +1,7 @@
 // 国际化字典与翻译函数。至少支持 zh / en
 const DICT = {
+  gitAutoInstalling: { en: 'Git is missing. Installing automatically; keep this page open.', zh: '未检测到 Git，正在自动安装，请保持页面打开。' },
+  gitAutoReady: { en: 'Git installed and verified. Continuing your action.', zh: 'Git 已安装并验证，正在继续操作。' },
   securityLegacyEnabled: { en: 'Old workspace access credentials were found. Earlier versions sometimes created these automatically. If you never set a password, clear the old credentials here on this computer.', zh: '检测到旧版访问凭据，旧版本可能曾自动生成。如果你从未设置过安全密码，可在这台电脑上清除旧凭据，恢复直接使用。' },
   securityLock: {"en": "Lock workspace", "zh": "锁定工作台"},
   securityEnabled: {"en": "Security password enabled. This protects access to this workspace and is separate from provider accounts.", "zh": "已启用安全密码，用于保护工作台访问，与供应商账号无关。"},

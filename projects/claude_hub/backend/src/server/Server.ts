@@ -32,6 +32,7 @@ import { Connectivity } from '../logic_realize/Connectivity';
 import { ClaudeLogin } from '../logic_realize/ClaudeLogin';
 import { ModelManager } from '../logic_realize/ModelManager';
 import { GitPusher } from '../logic_realize/GitPusher';
+import { GitBin } from '../helper/GitBin';
 import { FolderOpener } from '../logic_realize/FolderOpener';
 import { TraceStore } from '../logic_realize/TraceStore';
 import { CommandRunner } from '../logic_realize/CommandRunner';
@@ -120,6 +121,13 @@ export class Server {
         return;
       }
       next();
+    });
+
+    // If Git is removed while the tool is running, repair it before executing
+    // the pending action. Authorization and root locks have already been checked.
+    app.use('/api', (req, res, next) => {
+      if (!['/task/add', '/flow/resume', '/git/push', '/git/push-root', '/root/gitpush', '/update/check', '/update/apply', '/toolchain/status'].includes(req.path)) { next(); return; }
+      GitBin.ensure().then(() => next()).catch(error => res.status(500).json({ success: false, error: error.message }));
     });
 
     // 客户端用持久 token 探测登录态
@@ -789,6 +797,8 @@ export class Server {
       );
       // 端口到手后才开始看护：记开机行、挂信号钩子、开心跳
       LifeGuard.install(AppConfig.PORT);
+      const gitCheck = setTimeout(() => { void GitBin.ensure().catch(error => Logger.warn('Git', 'automatic installation incomplete', error)); }, 1000);
+      gitCheck.unref();
     });
   }
 

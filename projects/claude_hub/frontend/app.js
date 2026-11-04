@@ -5976,6 +5976,28 @@ function refreshComposerControls() {
   $('pauseHint').style.display = paused ? '' : 'none';
 }
 
+let gitInstallTimer = null, gitInstallHideTimer = null;
+let gitInstallStarted = 0, gitInstallLines = [];
+function renderGitInstall(event) {
+  const box = $('gitInstallStatus');
+  clearTimeout(gitInstallHideTimer);
+  box.hidden = false;
+  if (event.status === 'installing') {
+    if (!gitInstallTimer) {
+      gitInstallStarted = Date.now(); gitInstallLines = [];
+      gitInstallTimer = setInterval(() => {
+        box.textContent = `${T('gitAutoInstalling')} (${Math.floor((Date.now() - gitInstallStarted) / 1000)}s)\n${gitInstallLines.join('\n')}`;
+      }, 1000);
+    }
+    gitInstallLines.push(String(event.line || '')); gitInstallLines = gitInstallLines.slice(-5);
+    box.textContent = T('gitAutoInstalling') + '\n' + gitInstallLines.join('\n');
+  } else {
+    clearInterval(gitInstallTimer); gitInstallTimer = null;
+    box.textContent = event.status === 'ready' ? T('gitAutoReady') : String(event.line || '');
+    if (event.status === 'ready') gitInstallHideTimer = setTimeout(() => { box.hidden = true; }, 5000);
+  }
+}
+
 // ── 引擎安装进度 ──
 // 后端把 npm 输出逐行广播过来（kind='engineInstall'）；谁在装谁订阅（引导页 / 设置页）。
 // 引擎包有几百 MB，没有进度显示会被当成卡死。
@@ -6277,6 +6299,7 @@ function connectWs() {
   ws.onopen = () => { if (hubWs === ws) resyncVisibleSession(); };
   ws.onmessage = (ev) => {
     const e = JSON.parse(ev.data);
+    if (e.kind === 'gitInstall') { renderGitInstall(e); return; }
     if (e.kind === 'workspaceSecurity') {
       void refreshSecurityState().catch(error => showAccessError(error.message));
       return;
