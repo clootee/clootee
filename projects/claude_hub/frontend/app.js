@@ -673,9 +673,13 @@ function syncSecurityUi() {
     $('legacyAccessReset').hidden = !(enabled && SecurityState.legacyCredentials && SecurityState.localAccess);
     $('legacyAccessReset').textContent = T('securityLegacyReset');
   }
+  if ($('legacySecurityReset')) {
+    $('legacySecurityReset').hidden = !(enabled && SecurityState.legacyCredentials && SecurityState.localAccess);
+    $('legacySecurityReset').textContent = T('securityLegacyReset');
+  }
   if ($('lanForgotLink')) $('lanForgotLink').hidden = !enabled;
   if ($('securityPasswordStatus')) {
-    $('securityPasswordStatus').textContent = T(enabled ? 'securityEnabled' : 'securityDisabled');
+    $('securityPasswordStatus').textContent = T(enabled ? (SecurityState.legacyCredentials ? 'securityLegacyEnabled' : 'securityEnabled') : 'securityDisabled');
     $('pwOld').hidden = !enabled;
     $('pwChangeBtn').textContent = T(enabled ? 'securityChange' : 'securityEnable');
     $('pwDisableBtn').hidden = !enabled;
@@ -6273,6 +6277,10 @@ function connectWs() {
   ws.onopen = () => { if (hubWs === ws) resyncVisibleSession(); };
   ws.onmessage = (ev) => {
     const e = JSON.parse(ev.data);
+    if (e.kind === 'workspaceSecurity') {
+      void refreshSecurityState().catch(error => showAccessError(error.message));
+      return;
+    }
     // 引擎/工具安装进度：没有 sessionId，必须在按会话过滤之前处理
     if (e.kind === 'engineInstall' || e.kind === 'toolInstall') { EngineInstall.emit(e.line); return; }
     // 软件本身更新（git pull 输出逐行广播），没有 sessionId，同样要在按会话过滤之前处理
@@ -7331,6 +7339,7 @@ function bind() {
   });
   $('logoutBtn').addEventListener('click', logout);
   $('legacyAccessReset').addEventListener('click', clearLegacyAccess);
+  $('legacySecurityReset').addEventListener('click', clearLegacyAccess);
   $('accessErrorRetry').addEventListener('click', () => location.reload());
   $('pwDisableBtn').addEventListener('click', disableSecurityPassword);
   $('aiCollapseBtn').addEventListener('click', toggleAiCollapse);
