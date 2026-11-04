@@ -1,0 +1,74 @@
+﻿body.dog {
+  --bg:#f7f3ee; --panel:#fdfbf8; --panel2:#eee5dc; --border:#d8c9bb;
+  --text:#48392f; --muted:#857364; --accent:#956849; --green:#287747;
+  --yellow:#966614; --red:#b34c5a; --gray:#99816f; --overlay:rgba(55,40,29,.32);
+  --codebg:#f0eae3; --hover:#e9dfd3; --active:#dfcebc;
+}
+body.dog .plog.thinking { color:#874da1; }
+body.dog .plog.tool { color:#965b35; }
+body.dog .plog.output { color:#287747; }
+#dogFx { position:fixed; left:0; bottom:84px; width:164px; height:164px; z-index:15; pointer-events:none; transition:transform var(--dog-travel,0ms) linear; }
+#dogFx[hidden] { display:none; }
+.dog-pet { display:block; position:absolute; inset:0; width:100%; height:100%; padding:0; border:0; background:transparent; border-radius:40%; pointer-events:auto; cursor:grab; touch-action:none; -webkit-tap-highlight-color:transparent; transform:scaleX(var(--dog-facing,1)); }
+.dog-pet:hover,.dog-pet:active { background:transparent; }
+.dog-pet:active { cursor:grabbing; }
+.dog-pet:focus-visible { outline:2px solid var(--accent); outline-offset:-20px; }
+.dog-sprite { display:block; width:100%; height:100%; background-image:url('assets/teddy-atlas.png?v=20261026b'); background-size:300% 200%; background-position:0 0; background-repeat:no-repeat; transform-origin:50% 83%; animation:dog-breathe 5s ease-in-out infinite; filter:drop-shadow(0 3px 2px #38261816); }
+#dogFx[data-state=sleep] .dog-sprite { background-position:50% 0; animation-duration:6.5s; }
+#dogFx[data-state=sniff] .dog-sprite { background-position:100% 100%; animation:dog-sniff 2.4s ease-in-out infinite; }
+#dogFx[data-state=walk] .dog-sprite { background-position:0 100%; animation:dog-step .48s steps(1) infinite; }
+#dogFx[data-state=run] .dog-sprite { background-position:0 100%; animation:dog-step .26s steps(1) infinite; }
+#dogFx[data-state=notice] .dog-sprite { background-position:100% 0; animation:dog-settle 1s ease-out; }
+#dogFx[data-state=petted] .dog-sprite { background-position:50% 0; animation:dog-settle 1.8s ease-out; }
+#dogFx[data-state=hidden] { visibility:hidden; }
+@keyframes dog-breathe { 50% { transform:scale(1.005,1.018); } }
+@keyframes dog-sniff { 40%,65% { transform:translateY(2px) rotate(-1deg); } }
+@keyframes dog-step { 0%,100% { background-position:0 100%; transform:translateY(0); } 50% { background-position:50% 100%; transform:translateY(-2px); } }
+@keyframes dog-settle { 35% { transform:translateY(1px) scaleY(.985); } }
+@media (prefers-reduced-motion:reduce) { #dogFx { transition:none; } #dogFx .dog-sprite { animation:none; } }
+
+/* Code renderer is the default. The original atlas stays available for comparison. */
+#dogFx[data-renderer=code] .dog-sprite { display:none; }
+#dogFx[data-renderer=image] .dog-vector { display:none; }
+.dog-vector { width:100%; height:100%; overflow:visible; }
+.dog-animal { transform-origin:130px 178px; }
+.dog-body { transform-origin:145px 151px; animation:dog-chest 4s ease-in-out infinite; }
+.dog-head-vector { transform-origin:93px 125px; transition:transform 700ms ease-in-out; }
+.dog-ear-vector { transform-origin:100px 89px; }
+.dog-leg,.dog-lower-leg { transform-box:view-box; transition:transform 450ms ease-in-out; }
+.dog-closed-eyes { opacity:0; }
+.dog-open-eyes { animation:dog-vector-blink 7s infinite; transform-origin:62px 111px; }
+.dog-tail-vector { transform-origin:195px 109px; }
+#dogFx:is([data-state=rest],[data-state=sleep],[data-state=petted]) .dog-leg { transform:translateY(26px) scaleY(.43); }
+#dogFx:is([data-state=rest],[data-state=sleep],[data-state=petted]) .dog-head-vector { transform:translate(-5px,45px) rotate(-12deg); }
+#dogFx:is([data-state=rest],[data-state=sleep],[data-state=petted]) .dog-body { transform:translateY(22px) scaleY(.83); animation:dog-rest-chest 4s ease-in-out infinite; }
+#dogFx:is([data-state=sleep],[data-state=petted]) .dog-open-eyes { opacity:0; animation:none; }
+#dogFx:is([data-state=sleep],[data-state=petted]) .dog-closed-eyes { opacity:1; }
+#dogFx[data-state=sleep] .dog-body { animation:dog-sleep-chest 3.8s ease-in-out infinite; }
+#dogFx[data-state=sleep] .dog-head-vector { animation:dog-sleep-head 3.8s ease-in-out infinite; }
+#dogFx { --dog-gait:.65s; }
+.dog-back-near { --dog-phase:0; }
+.dog-front-near { --dog-phase:-.25; }
+.dog-back-far { --dog-phase:-.5; }
+.dog-front-far { --dog-phase:-.75; }
+#dogFx[data-state=run] .dog-front-near,#dogFx[data-state=run] .dog-back-far { --dog-phase:0; }
+#dogFx[data-state=run] .dog-front-far,#dogFx[data-state=run] .dog-back-near { --dog-phase:-.5; }
+#dogFx:is([data-state=walk],[data-state=run]) .dog-leg { animation:dog-stride var(--dog-gait) linear infinite; animation-delay:calc(var(--dog-gait) * var(--dog-phase)); }
+#dogFx:is([data-state=walk],[data-state=run]) .dog-lower-leg { animation:dog-knee var(--dog-gait) linear infinite; animation-delay:calc(var(--dog-gait) * var(--dog-phase)); }
+#dogFx:is([data-state=walk],[data-state=run]) .dog-body { animation:none; }
+#dogFx:is([data-state=walk],[data-state=run]) .dog-ear-vector { animation:dog-ear-sway var(--dog-gait) ease-in-out infinite; }
+#dogFx:is([data-state=walk],[data-state=run]) .dog-tail-vector { animation:dog-tail-sway 1.3s ease-in-out infinite; }
+#dogFx[data-state=sniff] .dog-head-vector { animation:dog-vector-sniff 2s ease-in-out infinite; }
+#dogFx[data-state=drag] .dog-leg { transform:rotate(-6deg); }
+@keyframes dog-chest { 50% { transform:scale(1.008,1.025); } }
+@keyframes dog-rest-chest { 0%,100% { transform:translateY(22px) scaleY(.83); } 50% { transform:translateY(21px) scale(1.008,.86); } }
+@keyframes dog-sleep-chest { 0%,100% { transform:translateY(23px) scale(1,.81); } 45% { transform:translateY(20px) scale(1.018,.91); } }
+@keyframes dog-sleep-head { 0%,100% { transform:translate(-5px,46px) rotate(-12deg); } 45% { transform:translate(-5px,44.8px) rotate(-11.5deg); } }
+/* Long grounded stance, then a short bent-knee return. Four distinct footfalls. */
+@keyframes dog-stride { 0%,100% { transform:rotate(19deg); } 65% { transform:rotate(-19deg); } 82% { transform:rotate(0); } }
+@keyframes dog-knee { 0%,65%,100% { transform:rotate(0); } 80% { transform:rotate(-32deg); } 92% { transform:rotate(-14deg); } }
+@keyframes dog-ear-sway { 50% { transform:rotate(5deg); } }
+@keyframes dog-tail-sway { 50% { transform:rotate(9deg); } }
+@keyframes dog-vector-sniff { 0%,100% { transform:translateY(9px) rotate(-10deg); } 40%,65% { transform:translate(-2px,15px) rotate(-14deg); } }
+@keyframes dog-vector-blink { 0%,44%,48%,100% { transform:scaleY(1); } 46% { transform:scaleY(.1); } }
+@media (prefers-reduced-motion:reduce) { #dogFx .dog-vector * { animation:none !important; transition:none !important; } }

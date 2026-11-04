@@ -1,0 +1,93 @@
+{
+  "name": "clootee-desktop",
+  "productName": "Clootee",
+  "version": "3.1.29",
+  "private": true,
+  "description": "Clootee desktop launcher",
+  "author": "Clootee",
+  "license": "Apache-2.0",
+  "main": "main.cjs",
+  "devDependencies": {
+    "electron": "45.2.1",
+    "electron-builder": "26.18.1",
+    "playwright": "1.64.1"
+  },
+  "build": {
+    "appId": "com.clootee.desktop",
+    "asar": true,
+    "directories": {
+      "output": "output",
+      "buildResources": "."
+    },
+    "files": [
+      "main.cjs",
+      "icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "payload",
+        "to": "payload",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "runtimes",
+        "to": "runtimes",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "artifactName": "clootee-${version}-${os}.${ext}",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "include": "installer.nsh",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "icon.icns",
+      "hardenedRuntime": true,
+      "x64ArchFiles": "Contents/Resources/runtimes/**/bin/node"
+    },
+    "dmg": {
+      "title": "Clootee",
+      "contents": [
+        {
+          "x": 170,
+          "y": 180
+        },
+        {
+          "x": 450,
+          "y": 180,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}

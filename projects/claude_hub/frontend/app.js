@@ -1,0 +1,9429 @@
+// 前端逻辑：API 调用、WebSocket 实时更新、渲染。无业务逻辑下沉，仅渲染与转发
+const State = {
+  roots: [],
+  rootId: sessionStorage.getItem('rootId') || '',
+  sessions: [],
+  sessionId: '',
+  session: null,
+  settings: { defaultEngine: 'claude', engineAvail: null, platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0, version: '', runAsUserEnabled: false, runAsUserName: 'claudeuser' }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址 + 软件版本号 + 以系统用户运行（从后端 /api/settings 加载）
+  running: new Set(),                     // 正在执行任务的会话 id 集合（驱动侧栏"执行中"标识）
+  runningTasks: new Map(),                // 会话 id → 该会话正在跑的任务 id 集合；running 即它的非空键集（排队新消息不会误清执行中）
+  justFinished: new Set(),                // 刚从执行中变为停止、且用户尚未点开查看的会话 id（驱动侧栏"刚执行"醒目标识，区别于状态"已完成"）
+  justFinishedSeen: new Set(),            // 在「刚执行完」筛选下被点开（已清除待读）的会话 id：本轮筛选内继续保留在列表中，避免点一个少一个
+  tab: 'active',                          // 会话列表筛选：active / testing / completed / all
+  runFilters: new Set(),                  // 运行状态筛选（与 tab 叠加）：可同时含 running / justFinished（并集）；空集=「所有」
+  mode: 'classic',                       // 模式切换已下线，固定经典模式
+  // 会话列表视图：single=单目录 / favorites=收藏夹 / all=全部目录（只列已建索引的会话）。
+  // 刷新后保持，且新标签页/新窗口沿用（localStorage）；'favoritesOnly' 是它的派生只读属性（见下方 defineProperty），
+  // 含义为「跨目录视图」——收藏夹与全部目录共用同一套列表/草稿/目录筛选逻辑，只是数据源不同。
+  listMode: readListMode(),
+  favoriteSessions: [],   // 跨目录视图的列表缓存（收藏夹或全部目录，取决于 listMode）
+  favoriteCacheReady: false,
+  favoriteRootBindingDraftId: '',
+  rootRecent: {},
+  aiCollapsed: localStorage.getItem('aiCollapsed') !== '0', // 新用户默认收拢；仅显式关闭('0')才展开
+  aiExpandedGroups: new Set(),
+  aiExpandedBySession: new Map(),
+  batchMode: false,                       // 会话批量选择模式
+  selectedSessions: new Set(),            // 批量模式下已勾选的会话 id
+  selectedRoots: new Set(),               // 根目录管理弹窗中已勾选的根 id
+  notices: [],                            // 运行提示（后端 kind='notice'）：{id,sessionId,taskId,level,message,at}
+  dismissedNotices: new Set(),            // 用户手动关掉（或发新消息时清掉）的提示卡片 key，渲染时跳过
+  noticeOpen: false,                      // 右下角错误小圆圈是否已展开
+  updateInfo: null,                       // 最近一次软件更新检测结果（/api/update/check 的返回值）
+};
+// 异步响应只能更新发起请求时的视图；用户选择的会话独立于列表排序。
+let sessionSelectionVersion = 0;
+let sessionDetailRequest = 0;
+let sessionListRequest = 0;
+let favoriteListRequest = 0;
+function activateSession(id) {
+  const next = id || '';
+  if (State.sessionId !== next) sessionSelectionVersion++;
+  State.sessionId = next;
+  if (!State.aiExpandedBySession.has(next)) State.aiExpandedBySession.set(next, new Set());
+  State.aiExpandedGroups = State.aiExpandedBySession.get(next);
+}
+function sessionListScope() {
+  return [State.mode, State.listMode, State.favoritesOnly ? '' : State.rootId].join(':');
+}
+
+// 视图模式存 localStorage：刷新页面、新开标签页/窗口都沿用上次选择的模式。
+// 兼容旧版本：listMode 曾存 sessionStorage，收藏夹开关曾用 favoritesOnly 键，读取时一并识别并迁移。
+function readListMode() {
+  const legacy = sessionStorage.getItem('listMode');
+  const m = localStorage.getItem('listMode') || legacy;
+  if (m === 'single' || m === 'favorites' || m === 'all') {
+    if (legacy) {
+      localStorage.setItem('listMode', m);
+      sessionStorage.removeItem('listMode');
+    }
+    return m;
+  }
+  const legacyFav = (localStorage.getItem('favoritesOnly') || sessionStorage.getItem('favoritesOnly')) === '1';
+  if (legacyFav) localStorage.setItem('listMode', 'favorites');
+  localStorage.removeItem('favoritesOnly');
+  sessionStorage.removeItem('favoritesOnly');
+  return legacyFav ? 'favorites' : 'single';
+}
+// favoritesOnly = 「跨目录视图」派生值，只读。切换视图一律走 setListMode。
+Object.defineProperty(State, 'favoritesOnly', {
+  get() { return State.listMode !== 'single'; },
+  enumerable: true,
+});
+
+let NOTICE_SEQ = 0;                       // 提示卡片自增 id：数组下标会随裁剪变动，不能当 key
+
+// 工作台模式：不按左上角根目录过滤，而是跨全部目录合并会话，每个会话自带目录。
+function isWorkspace() {
+  return State.mode === 'workspace';
+}
+// 应用当前模式到 body（CSS 据此隐藏根目录栏等）+ 刷新切换按钮文案
+function applyMode() {
+  document.body.classList.toggle('mode-workspace', isWorkspace());
+  const btn = $('modeToggleBtn');
+  if (btn) {
+    btn.textContent = isWorkspace() ? T('modeWorkspace') : T('modeClassic');
+    btn.title = T('modeToggleHint');
+  }
+}
+async function toggleMode() {
+  State.mode = isWorkspace() ? 'classic' : 'workspace';
+  localStorage.setItem('hubMode', State.mode);
+  setFavoritesOnly(false);
+  applyMode();
+  // 切换后重新加载会话（数据源不同）：先清空当前选择避免跨模式串台
+  activateSession('');
+  State.session = null;
+  await loadSessions();
+  await selectSession(State.sessions[0]?.id || null);
+}
+// 根目录末段名（工作台会话列表的目录徽章用）
+function rootName(rootId) {
+  const r = State.roots.find((x) => x.id === rootId);
+  if (!r) return '';
+  return basename(r.path) || r.name;
+}
+
+function setTabRootId(rootId) {
+  State.rootId = rootId || '';
+  if (State.rootId) sessionStorage.setItem('rootId', State.rootId);
+  else sessionStorage.removeItem('rootId');
+}
+
+// 列表视图切换：持久化到 localStorage，刷新页面或新开标签页后仍停留在同一视图
+function setListMode(mode) {
+  const next = mode === 'favorites' || mode === 'all' ? mode : 'single';
+  if (State.listMode !== next) State.favoriteSessions = []; // 换数据源：旧缓存（含草稿）一律作废
+  State.listMode = next;
+  localStorage.setItem('listMode', next);
+  localStorage.removeItem('favoritesOnly'); // 旧键不再使用
+  sessionStorage.removeItem('listMode');
+  sessionStorage.removeItem('favoritesOnly');
+  resetSessionPage();
+}
+function setFavoritesOnly(on) {
+  setListMode(on ? 'favorites' : 'single');
+}
+// ── 图标（统一手绘 SVG）──
+// 同一套规格：24x24 视窗、单色描边（currentColor）、线宽 1.6、圆头圆角、不填充。
+// 用 currentColor 才能跟按钮/菜单项的文字颜色（含选中态高亮、暗色主题）自动一致。
+const ICONS = {
+  // 目录管理：叠放的两个文件夹
+  manageRoots: '<path d="M6.5 6.5V5.6a1.6 1.6 0 0 1 1.6-1.6h2.5l1.5 1.6h5.8a1.6 1.6 0 0 1 1.6 1.6v6.6a1.6 1.6 0 0 1-1.6 1.6h-.4"/><path d="M3.5 10a1.6 1.6 0 0 1 1.6-1.6h2.6l1.5 1.6h5.7a1.6 1.6 0 0 1 1.6 1.6v6.3a1.6 1.6 0 0 1-1.6 1.6H5.1a1.6 1.6 0 0 1-1.6-1.6V10Z"/>',
+  // 推送：云 + 上箭头
+  gitPush: '<path d="M7.2 18.5H6.6a4.1 4.1 0 0 1-.6-8.15 5.6 5.6 0 0 1 10.9-1.1 4.65 4.65 0 0 1 .6 9.25h-.7"/><path d="M12 20.5v-8"/><path d="m8.9 15.3 3.1-3.1 3.1 3.1"/>',
+  // 打开文件夹
+  openFolder: '<path d="M3.5 17.5V6.6A1.6 1.6 0 0 1 5.1 5h3.3l1.7 1.8h6.3a1.6 1.6 0 0 1 1.6 1.6v1.8"/><path d="M3.5 17.5 6 11.3a1.6 1.6 0 0 1 1.5-1h12a1.1 1.1 0 0 1 1 1.5l-2.3 5.9a1.6 1.6 0 0 1-1.5 1H5a1.5 1.5 0 0 1-1.5-1.2Z"/>',
+  // 添加
+  plus: '<path d="M12 5.5v13"/><path d="M5.5 12h13"/>',
+  // 删除：垃圾桶
+  trash: '<path d="M4.5 7h15"/><path d="M9.5 7V5.4a1.4 1.4 0 0 1 1.4-1.4h2.2a1.4 1.4 0 0 1 1.4 1.4V7"/><path d="m6.3 7 .8 11.4a1.8 1.8 0 0 0 1.8 1.6h6.2a1.8 1.8 0 0 0 1.8-1.6L17.7 7"/><path d="M10.2 11v5"/><path d="M13.8 11v5"/>',
+  // 单目录：一只文件夹
+  single: '<path d="M3.2 8.1a2 2 0 0 1 2-2h3.05a2 2 0 0 1 1.5.68l1.02 1.16a2 2 0 0 0 1.5.68h6.53a2 2 0 0 1 2 2v7.7a2 2 0 0 1-2 2H5.2a2 2 0 0 1-2-2V8.1Z"/>',
+  // 收藏夹：五角星
+  favorites: '<path d="M12 3.5l2.62 5.32 5.88.86-4.25 4.14 1 5.85L12 16.92l-5.25 2.75 1-5.85L3.5 9.68l5.88-.86L12 3.5Z"/>',
+  // 全部目录：两只叠起来的文件夹
+  all: '<path d="M7.2 8V5.4a1.9 1.9 0 0 1 1.9-1.9h2.7a1.9 1.9 0 0 1 1.42.64l.86.98a1.9 1.9 0 0 0 1.43.64h4.1a1.9 1.9 0 0 1 1.9 1.9v1.9"/><path d="M2.6 10.6a1.9 1.9 0 0 1 1.9-1.9h3a1.9 1.9 0 0 1 1.42.64l.86.98a1.9 1.9 0 0 0 1.43.64h5.39a1.9 1.9 0 0 1 1.9 1.9v5.64a1.9 1.9 0 0 1-1.9 1.9H4.5a1.9 1.9 0 0 1-1.9-1.9V10.6Z"/>',
+  // 搜索：放大镜
+  search: '<circle cx="10.9" cy="10.9" r="6.4"/><path d="M15.55 15.55 20.4 20.4"/>',
+  // 批量选择：打了勾的方框
+  batch: '<rect x="3.6" y="3.6" width="16.8" height="16.8" rx="4.2"/><path d="M8 12.15l2.85 2.85L16.3 9.6"/>',
+  // 选中勾
+  check: '<path d="M4.8 12.4l4.7 4.7L19.2 7.3"/>',
+  // 首次引导箭头：一支指向左边（按钮方向）的细箭头
+  hintArrow: '<path d="M21 12H4.2"/><path d="M10.2 5.6 3.8 12l6.4 6.4"/>',
+};
+function svgIcon(name, size) {
+  const d = ICONS[name];
+  if (!d) throw new Error(`svgIcon: unknown icon=${name}`);
+  return `<svg class="ico ico-${name}" viewBox="0 0 24 24" width="${size}" height="${size}" `
+    + 'fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" '
+    + `stroke-linejoin="round" aria-hidden="true" focusable="false">${d}</svg>`;
+}
+
+// ── 首次使用引导箭头：没点过视图按钮时指着它，点一次后永久消失 ──
+const LIST_MODE_HINT_KEY = 'listModeHintSeen';
+function listModeHintSeen() {
+  return localStorage.getItem(LIST_MODE_HINT_KEY) === '1';
+}
+function syncListModeHint() {
+  const el = $('listModeHint');
+  if (!el) return;
+  const show = !listModeHintSeen();
+  el.hidden = !show;
+  el.innerHTML = show ? svgIcon('hintArrow', 20) : '';
+}
+function dismissListModeHint() {
+  if (listModeHintSeen()) return;
+  localStorage.setItem(LIST_MODE_HINT_KEY, '1');
+  syncListModeHint();
+}
+
+// 当前跨目录视图对应的后端接口与文案
+function listModeApi() {
+  return State.listMode === 'all' ? '/api/session/list-indexed' : '/api/session/list-favorites';
+}
+function listModeLabelKey() {
+  return State.listMode === 'all' ? 'allSessionsFolder' : State.listMode === 'favorites' ? 'favoritesFolder' : 'sessions';
+}
+// 画出视图按钮 / 菜单项的图标与勾选态。渲染会话列表时会调，applyText 里也调一次 ——
+// 还没选工作目录时 renderSessions 不会执行，按钮不能是空的。
+function paintListModeIcons() {
+  const btn = $('favoritesToggleBtn');
+  if (!btn) return;
+  btn.innerHTML = svgIcon(listModeIcon(State.listMode), 17); // 图标即当前模式，一眼看出在看哪一类列表
+  document.querySelectorAll('.lmm-item').forEach((b) => {
+    b.classList.toggle('active', b.dataset.listmode === State.listMode);
+    b.querySelector('.lmm-ico').innerHTML = svgIcon(listModeIcon(b.dataset.listmode), 17);
+    b.querySelector('.lmm-chk').innerHTML = svgIcon('check', 15);
+  });
+  syncListModeHint();
+}
+
+function listModeIcon(mode) {
+  return mode === 'all' ? 'all' : mode === 'favorites' ? 'favorites' : 'single';
+}
+
+// 引擎显示名
+function engineLabel(e) {
+  return e === 'codex' ? T('engineCodex') : T('engineClaude');
+}
+function engineShortLabel(e) {
+  return e === 'codex' ? 'CD' : 'CC';
+}
+function assistantLabel() {
+  return engineLabel(State.session?.engine);
+}
+// 会话是否仍是"未开始"草稿（可切换引擎）
+function isDraftSession(s) {
+  return !!s && !s.claudeSessionId && (s.tasks || []).length === 0;
+}
+
+let TOKEN = localStorage.getItem('token') || '';
+// 本次打开是否属于「新用户首启」（尚未设定访问密码）：决定引导结束后是去设密码还是直接进入
+let NEEDS_SETUP = false;
+
+// ── API ──
+async function api(path, body) {
+  const headers = { 'x-auth-token': TOKEN };
+  if (body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(path, {
+    method: body ? 'POST' : 'GET',
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (res.status === 401) {
+    showLogin();
+    throw new Error('unauthorized');
+  }
+  if (!(res.headers.get('content-type') || '').toLowerCase().includes('application/json')) {
+    throw new Error(T(['/api/fm/open-containing', '/api/fm/open-file'].includes(path) && res.status === 404
+      ? 'messageLinkRestartNeeded' : 'apiUnexpectedResponse'));
+  }
+  const json = await res.json();
+  if (!json.success) throw new Error(json.locked ? T('lockedHint') : (json.error || 'request failed'));
+  return json.data;
+}
+
+// ── 目录私有密码：各目录解锁凭据存 localStorage，并同步成 cookie（img/下载链接也能带上） ──
+function rootKeys() {
+  try { return JSON.parse(localStorage.getItem('rootKeys') || '{}') || {}; } catch { return {}; }
+}
+function syncRootKeyCookie() {
+  document.cookie = `rootKeys=${encodeURIComponent(JSON.stringify(rootKeys()))}; path=/; max-age=31536000; SameSite=Lax`;
+}
+function setRootKey(rootId, token) {
+  const k = rootKeys();
+  if (token) k[rootId] = token; else delete k[rootId];
+  localStorage.setItem('rootKeys', JSON.stringify(k));
+  syncRootKeyCookie();
+}
+syncRootKeyCookie();
+
+async function afterRootLockChange() {
+  await loadRoots();
+  renderWorkdirBar();
+  renderRootMeta();
+  await loadSessions();
+}
+
+// 未解锁的私有目录：输入密码解锁本浏览器
+async function unlockRoot(rootId) {
+  const pw = prompt(T('lockAskPw'));
+  if (!pw) return false;
+  try {
+    const { token } = await api('/api/root/lock/unlock', { id: rootId, password: pw });
+    setRootKey(rootId, token);
+    await afterRootLockChange();
+    return true;
+  } catch (e) {
+    alert(e.message);
+    return false;
+  }
+}
+
+// 目录私有按钮 / 右键菜单入口：未私有→设置密码；已私有未解锁→解锁；已解锁→关闭或修改密码
+async function manageRootLock(rootId) {
+  const root = State.roots.find((r) => r.id === rootId);
+  if (!root) return;
+  if (root.locked && !root.unlocked) { await unlockRoot(rootId); return; }
+  try {
+    let oldPw;
+    if (root.locked) {
+      const off = confirm(T('lockManageAsk'));
+      const cur = prompt(T('lockCurPw'));
+      if (!cur) return;
+      if (off) {
+        await api('/api/root/lock/clear', { id: rootId, password: cur });
+        setRootKey(rootId, '');
+        await afterRootLockChange();
+        return;
+      }
+      oldPw = cur;
+    }
+    const pw = prompt(T('lockNewPw'));
+    if (!pw) return;
+    if (prompt(T('lockNewPw2')) !== pw) { alert(T('lockMismatch')); return; }
+    const { token } = await api('/api/root/lock/set', { id: rootId, password: pw, oldPassword: oldPw });
+    setRootKey(rootId, token);
+    await afterRootLockChange();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function lockLabel(root) {
+  if (!root || !root.locked) return T('lockSet');
+  return root.unlocked ? T('lockManage') : T('lockUnlock');
+}
+
+// 单目录模式下的私有按钮：🔓=未私有，🔒=已私有
+function refreshLockRootBtn() {
+  const btn = $('lockRootBtn');
+  if (!btn) return;
+  const root = currentRoot();
+  btn.hidden = !root || isWorkspace() || State.favoritesOnly;
+  if (!root) return;
+  btn.textContent = root.locked ? '🔒' : '🔓';
+  btn.title = lockLabel(root);
+  btn.classList.toggle('active', !!root.locked);
+}
+
+const $ = (id) => document.getElementById(id);
+
+// ── 静态文案 ──
+function applyText() {
+  document.documentElement.lang = LANG;
+  $('appTitle').textContent = T('title');
+  $('appTitle').style.display = '';
+  $('appTitle').title = T('tagline');
+  $('appTagline').textContent = T('tagline');
+  // 浏览器标签页/窗口标题也带上这句介绍，并随语言切换
+  document.title = `${T('title')} — ${T('tagline')}`;
+  $('langBtn').textContent = T('lang');
+  $('guideBtn').title = T('guideBtn');
+  if (!$('guideMenu').hidden) renderGuideMenu();
+  if (!$('guideOverlay').hidden) renderGuide();
+  $('rootLabel').textContent = T('root');
+  $('addRootBtn').innerHTML = svgIcon('plus', 17);
+  $('addRootBtn').title = T('addRoot');
+  $('removeRootBtn').innerHTML = svgIcon('trash', 17);
+  $('manageRootsBtn').innerHTML = svgIcon('manageRoots', 17);
+  $('openFolderBtn').innerHTML = svgIcon('openFolder', 17);
+  $('removeRootBtn').title = T('removeRoot');
+  $('manageRootsBtn').title = T('manageRoots');
+  $('batchToggleBtn').title = T('batchSelect');
+  $('batchToggleBtn').innerHTML = svgIcon('batch', 17);
+  $('rootManageTitle').textContent = T('manageRootsTitle');
+  $('rootManageClose').textContent = T('close');
+  $('rmAllLabel').textContent = T('selectAll');
+  $('rootManageDelete').textContent = T('deleteSelected');
+  $('batchAllLabel').textContent = T('selectAll');
+  $('batchDeleteBtn').textContent = `🗑 ${T('deleteSelected')}`;
+  $('batchMarkCompleted').textContent = `✅ ${T('markCompleted')}`;
+  $('batchMarkTesting').textContent = `🧪 ${T('markTesting')}`;
+  $('batchMarkActive').textContent = `🔥 ${T('markActive')}`;
+  $('batchCancelBtn').textContent = T('cancel');
+  $('gitPushBtn').innerHTML = svgIcon('gitPush', 17);
+  $('rootEditTitle').textContent = T('editRootTitle');
+  $('rootEditClose').textContent = T('close');
+  $('noteLabel').textContent = T('note');
+  $('rootNote').placeholder = T('notePlaceholder');
+  $('linksLabel').textContent = T('links');
+  $('addLinkBtn').textContent = T('addLink');
+  $('rootEditSave').textContent = T('save');
+  $('extApiTitle').textContent = T('extApiTitle');
+  $('extApiOpenLabel').textContent = T('extApiOpenLabel');
+  $('extApiHint').textContent = T('extApiHint');
+  $('extApiTokenLabel').textContent = T('extApiTokenLabel');
+  $('extApiCopyToken').textContent = T('extApiCopyToken');
+  $('extApiResetToken').textContent = T('extApiResetToken');
+  $('extApiBaseUrlLabel').textContent = T('extApiBaseUrlLabel');
+  $('extApiBaseUrlHint').textContent = T('extApiBaseUrlHint');
+  $('extApiSaveBaseUrl').textContent = T('save');
+  $('extApiExampleLabel').textContent = T('extApiExampleLabel');
+  $('extApiDone').textContent = T('extApiDone');
+  $('extApiBtn').title = T('extApiTitle');
+  $('extMsgToastGo').textContent = T('extMsgToastGo');
+  $('extMsgToastClose').title = T('close');
+  $('sessionsLabel').textContent = T('sessions');
+  refreshNewSessionButton();
+  $('wsDirTitle').textContent = T('wsPickDirTitle');
+  $('wsDirClose').textContent = T('close');
+  $('wsRecentLabel').textContent = T('wsRecentLabel');
+  $('wsAddLabel').textContent = T('wsAddDirLabel');
+  $('wsDirPath').placeholder = T('wsDirPathPlaceholder');
+  $('wsDirBrowse').textContent = T('wsBrowse');
+  $('wsDirCreateLabel').textContent = T('wsCreateIfMissing');
+  $('wsDirUse').textContent = T('wsUseDir');
+  $('searchToggleBtn').title = T('search');
+  $('searchToggleBtn').innerHTML = svgIcon('search', 17);
+  $('favoritesToggleBtn').title = T('listModeTitle');
+  $('listModeMenuTitle').textContent = T('listModeTitle');
+  $('lmmSingle').textContent = T('listModeSingle');
+  $('lmmSingleHint').textContent = T('listModeSingleHint');
+  $('lmmFav').textContent = T('listModeFavorites');
+  $('lmmFavHint').textContent = T('listModeFavoritesHint');
+  $('lmmAll').textContent = T('listModeAll');
+  $('lmmAllHint').textContent = T('listModeAllHint');
+  paintListModeIcons();
+  $('sessionSearch').placeholder = T('searchSessions');
+  $('advSearchLabel').textContent = T('advancedSearch');
+  $('ftSearchStatusLbl').textContent = T('fullTextSearching');
+  $('tabActiveBtn').textContent = T('tabActive');
+  $('tabTestingBtn').textContent = T('tabTesting');
+  $('tabCompletedBtn').textContent = T('tabCompleted');
+  $('tabAllBtn').textContent = T('tabAll');
+  syncRunTabs();
+  $('ctxMarkActive').textContent = T('markActive');
+  $('ctxMarkTesting').textContent = T('markTesting');
+  $('ctxMarkCompleted').textContent = T('markCompleted');
+  $('ctxRenameTitle').textContent = T('renameSession');
+  $('ctxTraceStats').textContent = T('ctxTraceStats');
+  $('ctxOpenWorkdir').textContent = T('ctxOpenWorkdir');
+  $('ctxToggleFavorite').textContent = T('favoriteSession');
+  $('processLabel').textContent = T('process');
+  $('clearProcessBtn').textContent = T('clearProcess');
+  $('taskInput').placeholder = T('inputPlaceholder');
+  $('addTaskBtn').textContent = T('addTask');
+  $('addTasksLabel').textContent = T('addTasks');
+  $('tasksTitle').textContent = T('multiTaskTitle');
+  $('tasksClose').textContent = T('close');
+  $('tasksHint').textContent = T('multiTaskHint');
+  $('tasksSubmit').textContent = T('submitTasks');
+  $('tasksInput').placeholder = T('inputPlaceholder');
+  $('qmAllLabel').textContent = T('selectAll');
+  $('stopBtn').textContent = T('stopTask');
+  $('stopChoiceTitle').textContent = T('stopChoiceTitle');
+  $('stopChoiceDesc').textContent = T('stopChoiceDesc');
+  $('stopChoicePauseTitle').textContent = T('stopChoicePause');
+  $('stopChoicePauseDesc').textContent = T('stopChoicePauseDesc');
+  $('stopChoiceNextTitle').textContent = T('stopChoiceNext');
+  $('stopChoiceNextDesc').textContent = T('stopChoiceNextDesc');
+  $('pauseHint').textContent = T('pauseHint');
+  refreshComposerControls();
+  $('uploadBtn').title = T('uploadFile');
+  $('attachPvClose').textContent = T('attachClose');
+  $('upCancelBtn').textContent = T('uploadCancel');
+  renderAttachBar();
+  $('shotBtn').title = T('screenshot');
+  $('cmdMenuBtn').title = T('cmdMenuBtn');
+  if (!$('cmdMenu').hidden) renderCmdMenu();
+  if (!$('cmdOverlay').hidden) $('cmdGotIt').textContent = T('guideGotIt');
+  $('shotHead').textContent = T('shotPreview');
+  $('shotTip').textContent = T('shotAnnTip');
+  if (!$('shotOverlay').hidden) renderShotTools();
+  $('shotCancel').textContent = T('cancel');
+  $('shotConfirm').textContent = T('confirm');
+  $('dropHint').textContent = T('dropToUpload');
+  $('loginTitle').textContent = T('loginTitle');
+  $('loginPwd').placeholder = T('password');
+  $('loginBtn').textContent = T('loginBtn');
+  $('logoutBtn').textContent = T('logout');
+  $('themeBtn').textContent = '🎨';
+  $('themeBtn').title = T('themePick');
+  refreshAiCollapseBtn();
+  $('pickerTitle').textContent = T('pickDir');
+  $('pickerClose').textContent = T('close');
+  $('pickerHome').textContent = '🏠 ' + T('home');
+  $('pickerUp').textContent = '⬆ ' + T('up');
+  $('pickerNewDir').textContent = '➕ ' + T('newFolder');
+  $('pickerGo').textContent = T('go');
+  $('pickerSearch').placeholder = T('searchDir');
+  $('pickerName').placeholder = T('dirNameLabel');
+  $('pickerSelect').textContent = T('selectThisDir');
+  $('fmSearchInput').placeholder = T('searchFiles');
+  $('fmSearchRecurseLbl').textContent = T('searchSubdirs');
+  $('fmSearchBtn').title = T('search');
+  $('fmRefreshBtn').title = T('refresh');
+  $('settingsBtn').title = T('settings');
+  $('settingsTitle').textContent = T('settingsTitle');
+  $('settingsClose').textContent = T('close');
+  $('defaultEngineLabel').textContent = T('defaultEngine');
+  $('settingsPaneSave').textContent = T('save');
+  $('settingsPaneBack').title = T('back');
+  renderPaneStatus(); // 状态条里可能挂着「有未保存的改动」等文案，切语言要跟着变
+  // 设置弹窗开着时切语言 → 重渲染板块列表 / 当前板块标题
+  if (!$('settingsOverlay').hidden) renderSettingsNav();
+  if (!$('settingsPaneOverlay').hidden && CurrentPane) {
+    const p = paneById(CurrentPane);
+    if (p) $('settingsPaneTitle').textContent = `${p.icon} ${p.title()}`;
+  }
+  // 引擎下拉选项（主区 + 设置弹窗）
+  fillEngineOptions($('engineSelect'));
+  fillEngineOptions($('defaultEngineSelect'));
+  applyEnginePaneText();
+  updateQueueToggle((State.session?.tasks || []).length);
+  refreshPauseBtn();
+  refreshEngineControl();
+  applyMode();
+}
+
+// 用 claude/codex 两个选项填充一个 <select>
+function fillEngineOptions(sel) {
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML =
+    `<option value="claude">${escapeHtml(T('engineClaude'))}</option>` +
+    `<option value="codex">${escapeHtml(T('engineCodex'))}</option>`;
+  if (prev) sel.value = prev;
+}
+
+// ── 主题（多主题：经典深/浅 + 大海蓝 + 粉色少女心，持久化） ──
+// 每项 sw = 三色样本[背景, 强调, 文字]，用于面板色卡预览。
+const THEMES = [
+  { id: 'dark', name: () => T('themeDark'), sw: ['#0f1115', '#5b8cff', '#e6e8ec'] },
+  { id: 'light', name: () => T('themeLight'), sw: ['#f4f6fb', '#2f6fed', '#1b2230'] },
+  { id: 'ocean', name: () => T('themeOcean'), sw: ['#0a1a2f', '#38bdf8', '#dce8f5'], anim: true },
+  { id: 'pink', name: () => T('themePink'), sw: ['#fff0f6', '#ec4899', '#5a2a42'] },
+  { id: 'green', name: () => T('themeGreen'), sw: ['#f0f7ee', '#3fa34d', '#22331c'], anim: true },
+  { id: 'dog', name: () => T('themeDog'), sw: ['#f7f3ee', '#956849', '#48392f'], anim: true },
+  { id: 'cat', name: () => T('themeCat'), sw: ['#fdf6ec', '#e08a3c', '#4a3928'], anim: true },
+  { id: 'galaxy', name: () => T('themeGalaxy'), sw: ['#05070f', '#3b82f6', '#f2f6ff'], anim: true },
+  { id: 'mecha', name: () => T('themeMecha'), sw: ['#171a1c', '#eab308', '#d5dde2'], anim: true },
+  { id: 'cyber', name: () => T('themeCyber'), sw: ['#0d0221', '#ff2a6d', '#f0e9ff'], anim: true },
+  { id: 'steam', name: () => T('themeSteam'), sw: ['#241b12', '#c8862b', '#ecdcbf'] },
+  { id: 'rain', name: () => T('themeRain'), sw: ['#0e1519', '#5aa9e6', '#dbe6ec'], anim: true },
+  { id: 'sea', name: () => T('themeSea'), sw: ['#04141f', '#22d3ee', '#cfe6ef'], anim: true },
+  { id: 'aurora', name: () => T('themeAurora'), sw: ['#0a1420', '#4ade80', '#dce8f0'], anim: true },
+  { id: 'winter', name: () => T('themeWinter'), sw: ['#dbe9f5', '#4f9fd6', '#25384a'], anim: true },
+  { id: 'rabbit', name: () => T('themeRabbit'), sw: ['#e7f3dc', '#6aa84f', '#35402a'], anim: true },
+];
+// 浅底主题集合（编辑器用 CodeMirror default，其余用 material-darker）
+const LIGHT_THEMES = ['light', 'pink', 'green', 'dog', 'cat', 'winter', 'rabbit'];
+// 移动端只保留最简单的深/浅两套：动效主题的 canvas 动画在手机上容易卡死。
+const MOBILE_THEMES = ['dark', 'light'];
+function isMobileView() {
+  return !!(window.matchMedia && window.matchMedia('(max-width: 860px)').matches);
+}
+function availableThemes() {
+  return isMobileView() ? THEMES.filter((t) => MOBILE_THEMES.indexOf(t.id) >= 0) : THEMES;
+}
+function currentTheme() {
+  const t = localStorage.getItem('theme') || 'dark';
+  return availableThemes().some((x) => x.id === t) ? t : 'dark';
+}
+function isLightTheme(t) {
+  return LIGHT_THEMES.indexOf(t || currentTheme()) >= 0;
+}
+function cmTheme() {
+  return isLightTheme() ? 'default' : 'material-darker';
+}
+function applyTheme() {
+  const theme = currentTheme();
+  THEMES.forEach((t) => document.body.classList.remove(t.id));
+  document.body.classList.add(theme);
+  // 同步 CodeMirror 主题（编辑器若已创建）
+  if (typeof Editor !== 'undefined' && Editor.cm) Editor.cm.setOption('theme', cmTheme());
+  // 银河系动态星空 / 赛博朋克合成波场景：仅对应主题时激活 canvas 动画
+  if (window.Galaxy) window.Galaxy.setActive(theme === 'galaxy');
+  if (window.Cyber) window.Cyber.setActive(theme === 'cyber');
+  if (window.Rain) window.Rain.setActive(theme === 'rain');
+  if (window.Sea) window.Sea.setActive(theme === 'sea');
+  if (window.Aurora) window.Aurora.setActive(theme === 'aurora');
+  if (window.Winter) window.Winter.setActive(theme === 'winter');
+  if (window.Ocean) window.Ocean.setActive(theme === 'ocean');
+  if (window.Bamboo) window.Bamboo.setActive(theme === 'green');
+  if (window.Dog) window.Dog.setActive(theme === 'dog');
+  if (window.Cat) window.Cat.setActive(theme === 'cat');
+  if (window.Rabbit) window.Rabbit.setActive(theme === 'rabbit');
+  if (window.Mecha) window.Mecha.setActive(theme === 'mecha');
+}
+function pickTheme(id) {
+  localStorage.setItem('theme', id);
+  applyTheme();
+  renderThemePanel();
+}
+function renderThemePanel() {
+  const cur = currentTheme();
+  $('themePanelTitle').textContent = T('themePick');
+  $('themeGrid').innerHTML = availableThemes().map((t) =>
+    `<button type="button" class="theme-opt${t.id === cur ? ' on' : ''}" data-theme="${t.id}">
+       <span class="theme-sw">${t.sw.map((c) => `<i style="background:${c}"></i>`).join('')}</span>
+       <span class="theme-nm">${escapeHtml(t.name())}</span>
+       ${t.anim ? `<span class="theme-anim" title="${escapeHtml(T('themeAnim'))}">✨ ${escapeHtml(T('themeAnim'))}</span>` : ''}
+       ${t.id === cur ? '<span class="theme-chk">✓</span>' : ''}
+     </button>`).join('');
+  $('themeGrid').querySelectorAll('[data-theme]').forEach((el) => {
+    el.onclick = () => pickTheme(el.dataset.theme);
+  });
+}
+function toggleThemePanel() {
+  const p = $('themePanel');
+  if (p.hidden) { renderThemePanel(); p.hidden = false; }
+  else p.hidden = true;
+}
+function closeThemePanel() {
+  const p = $('themePanel');
+  if (p && !p.hidden) p.hidden = true;
+}
+
+// ── 教程入口菜单：📖 弹出两个选项（快速上手指南 / 小白教程） ──
+function renderGuideMenu() {
+  $('guideMenuTitle').textContent = T('guideMenuTitle');
+  $('gmQuickT').textContent = T('guideMenuQuickT');
+  $('gmQuickD').textContent = T('guideMenuQuickD');
+  $('gmLearnT').textContent = T('guideMenuLearnT');
+  $('gmLearnD').textContent = T('guideMenuLearnD');
+}
+function toggleGuideMenu() {
+  const p = $('guideMenu');
+  if (p.hidden) { renderGuideMenu(); p.hidden = false; }
+  else p.hidden = true;
+}
+function closeGuideMenu() {
+  const p = $('guideMenu');
+  if (p && !p.hidden) p.hidden = true;
+}
+// 小白教程是独立页面，另开标签页，不打断当前会话
+function openLearnCourse() {
+  closeGuideMenu();
+  window.open('learn.html', '_blank', 'noopener');
+}
+
+// ── 使用指南 ──
+function renderGuide() {
+  $('guideTitle').textContent = T('guideTitle');
+  $('guideBody').innerHTML = T('guideHtml');
+  $('guideGotIt').textContent = T('guideGotIt');
+}
+function openGuide() {
+  renderGuide();
+  $('guideOverlay').hidden = false;
+}
+function closeGuide() {
+  $('guideOverlay').hidden = true;
+}
+
+// ── 登录 ──
+function showLogin() {
+  $('loginOverlay').hidden = false;
+  setTimeout(() => $('loginPwd').focus(), 50);
+}
+function hideLogin() {
+  $('loginOverlay').hidden = true;
+}
+async function doLogin(e) {
+  e.preventDefault();
+  $('loginErr').textContent = '';
+  try {
+    const data = await api('/api/auth/login', { password: $('loginPwd').value });
+    TOKEN = data.token;
+    localStorage.setItem('token', TOKEN);
+    $('loginPwd').value = '';
+    hideLogin();
+    await startApp();
+  } catch {
+    $('loginErr').textContent = T('wrongPassword');
+  }
+}
+function logout() {
+  TOKEN = '';
+  localStorage.removeItem('token');
+  location.reload();
+}
+
+// ── 首次安装：设定访问密码 ──
+function showSetup() {
+  $('setupTitle').textContent = T('setupTitle');
+  $('setupHint').textContent = T('setupHint');
+  $('setupPwd').placeholder = T('setupPwd');
+  $('setupPwd2').placeholder = T('setupPwd2');
+  $('setupBtn').textContent = T('setupBtn');
+  $('setupOverlay').hidden = false;
+  setTimeout(() => $('setupPwd').focus(), 50);
+}
+async function doSetup(e) {
+  e.preventDefault();
+  $('setupErr').textContent = '';
+  const p1 = $('setupPwd').value;
+  const p2 = $('setupPwd2').value;
+  if (!p1 || p1.length < 4) { $('setupErr').textContent = T('setupTooShort'); return; }
+  if (p1 !== p2) { $('setupErr').textContent = T('setupMismatch'); return; }
+  try {
+    const data = await api('/api/auth/setup', { password: p1 });
+    TOKEN = data.token;
+    NEEDS_SETUP = false;
+    localStorage.setItem('token', TOKEN);
+    $('setupPwd').value = '';
+    $('setupPwd2').value = '';
+    $('setupOverlay').hidden = true;
+    await startApp();
+  } catch (err) {
+    $('setupErr').textContent = err.message || T('setupFail');
+  }
+}
+
+// ── 根目录 ──
+async function loadRoots() {
+  State.roots = await api('/api/root/list');
+  await refreshRootRecency();
+  const sel = $('rootSelect');
+  sel.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = T('selectRootFirst');
+  sel.appendChild(empty);
+  sortedRoots().forEach((r) => {
+    const o = document.createElement('option');
+    o.value = r.id;
+    o.textContent = `${r.name} (${r.path})`;
+    sel.appendChild(o);
+  });
+  if (!State.roots.find((r) => r.id === State.rootId)) {
+    setTabRootId(State.roots.length === 1 ? State.roots[0].id : '');
+  }
+  sel.value = State.rootId;
+  renderWorkdirBar();
+  renderRootMeta();
+  await loadSessions();
+  refreshFavoriteSessions(false);
+}
+
+async function refreshRootRecency() {
+  try {
+    const sessions = await api('/api/session/list-all');
+    const recent = {};
+    sessions.forEach((s) => {
+      if (!s.rootId) return;
+      recent[s.rootId] = Math.max(recent[s.rootId] || 0, s.updatedAt || 0);
+    });
+    State.rootRecent = recent;
+  } catch {
+    State.rootRecent = {};
+  }
+}
+
+function sortedRoots() {
+  return [...State.roots].sort((a, b) => {
+    const ar = State.rootRecent[a.id] || 0;
+    const br = State.rootRecent[b.id] || 0;
+    if (br !== ar) return br - ar;
+    return (b.createdAt || 0) - (a.createdAt || 0);
+  });
+}
+
+// 当前选中的根目录对象
+function currentRoot() {
+  return State.roots.find((r) => r.id === State.rootId) || null;
+}
+
+// 就近提示并聚焦实际可见的控件，保留输入内容，移动端必要时展开侧栏。
+function requestRootSelection() {
+  showMiniToast(T(State.roots.length ? 'rootChoiceHint' : 'rootAddHint'));
+  let control = State.roots.length
+    ? [...document.querySelectorAll('.favorite-root-required select, .gs-root-chooser select, #rootSelect')]
+        .find((el) => el.getClientRects().length)
+    : $('addRootBtn');
+  control ||= $('rootSelect');
+  if (!control.getClientRects().length) document.body.classList.add('drawer-open');
+  control.classList.add('root-needs-choice');
+  control.setAttribute('aria-invalid', 'true');
+  control.scrollIntoView({ block: 'center' });
+  control.focus();
+  const clear = () => {
+    control.classList.remove('root-needs-choice');
+    control.removeAttribute('aria-invalid');
+  };
+  control.addEventListener(State.roots.length ? 'change' : 'click', clear, { once: true });
+}
+
+function selectOnlyRoot() {
+  if (currentRoot()) return true;
+  if (State.roots.length !== 1) return false;
+  setTabRootId(State.roots[0].id);
+  $('rootSelect').value = State.rootId;
+  renderWorkdirBar();
+  renderRootMeta();
+  return true;
+}
+
+// 选中某个根目录（下拉框 change / 引导按钮共用）：同步下拉框、切换 tab 根目录、刷新会话列表
+function applyRootSelection(id) {
+  selectSession(null);
+  setFavoritesOnly(false);
+  const sel = $('rootSelect');
+  if (sel && sel.value !== id) sel.value = id;
+  setTabRootId(id);
+  renderWorkdirBar();
+  renderRootMeta();
+  loadSessions();
+  // 选用该目录工作时，若缺 CLAUDE.md/AGENTS.md 则至少引导选一次模板（选过/明确跳过就不再问）
+  if (id && typeof offerTemplateForRoot === 'function') offerTemplateForRoot(id);
+}
+
+// 引导「选择目录」：打开目录选择器浏览并选中一个项目目录。
+// （原先只是 rootSelect.click()，多数浏览器不会以脚本弹开原生下拉 → 点了没反应）
+// 走 /api/root/ensure：同一路径复用已有根、不重复添加，选完即选中并进入下一步。
+function guidePickRoot() {
+  openPicker(async (dirPath) => {
+    try {
+      const root = await api('/api/root/ensure', { path: dirPath, create: false });
+      await loadRoots();
+      applyRootSelection(root.id);
+    } catch (e) {
+      alert(e.message);
+    }
+  });
+}
+
+function renderWorkdirBar() {
+  const el = $('workdirBar');
+  const row = $('workdirRow');
+  if (!el) return;
+  const root = State.favoritesOnly ? null : currentRoot();
+  el.textContent = root ? root.path : '';
+  el.title = root ? root.path : '';
+  if (row) row.hidden = !root; // 整行（含边框）随目录有无一起显隐
+  const extBtn = $('extApiBtn');
+  if (extBtn) extBtn.style.display = root ? '' : 'none';
+}
+
+// 侧栏渲染根目录的备注与链接（链接 _blank 打开）。编辑入口集成在此处的 ✎
+function renderRootMeta() {
+  refreshLockRootBtn();
+  const box = $('rootMeta');
+  const root = currentRoot();
+  box.innerHTML = '';
+  if (!root) return;
+  const hasNote = !!(root.note && root.note.trim());
+  const links = root.links || [];
+
+  // 无备注无链接：显示一个低调的「添加」入口
+  if (!hasNote && links.length === 0) {
+    const add = document.createElement('button');
+    add.className = 'meta-empty';
+    add.textContent = T('addNoteLink');
+    add.addEventListener('click', openRootEdit);
+    box.appendChild(add);
+    return;
+  }
+
+  // 头部：标题 + ✎ 编辑
+  const head = document.createElement('div');
+  head.className = 'meta-head';
+  head.innerHTML = `<span class="lbl">${T('noteLinks')}</span>`;
+  const edit = document.createElement('button');
+  edit.className = 'meta-edit';
+  edit.textContent = '✎';
+  edit.title = T('editRoot');
+  edit.addEventListener('click', openRootEdit);
+  head.appendChild(edit);
+  box.appendChild(head);
+
+  if (hasNote) {
+    const note = document.createElement('div');
+    note.className = 'note';
+    note.textContent = root.note;
+    box.appendChild(note);
+  }
+  if (links.length > 0) {
+    const wrap = document.createElement('div');
+    wrap.className = 'links';
+    links.forEach((l) => {
+      const a = document.createElement('a');
+      a.href = l.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = l.label || l.url;
+      a.title = l.url;
+      wrap.appendChild(a);
+    });
+    box.appendChild(wrap);
+  }
+}
+
+// ── git 一键提交推送：add . / commit -m 1 / push（顶部小型弹窗提示结果，全局仅一个） ──
+let gitPushToastTimer = null;
+function showGitPushToast(msg, isErr) {
+  clearTimeout(gitPushToastTimer);
+  const box = $('gitPushToast');
+  $('gitPushToastMsg').textContent = msg;
+  box.classList.toggle('err', !!isErr);
+  box.hidden = false;
+  gitPushToastTimer = setTimeout(() => (box.hidden = true), 8000);
+}
+function hideGitPushToast() {
+  clearTimeout(gitPushToastTimer);
+  $('gitPushToast').hidden = true;
+}
+
+// ── 通用小型提示（如「已经是新会话」），避免用户以为按钮失效 ──
+let miniToastTimer = null;
+function showMiniToast(msg) {
+  clearTimeout(miniToastTimer);
+  const box = $('miniToast');
+  $('miniToastMsg').textContent = msg;
+  box.hidden = false;
+  miniToastTimer = setTimeout(() => (box.hidden = true), 2500);
+}
+
+// ── 外部消息到达提示（不管当前正看哪个会话，落地就弹）──
+let extMsgToastTimer = null;
+function showExtMsgToast(sessionId, promptPreview) {
+  clearTimeout(extMsgToastTimer);
+  const box = $('extMsgToast');
+  $('extMsgToastMsg').textContent = T('extMsgToastMsg').replace('{text}', (promptPreview || '').slice(0, 60));
+  $('extMsgToastGo').onclick = () => {
+    box.hidden = true;
+    jumpToExternalSession(sessionId);
+  };
+  box.hidden = false;
+  extMsgToastTimer = setTimeout(() => (box.hidden = true), 15000);
+}
+// 切到外部消息所在的根目录（如果不是当前正看的）并打开该会话
+async function jumpToExternalSession(sessionId) {
+  const rootId = (sessionId || '').split(':')[0];
+  if (rootId && rootId !== State.rootId) {
+    applyRootSelection(rootId);
+    await loadSessions();
+  }
+  selectSession(sessionId);
+  flashSessionRow(sessionId);
+}
+
+// 会话列表里对应会话行闪烁一次高亮，提示用户「就是这个」
+function flashSessionRow(sid) {
+  const row = $('sessionList').querySelector(`[data-sid="${CSS.escape(sid)}"]`);
+  if (!row) return;
+  row.classList.remove('flash-highlight');
+  void row.offsetWidth;
+  row.classList.add('flash-highlight');
+  row.addEventListener('animationend', () => row.classList.remove('flash-highlight'), { once: true });
+}
+async function gitPush() {
+  const root = currentRoot();
+  if (!root) {
+    alert(T('selectRootFirst'));
+    return;
+  }
+  showGitPushToast(T('gitPushing'), false);
+  try {
+    const r = await api('/api/root/gitpush', { rootId: root.id });
+    showGitPushToast(`${r.ok ? T('gitPushOk') : T('gitPushFail')}\n${r.output}`, !r.ok);
+  } catch (e) {
+    showGitPushToast(`${T('gitPushFail')}\n${e.message}`, true);
+  }
+}
+
+// ── 编辑根目录（备注 + 链接） ──
+function openRootEdit() {
+  const root = currentRoot();
+  if (!root) {
+    alert(T('selectRootFirst'));
+    return;
+  }
+  $('rootNote').value = root.note || '';
+  $('linksEditor').innerHTML = '';
+  (root.links || []).forEach((l) => addLinkRow(l.label, l.url));
+  $('rootEditOverlay').hidden = false;
+}
+function closeRootEdit() {
+  $('rootEditOverlay').hidden = true;
+}
+function addLinkRow(label, url) {
+  const row = document.createElement('div');
+  row.className = 'link-row';
+  row.innerHTML =
+    `<input class="lbl" placeholder="${T('linkLabel')}" />` +
+    `<input class="url" placeholder="${T('linkUrl')}" />` +
+    `<button class="del danger sm">✕</button>`;
+  row.querySelector('.lbl').value = label || '';
+  row.querySelector('.url').value = url || '';
+  row.querySelector('.del').addEventListener('click', () => row.remove());
+  $('linksEditor').appendChild(row);
+}
+function collectLinks() {
+  return Array.from($('linksEditor').querySelectorAll('.link-row'))
+    .map((row) => ({
+      label: row.querySelector('.lbl').value.trim(),
+      url: row.querySelector('.url').value.trim(),
+    }))
+    .filter((l) => l.url);
+}
+async function saveRootEdit() {
+  const root = currentRoot();
+  if (!root) return;
+  await api('/api/root/update', {
+    id: root.id,
+    note: $('rootNote').value,
+    links: collectLinks(),
+  });
+  closeRootEdit();
+  await loadRoots();
+}
+
+// ── 外部消息注入 API（齿轮）：查看/切换该根目录是否开放，看/换 token ──
+async function openExternalApi() {
+  const root = currentRoot();
+  if (!root) {
+    alert(T('selectRootFirst'));
+    return;
+  }
+  let status;
+  try {
+    status = await api('/api/root/external?id=' + encodeURIComponent(root.id));
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  fillExternalApiPanel(root.id, status);
+  $('extApiOverlay').hidden = false;
+}
+function closeExternalApi() {
+  $('extApiOverlay').hidden = true;
+}
+function fillExternalApiPanel(rootId, status) {
+  $('extApiOpenChk').checked = status.externalApiOpen !== false;
+  $('extApiToken').value = status.externalApiToken || '';
+  $('extApiBaseUrl').value = status.externalApiBaseUrl || '';
+  const base = status.externalApiBaseUrl || location.origin;
+  $('extApiExample').value =
+    `curl -X POST ${base}/api/external/message \\\n` +
+    `  -H "Content-Type: application/json" \\\n` +
+    `  -d '{"rootId":"${rootId}","token":"${status.externalApiToken || ''}",` +
+    `"sessionId":"<sessionId>","content":"<回复内容>"}'\n\n` +
+    `# 会话里的 AI 也可以直接读环境变量自己拼，不用你手填：\n` +
+    `# CLOOTEE_ROOT_ID / CLOOTEE_SESSION_ID / CLOOTEE_EXTERNAL_TOKEN / CLOOTEE_EXTERNAL_BASE_URL`;
+}
+async function saveExternalApiBaseUrl() {
+  const root = currentRoot();
+  if (!root) return;
+  try {
+    const status = await api('/api/root/external/base-url', { id: root.id, baseUrl: $('extApiBaseUrl').value.trim() });
+    fillExternalApiPanel(root.id, status);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+async function toggleExternalApiOpen() {
+  const root = currentRoot();
+  if (!root) return;
+  try {
+    const status = await api('/api/root/external', { id: root.id, open: $('extApiOpenChk').checked });
+    fillExternalApiPanel(root.id, status);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+async function resetExternalApiToken() {
+  const root = currentRoot();
+  if (!root) return;
+  if (!confirm(T('extApiResetConfirm'))) return;
+  try {
+    const status = await api('/api/root/external/reset-token', { id: root.id });
+    fillExternalApiPanel(root.id, status);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+function copyExternalApiToken() {
+  const val = $('extApiToken').value;
+  if (!val) return;
+  navigator.clipboard?.writeText(val).catch(() => {});
+}
+
+// ── 移动端抽屉 ──
+function toggleDrawer() {
+  document.body.classList.toggle('drawer-open');
+}
+function closeDrawer() {
+  document.body.classList.remove('drawer-open');
+}
+
+// ── 目录选择器 ──
+const Picker = { path: '', searchTimer: null, onPick: null };
+
+function openPicker(onPick) {
+  Picker.onPick = onPick || null; // 传入回调=仅回填路径（工作台选目录），否则=添加根目录
+  $('pickerOverlay').hidden = false;
+  $('pickerSearch').value = '';
+  navigatePicker('');
+}
+function closePicker() {
+  $('pickerOverlay').hidden = true;
+}
+
+async function navigatePicker(target) {
+  let listing;
+  try {
+    listing = await api('/api/fs/list?path=' + encodeURIComponent(target || ''));
+  } catch (e) {
+    alert(e.message);
+    return;
+  }
+  Picker.path = listing.path;
+  $('pickerPath').value = listing.path;
+  $('pickerName').value = basename(listing.path);
+  renderDrives(listing.drives);
+  renderDirRows(listing.dirs, false);
+}
+
+function renderDrives(drives) {
+  const box = $('pickerDrives');
+  box.innerHTML = '';
+  (drives || []).forEach((d) => {
+    const b = document.createElement('button');
+    b.textContent = d.name;
+    b.addEventListener('click', () => navigatePicker(d.path));
+    box.appendChild(b);
+  });
+}
+
+function renderDirRows(dirs, isSearch) {
+  const list = $('pickerList');
+  list.innerHTML = '';
+  if (!dirs || dirs.length === 0) {
+    list.innerHTML = `<div class="picker-empty">${isSearch ? T('noResults') : T('emptyDir')}</div>`;
+    return;
+  }
+  dirs.forEach((d) => {
+    const row = document.createElement('div');
+    row.className = 'dir-row';
+    row.innerHTML = `<span class="ico">📁</span><span class="nm">${escapeHtml(d.name)}</span>${isSearch ? `<span class="sub">${escapeHtml(d.path)}</span>` : ''}`;
+    row.addEventListener('click', () => {
+      $('pickerSearch').value = '';
+      navigatePicker(d.path);
+    });
+    list.appendChild(row);
+  });
+}
+
+// 在当前目录下新建文件夹，成功后进入其中（显示名自动填为新目录名）
+async function createDirInPicker() {
+  const parent = Picker.path;
+  if (!parent) return;
+  const name = (prompt(T('newFolderPrompt') + '\n' + parent, '') || '').trim();
+  if (!name) return;
+  try {
+    const dir = await api('/api/fs/mkdir', { parent, name });
+    $('pickerSearch').value = '';
+    await navigatePicker(dir.path);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function isAbsolutePath(s) {
+  return /^[A-Za-z]:[\\/]?/.test(s) || /^[\\/]/.test(s);
+}
+
+// 列目录，成功返回 data，失败返回 null（不弹错）
+async function fsListSafe(target) {
+  try {
+    return await api('/api/fs/list?path=' + encodeURIComponent(target));
+  } catch {
+    return null;
+  }
+}
+
+function onPickerSearch() {
+  clearTimeout(Picker.searchTimer);
+  const q = $('pickerSearch').value.trim();
+  if (!q) {
+    navigatePicker(Picker.path);
+    return;
+  }
+  Picker.searchTimer = setTimeout(() => runPickerSearch(q), 300);
+}
+
+async function runPickerSearch(q) {
+  // 1) 输入的是绝对路径 → 直接当作路径处理
+  if (isAbsolutePath(q)) {
+    const normalized = /^[A-Za-z]:$/.test(q) ? q + '\\' : q;
+    // 1a) 完整存在的目录：进入它
+    const listing = await fsListSafe(normalized);
+    if (listing) {
+      Picker.path = listing.path;
+      $('pickerPath').value = listing.path;
+      $('pickerName').value = basename(listing.path);
+      renderDrives(listing.drives);
+      renderDirRows(listing.dirs, false);
+      return;
+    }
+    // 1b) 部分路径：列出父目录并按末段过滤（如 C:\proj → 列 C:\ 过滤含 proj）
+    const parent = parentPath(normalized);
+    const seg = basename(normalized).toLowerCase();
+    const parentListing = await fsListSafe(parent);
+    if (parentListing) {
+      const matched = parentListing.dirs.filter((d) => d.name.toLowerCase().includes(seg));
+      renderDirRows(matched, true);
+    } else {
+      renderDirRows([], true);
+    }
+    return;
+  }
+  // 2) 普通关键词 → 在当前目录下递归搜索文件夹名
+  try {
+    const dirs = await api(
+      '/api/fs/search?base=' + encodeURIComponent(Picker.path) + '&q=' + encodeURIComponent(q),
+    );
+    renderDirRows(dirs, true);
+  } catch {
+    /* 忽略搜索中的瞬时错误 */
+  }
+}
+
+async function confirmPickDir() {
+  const path = Picker.path;
+  const name = $('pickerName').value.trim() || basename(path);
+  // 工作台模式：借用同一目录选择器为「新建会话选目录」回填路径，不新增根目录
+  if (Picker.onPick) {
+    const cb = Picker.onPick;
+    Picker.onPick = null;
+    closePicker();
+    cb(path);
+    return;
+  }
+  try {
+    const root = await api('/api/root/add', { name, path });
+    setTabRootId(root.id);
+    closePicker();
+    await loadRoots();
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function basename(p) {
+  if (!p) return '';
+  const parts = p.replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts[parts.length - 1] || p;
+}
+
+function parentPath(p) {
+  if (!p) return '';
+  const trimmed = p.replace(/[\\/]+$/, '');
+  const idx = Math.max(trimmed.lastIndexOf('\\'), trimmed.lastIndexOf('/'));
+  if (idx <= 0) return trimmed; // 已到盘符/根
+  let parent = trimmed.slice(0, idx);
+  if (/^[A-Za-z]:$/.test(parent)) parent += '\\'; // Windows 盘符根补反斜杠
+  return parent || '/';
+}
+
+function addRoot() {
+  // 引导：选择已有目录 / 新建项目（见 rootwizard.js）；随后按需引导选模板
+  openAddRootGuide();
+}
+
+async function removeRoot() {
+  if (!State.rootId) return;
+  if (!confirm(T('confirmRemoveRoot'))) return;
+  await api('/api/root/remove', { id: State.rootId });
+  setTabRootId('');
+  await loadRoots();
+}
+
+// 文案内 {n} 占位替换
+function Tn(key, n) {
+  return T(key).replace('{n}', n);
+}
+
+// ── 根目录批量管理弹窗 ──
+function openRootManage() {
+  State.selectedRoots = new Set();
+  $('rootManageOverlay').hidden = false;
+  renderRootManage();
+}
+function closeRootManage() {
+  $('rootManageOverlay').hidden = true;
+}
+function renderRootManage() {
+  const list = $('rootManageList');
+  const roots = sortedRoots();
+  if (roots.length === 0) {
+    list.innerHTML = `<div class="empty">${T('noRoots')}</div>`;
+  } else {
+    list.innerHTML = '';
+    roots.forEach((r) => {
+      const row = document.createElement('label');
+      row.className = 'rm-item' + (State.selectedRoots.has(r.id) ? ' selected' : '');
+      row.innerHTML = `<input type="checkbox" ${State.selectedRoots.has(r.id) ? 'checked' : ''} />
+        <span class="rm-name">${escapeHtml(r.name)}</span>
+        <span class="rm-path">${escapeHtml(r.path)}</span>`;
+      row.querySelector('input').addEventListener('change', (e) => {
+        if (e.target.checked) State.selectedRoots.add(r.id);
+        else State.selectedRoots.delete(r.id);
+        row.classList.toggle('selected', e.target.checked);
+        refreshRootManageBar();
+      });
+      list.appendChild(row);
+    });
+  }
+  refreshRootManageBar();
+}
+function refreshRootManageBar() {
+  const n = State.selectedRoots.size;
+  const total = State.roots.length;
+  $('rmCount').textContent = Tn('selectedCount', n);
+  $('rmAllChk').checked = total > 0 && n === total;
+  const btn = $('rootManageDelete');
+  btn.disabled = n === 0;
+  btn.textContent = n > 0 ? Tn('deleteSelected', n) + ` (${n})` : T('deleteSelected');
+}
+function toggleRootManageAll(checked) {
+  State.selectedRoots = checked ? new Set(State.roots.map((r) => r.id)) : new Set();
+  renderRootManage();
+}
+async function deleteSelectedRoots() {
+  const ids = [...State.selectedRoots];
+  if (ids.length === 0) return;
+  if (!confirm(Tn('confirmRemoveRoots', ids.length))) return;
+  await api('/api/root/remove-batch', { ids });
+  // 若当前根被删则清空选择
+  if (State.selectedRoots.has(State.rootId)) setTabRootId('');
+  State.selectedRoots = new Set();
+  closeRootManage();
+  await loadRoots();
+}
+
+// ── 会话批量选择 / 批量删除 ──
+function toggleBatchMode(on) {
+  State.batchMode = on === undefined ? !State.batchMode : !!on;
+  State.selectedSessions = new Set();
+  document.body.classList.toggle('batch-mode', State.batchMode);
+  $('batchToggleBtn').classList.toggle('on', State.batchMode);
+  $('batchBar').hidden = !State.batchMode;
+  renderSessions();
+  if (State.batchMode) refreshBatchBar();
+}
+function toggleSessionSelected(id, checked) {
+  if (checked) State.selectedSessions.add(id);
+  else State.selectedSessions.delete(id);
+  refreshBatchBar();
+  renderSessions();
+}
+// 当前列表实际可见（经筛选/搜索后）的会话 id，供全选/计数使用
+function visibleSessionIds() {
+  return [...document.querySelectorAll('#sessionList .session-item[data-sid]')].map(
+    (el) => el.dataset.sid,
+  );
+}
+function refreshBatchBar() {
+  const n = State.selectedSessions.size;
+  $('batchCount').textContent = Tn('selectedCount', n);
+  const vis = visibleSessionIds();
+  $('batchAllChk').checked = vis.length > 0 && vis.every((id) => State.selectedSessions.has(id));
+  const act = $('batchActBtn');
+  act.disabled = n === 0;
+  act.textContent = n > 0 ? `${T('batchActions')} (${n}) ▾` : `${T('batchActions')} ▾`;
+  if (n === 0) closeBatchMenu();
+  ApiBill.paintSelection();
+}
+// 批量操作下拉菜单
+function toggleBatchMenu(on) {
+  const menu = $('batchMenu');
+  const open = on === undefined ? menu.hidden : !!on;
+  menu.hidden = !open;
+  $('batchActBtn').classList.toggle('on', open);
+}
+function closeBatchMenu() { toggleBatchMenu(false); }
+// 批量标记状态：活跃 / 待测试 / 已完成
+async function markSelectedSessions(status) {
+  const ids = [...State.selectedSessions];
+  closeBatchMenu();
+  if (ids.length === 0) return;
+  for (const id of ids) await api('/api/session/status', { id, status });
+  toggleBatchMode(false);
+  await loadSessions();
+}
+function toggleBatchAll(checked) {
+  const vis = visibleSessionIds();
+  if (checked) vis.forEach((id) => State.selectedSessions.add(id));
+  else vis.forEach((id) => State.selectedSessions.delete(id));
+  refreshBatchBar();
+  renderSessions();
+}
+async function deleteSelectedSessions() {
+  const ids = [...State.selectedSessions];
+  closeBatchMenu();
+  if (ids.length === 0) return;
+  if (!confirm(Tn('confirmRemoveSessions', ids.length))) return;
+  await api('/api/session/remove-batch', { ids });
+  if (State.selectedSessions.has(State.sessionId)) {
+    activateSession('');
+    State.session = null;
+  }
+  toggleBatchMode(false);
+  await loadSessions();
+}
+
+// ── 会话（仅显示当前根目录关联的会话） ──
+async function loadSessions() {
+  const request = ++sessionListRequest;
+  const scope = sessionListScope();
+  const selection = sessionSelectionVersion;
+  let sessions;
+  if (!isWorkspace() && State.favoritesOnly) sessions = await loadFavoriteSessions();
+  else if (isWorkspace()) sessions = await api('/api/session/list-all');
+  else if (State.rootId) sessions = await api('/api/session/list?rootId=' + encodeURIComponent(State.rootId));
+  else sessions = [];
+  if (request !== sessionListRequest || scope !== sessionListScope()) return;
+  State.sessions = sessions;
+  rebuildRunning();
+  renderSessions();
+  // 缺席可能只是旧快照、刚创建或收藏状态变化，不能据此抢走当前会话。
+  const current = State.session;
+  const needsSelection = !State.sessionId || (!State.favoritesOnly && !isWorkspace()
+    && current && current.rootId !== State.rootId);
+  if (selection === sessionSelectionVersion && needsSelection) {
+    await selectSession(State.sessions[0]?.id || null);
+  }
+}
+
+// 会话标题：取第一条消息（优先用户消息）首句作为标题，没有消息则回退到 name
+function sessionTitle(s) {
+  if (!s) return '';
+  if (s.customTitle && s.customTitle.trim()) return s.customTitle.trim();
+  const msgs = s.messages || [];
+  const first = msgs.find((m) => m.role === 'user') || msgs[0];
+  const text = first && first.text ? first.text.trim().replace(/\s+/g, ' ') : '';
+  if (text) return text.slice(0, 60);
+  // 无消息：若是默认的 "Session …" 名则显示更友好的占位
+  if (!s.name || /^Session\s/.test(s.name)) return T('untitledSession');
+  return s.name;
+}
+
+// 会话来源徽章：手动 / SDK / 空。返回带样式的 <span>，未知来源不显示。
+function sourceBadge(source) {
+  const map = {
+    typed: { txt: T('srcTyped'), cls: 'src-typed' },
+    sdk: { txt: T('srcSdk'), cls: 'src-sdk' },
+    empty: { txt: T('srcEmpty'), cls: 'src-empty' },
+  };
+  const b = map[source];
+  if (!b) return '';
+  return `<span class="src-badge ${b.cls}">${escapeHtml(b.txt)}</span>`;
+}
+
+function fmtSessionListTime(ms) {
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const sameDay = sameYear && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  if (sameDay) return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  if (sameYear) return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// 列表项的正文：正文不再随列表下发（以 claude 原生为准）；仅当前打开的会话已加载正文，
+// 全文搜索因此只覆盖"当前打开的会话"，其余会话需打开后才可全文搜索（标题搜索不受影响）。
+function sessionMessages(s) {
+  if (s.id === State.sessionId && State.session) return State.session.messages || [];
+  return s.messages || [];
+}
+
+// 全文搜索时返回首个命中消息的上下文片段（无命中返回 null）
+function matchSnippet(s, q) {
+  for (const m of sessionMessages(s)) {
+    const body = (m.text || '').toLowerCase();
+    const idx = body.indexOf(q);
+    if (idx >= 0) {
+      const start = Math.max(0, idx - 20);
+      const raw = m.text.slice(start, idx + q.length + 30).replace(/\s+/g, ' ');
+      return (start > 0 ? '…' : '') + raw + (idx + q.length + 30 < m.text.length ? '…' : '');
+    }
+  }
+  return null;
+}
+
+// 依据会话列表（后端为准）重建"执行中"集合与每会话的运行任务 id 集，后续由 WS 任务事件增量更新
+function rebuildRunning() {
+  State.runningTasks = new Map();
+  for (const s of State.sessions) {
+    const ids = (s.tasks || []).filter((t) => t.status === 'running').map((t) => t.id);
+    if (ids.length) State.runningTasks.set(s.id, new Set(ids));
+  }
+  State.running = new Set(State.runningTasks.keys());
+}
+// 依据一条任务事件更新"执行中"集合（running→加入；该任务结束→移除）
+// ⚠ 必须按任务 id 记账：一个会话在跑的同时还能追加排队消息，而排队会广播 status='pending' 的任务事件。
+//   早期实现"只要来了非 running 事件就清掉执行中"，导致每追加一条消息，侧栏"执行中"就消失（还会误标"刚执行"）。
+// 结束瞬间若用户当前未打开该会话，标记 justFinished（侧栏"刚执行"），待用户点开该会话后清除
+function updateRunningFromTask(sessionId, task) {
+  if (!sessionId || !task) return;
+  const before = State.running.has(sessionId);
+  let ids = State.runningTasks.get(sessionId);
+  if (task.status === 'running') {
+    if (!ids) State.runningTasks.set(sessionId, (ids = new Set()));
+    ids.add(task.id);
+  } else if (ids) {
+    // 只有"这条正在跑的任务"结束才算跑完；pending/held 等其它任务的事件与执行中标识无关
+    ids.delete(task.id);
+    if (ids.size === 0) State.runningTasks.delete(sessionId);
+  }
+  const after = State.runningTasks.has(sessionId);
+  let reordered = false;
+  if (after) {
+    State.running.add(sessionId);
+    State.justFinished.delete(sessionId);
+  } else {
+    State.running.delete(sessionId);
+    if (before && sessionId !== State.sessionId) State.justFinished.add(sessionId);
+  }
+  if (task.status === 'running') {
+    // 开始执行即把该会话的更新时间顶到最新，让它在列表里浮到最上面
+    // （与后端 _markRunning 落库的 updatedAt 保持一致；否则前端缓存的旧时间不会重排）
+    reordered = bumpSessionUpdatedAt(sessionId, task.startedAt || Date.now());
+  }
+  if (reordered || after !== before) renderSessions();
+}
+
+// 把某会话的 updatedAt 顶到给定时间并就地重排会话列表（含收藏夹列表）。返回是否命中该会话。
+// 用于「开始执行的会话立即浮到列表最上面」：仅改前端缓存排序，不发请求（后端已在 _markRunning 落库同一时间）。
+function bumpSessionUpdatedAt(sessionId, ts) {
+  let hit = false;
+  const apply = (arr) => {
+    if (!Array.isArray(arr)) return arr;
+    const s = arr.find((x) => x.id === sessionId);
+    if (!s) return arr;
+    if ((s.updatedAt || 0) < ts) s.updatedAt = ts;
+    hit = true;
+    return sortSessionsForList(arr);
+  };
+  const favAliased = State.sessions === State.favoriteSessions;
+  State.favoriteSessions = apply(State.favoriteSessions);
+  if (favAliased) State.sessions = State.favoriteSessions;
+  else State.sessions = apply(State.sessions);
+  return hit;
+}
+
+function sortSessionsForList(sessions) {
+  return sessions.slice().sort((a, b) => {
+    if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    return b.updatedAt - a.updatedAt;
+  });
+}
+
+async function refreshFavoriteSessions(renderAfter = false) {
+  if (isWorkspace()) return;
+  try {
+    await loadFavoriteSessions();
+    if (State.favoritesOnly) {
+      State.sessions = State.favoriteSessions;
+      rebuildRunning();
+      if (renderAfter) renderSessions();
+    }
+  } catch {
+    /* 收藏夹后台刷新失败时保留当前缓存 */
+  }
+}
+
+async function loadFavoriteSessions() {
+  const request = ++favoriteListRequest;
+  const mode = State.listMode;
+  const sessions = await api(listModeApi());
+  if (request !== favoriteListRequest || mode !== State.listMode) return State.favoriteSessions;
+  // 在返回时读取草稿：请求期间用户可能刚刚点了新建，不能用请求前的快照覆盖。
+  const drafts = State.favoriteSessions.filter((s) => isFavoriteDraftId(s.id));
+  State.favoriteSessions = sortSessionsForList([...drafts, ...sessions]);
+  State.favoriteCacheReady = true;
+  // 恢复的目录筛选可能已无对应收藏（取消收藏/删目录）→ 自动失效，避免列表看起来空
+  if (FavDir.rootId && !State.favoriteSessions.some((s) => s.rootId === FavDir.rootId)) setFavDir('');
+  return State.favoriteSessions;
+}
+
+// ── 会话列表分页：默认只渲染 20 条，滚到底自动追加 20 条 ──
+// 搜索时不分页（"搜索能搜到全部"），其余视图（单目录 / 收藏夹 / 全部目录）一律分页。
+const Page = { size: 20, shown: 20 };
+function resetSessionPage() {
+  Page.shown = Page.size;
+}
+function growSessionPage() {
+  Page.shown += Page.size;
+  renderSessions();
+}
+// 滚到距底部 80px 内就追加下一页（只在还有剩余时生效，renderSessions 会记下总数）
+function onSessionListScroll() {
+  const el = $('sessionList');
+  if (!el || !Page.more) return;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) growSessionPage();
+}
+
+// hits：后端全文搜索命中集（id→片段）。前端只加载当前会话正文，其余会话的全文命中全靠后端。
+const Search = { open: false, query: '', advanced: false, hits: new Map(), reqSeq: 0, timer: null, pending: false };
+
+function toggleSearch() {
+  Search.open = !Search.open;
+  $('searchBar').hidden = !Search.open;
+  if (Search.open) {
+    updateSearchClear();
+    setTimeout(() => $('sessionSearch').focus(), 30);
+  } else {
+    Search.query = '';
+    Search.hits = new Map();
+    Search.reqSeq++;
+    setSearchPending(false);
+    $('sessionSearch').value = '';
+    updateSearchClear();
+    renderSessions();
+  }
+}
+
+// 全文搜索进行中的动画：输入框内转圈 + 搜索栏下方状态行（防抖等待期间也显示）
+function setSearchPending(pending) {
+  Search.pending = !!pending;
+  $('sessionSearchSpin').hidden = !Search.pending;
+  $('ftSearchStatus').hidden = !Search.pending;
+}
+// 全文搜索走后端（跨会话读 jsonl）。300ms 防抖 + 序号防竞态；非全文/空词即清空命中集。
+function scheduleFullTextSearch() {
+  if (Search.timer) clearTimeout(Search.timer);
+  Search.timer = null;
+  if (!Search.advanced || !Search.query) {
+    Search.hits = new Map();
+    Search.reqSeq++; // 让在途请求的结果作废
+    setSearchPending(false);
+    return;
+  }
+  setSearchPending(true);
+  Search.timer = setTimeout(runFullTextSearch, 300);
+}
+async function runFullTextSearch() {
+  const q = Search.query;
+  if (!Search.advanced || !q) {
+    Search.hits = new Map();
+    setSearchPending(false);
+    return;
+  }
+  const seq = ++Search.reqSeq;
+  try {
+    let url = '/api/session/search?q=' + encodeURIComponent(q);
+    // 经典单目录模式限定当前根目录；工作台/收藏夹跨目录则不限定，交由列表成员集自然收敛
+    if (!isWorkspace() && !State.favoritesOnly && State.rootId)
+      url += '&rootId=' + encodeURIComponent(State.rootId);
+    const hits = await api(url);
+    if (seq !== Search.reqSeq) return; // 丢弃过期响应
+    const map = new Map();
+    for (const h of hits) map.set(h.id, h.snippet || '');
+    Search.hits = map;
+    renderSessions();
+  } catch {
+    if (seq === Search.reqSeq) {
+      Search.hits = new Map();
+      renderSessions();
+    }
+  } finally {
+    if (seq === Search.reqSeq) setSearchPending(false);
+  }
+}
+function updateSearchClear() {
+  $('sessionSearchClear').hidden = !$('sessionSearch').value;
+}
+function onSearchInput() {
+  Search.query = $('sessionSearch').value.trim().toLowerCase();
+  resetSessionPage();
+  updateSearchClear();
+  scheduleFullTextSearch();
+  renderSessions();
+}
+function resetSessionSearch(focus = false) {
+  $('sessionSearch').value = '';
+  onSearchInput();
+  if (focus) $('sessionSearch').focus();
+}
+function clearSessionSearch() {
+  resetSessionSearch(true);
+}
+function onAdvToggle() {
+  Search.advanced = $('advSearch').checked;
+  scheduleFullTextSearch();
+  renderSessions();
+}
+
+// 三态视图切换：单目录 / 收藏夹 / 全部目录（由星标按钮的下拉菜单调用）
+async function switchListMode(mode) {
+  closeListModeMenu();
+  if (State.listMode === mode) return;
+  setListMode(mode);
+  setFavDir('');
+  await loadSessions();
+}
+
+function syncFavoritesButton() {
+  const btn = $('favoritesToggleBtn');
+  if (!btn) return;
+  document.body.classList.toggle('favorites-only', State.favoritesOnly);
+  document.body.classList.toggle('list-mode-all', State.listMode === 'all');
+  btn.classList.toggle('active', State.favoritesOnly);
+  btn.title = T('listModeTitle') + '：' + T(listModeLabelKey());
+  $('sessionsLabel').textContent = T(listModeLabelKey());
+  paintListModeIcons();
+  refreshNewSessionButton();
+  renderWorkdirBar();
+}
+
+// ── 星标按钮的视图下拉菜单 ──
+function openListModeMenu() {
+  const m = $('listModeMenu');
+  if (!m) return;
+  m.hidden = false;
+  setTimeout(() => document.addEventListener('click', onListModeOutside), 0);
+}
+function closeListModeMenu() {
+  const m = $('listModeMenu');
+  if (!m || m.hidden) return;
+  m.hidden = true;
+  document.removeEventListener('click', onListModeOutside);
+}
+function onListModeOutside(e) {
+  if (e.target.closest && e.target.closest('.list-mode-wrap')) return;
+  closeListModeMenu();
+}
+function toggleListModeMenu(e) {
+  if (e) e.stopPropagation();
+  dismissListModeHint(); // 点过就不再需要引导箭头
+  const m = $('listModeMenu');
+  if (!m) return;
+  if (m.hidden) openListModeMenu();
+  else closeListModeMenu();
+}
+
+function refreshNewSessionButton() {
+  const btn = $('newSessionBtn');
+  if (!btn) return;
+  btn.textContent = T('newSession');
+}
+
+// ── 收藏夹目录筛选（纯前端，不走后端） ──
+const FavDir = {
+  rootId: sessionStorage.getItem('favDirRootId') || '',
+  // 标签行默认只显示 3 行；展开状态也持久化，免得每次重绘又收回去
+  expanded: sessionStorage.getItem('favDirExpanded') === '1',
+};
+
+// 目录筛选同样持久化：刷新后仍停在原来那个目录下
+function setFavDir(rootId) {
+  resetSessionPage();
+  FavDir.rootId = rootId || '';
+  if (FavDir.rootId) sessionStorage.setItem('favDirRootId', FavDir.rootId);
+  else sessionStorage.removeItem('favDirRootId');
+}
+
+// 执行中的会话按这个时间参与排序：比任何真实 updatedAt 都大，但必须是有限值
+// （用 Infinity 会让两个都在执行的目录相减得 NaN，sort 结果不稳定）
+const FDF_RUNNING_AT = 8.64e15;
+
+// 收藏会话涉及的根目录（去重 + 计数），按「最近有任务」倒序
+// 顺带按目录累计「执行中」「刚执行完」的会话数：标签右上角一个这种会话画一个点
+function favDirOptions() {
+  const map = new Map();
+  State.sessions.forEach((s) => {
+    if (!s.rootId) return;
+    const cur = map.get(s.rootId) || { rootId: s.rootId, name: rootName(s.rootId) || s.rootId, count: 0, running: 0, justFinished: 0, lastAt: 0 };
+    cur.count += 1;
+    // 与会话列表里的标识同口径：执行中优先，停了且用户还没点开看过才算「刚执行完」
+    if (State.running.has(s.id)) cur.running += 1;
+    else if (State.justFinished.has(s.id)) cur.justFinished += 1;
+    // 「最近有任务」= 该目录下会话最近一次更新时间；正在执行的会话视为此刻（永远排最前）
+    const at = State.running.has(s.id) ? FDF_RUNNING_AT : (Number(s.updatedAt) || 0);
+    if (at > cur.lastAt) cur.lastAt = at;
+    map.set(s.rootId, cur);
+  });
+  // 最近活动优先；完全同时（如都没时间戳）才退回会话数与名称
+  return [...map.values()].sort((a, b) => b.lastAt - a.lastAt || b.count - a.count || a.name.localeCompare(b.name));
+}
+
+// 收藏夹里当前筛选中的目录（校验它还活着）：新建会话时直接拿来当工作目录
+function favFilterRootId() {
+  if (!FavDir.rootId) return '';
+  return State.roots.some((r) => r.id === FavDir.rootId) ? FavDir.rootId : '';
+}
+
+function pickFavDir(rootId) {
+  setFavDir(FavDir.rootId === rootId ? '' : rootId);
+  renderSessions();
+  // 切到某个目录时顺手打开该目录下最顶端的会话（取消筛选时不动当前会话）
+  if (FavDir.rootId) selectTopVisibleSession();
+}
+
+// 打开会话列表里第一条（已按当前筛选/排序渲染完毕）。批量模式下不动，避免误勾选。
+function selectTopVisibleSession() {
+  if (State.batchMode) return;
+  const top = $('sessionList').querySelector('.session-item');
+  const sid = top && top.dataset.sid;
+  if (!sid || sid === State.sessionId) return;
+  selectSession(sid);
+}
+
+function clearFavDir() {
+  setFavDir('');
+  renderSessions();
+}
+
+const FDF_NAME_MAX = 20; // 标签上目录名最多 20 字符，超出截断
+const FDF_ROWS_COLLAPSED = 3; // 折叠时显示的标签行数
+const FDF_GAP = 4; // 与 .fav-dir-filter 的 gap 保持一致（用于算 3 行的高度）
+const FDF_DOT_MAX = 6; // 单个目录最多画几个点：再多画不下，真实数量在 title 里给
+
+// 目录标签右上角的小圆点：执行中=闪烁，刚执行完=蓝色静态；其余会话不画点
+function favDirDots(o) {
+  const run = Math.min(o.running, FDF_DOT_MAX);
+  const fin = Math.min(o.justFinished, FDF_DOT_MAX);
+  if (!run && !fin) return '';
+  return '<span class="fdf-dots">'
+    + '<span class="fdf-dot run"></span>'.repeat(run)
+    + '<span class="fdf-dot fin"></span>'.repeat(fin)
+    + '</span>';
+}
+
+// 悬浮提示：目录名 + 两类会话的准确条数（点数被 FDF_DOT_MAX 截断时这里仍是真实值）
+function favDirTitle(o) {
+  const parts = [o.name];
+  if (o.running) parts.push(`${T('runningTag')} ${o.running}`);
+  if (o.justFinished) parts.push(`${T('justFinishedTag')} ${o.justFinished}`);
+  return parts.join(' · ');
+}
+
+// 收藏夹里目录标签行常驻显示（不折叠、无开关）：进来就能看到所有目录
+function renderFavDirFilter() {
+  const box = $('favDirFilter');
+  if (!box) return;
+  const opts = State.favoritesOnly && !isWorkspace() ? favDirOptions() : [];
+  box.hidden = opts.length === 0; // 不在收藏夹 / 收藏里没有带目录的会话时整行收掉
+  if (opts.length === 0) {
+    box.innerHTML = '';
+    if ($('favDirMoreRow')) $('favDirMoreRow').hidden = true;
+    return;
+  }
+  box.innerHTML = opts
+    .map((o) => `<button class="fdf-tag${o.rootId === FavDir.rootId ? ' active' : ''}" data-fdf="${escapeHtml(o.rootId)}" title="${escapeHtml(favDirTitle(o))}"><span class="fdf-nm">${escapeHtml(favDirLabel(o.name))}</span><i>${o.count}</i>${favDirDots(o)}</button>`)
+    .join('')
+    + (FavDir.rootId ? `<button class="fdf-clear" id="fdfClear" title="${escapeHtml(T('clearFilter'))}">✕</button>` : '');
+  box.querySelectorAll('.fdf-tag').forEach((el) => {
+    const opt = opts.find((o) => o.rootId === el.dataset.fdf);
+    el.addEventListener('click', () => pickFavDir(el.dataset.fdf));
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openDirCtxMenu(opt, e.clientX, e.clientY);
+    });
+    // 触屏没有右键：长按同一个菜单
+    bindLongPress(el, (e) => {
+      const t = e.touches && e.touches[0];
+      openDirCtxMenu(opt, t ? t.clientX : 40, t ? t.clientY : 120);
+    });
+  });
+  const clr = box.querySelector('#fdfClear');
+  if (clr) clr.addEventListener('click', clearFavDir);
+  applyFavDirCollapse();
+}
+
+// 目录名过长会把标签撑满整行，硬截断到 20 字符（完整名在 title 与右键菜单里给）
+function favDirLabel(name) {
+  const nm = String(name || '');
+  return nm.length > FDF_NAME_MAX ? nm.slice(0, FDF_NAME_MAX - 1) + '…' : nm;
+}
+
+// 折叠到 3 行：按实测单行高度算出 max-height，超高才露出「更多 / 收起」开关
+function applyFavDirCollapse() {
+  const box = $('favDirFilter');
+  const row = $('favDirMoreRow');
+  const btn = $('favDirMoreBtn');
+  if (!box || !row || !btn) return;
+  const tags = box.querySelectorAll('.fdf-tag');
+  if (!tags.length) {
+    row.hidden = true;
+    box.classList.remove('collapsed');
+    box.style.maxHeight = '';
+    return;
+  }
+  const lineH = tags[0].offsetHeight || 22;
+  const padTop = parseFloat(getComputedStyle(box).paddingTop) || 0;
+  const maxH = Math.round(lineH * FDF_ROWS_COLLAPSED + FDF_GAP * (FDF_ROWS_COLLAPSED - 1) + padTop);
+  // 先按未折叠量一次完整高度，再决定要不要裁
+  box.classList.remove('collapsed');
+  box.style.maxHeight = '';
+  const overflowing = box.scrollHeight > maxH + 1;
+  row.hidden = !overflowing;
+  if (!overflowing) return;
+  if (FavDir.expanded) {
+    btn.textContent = T('dirFilterLess');
+    return;
+  }
+  // 「更多(n)」里的 n = 会被裁掉的标签数（按标签相对本行容器的位置判断，比按行数估算准；
+  // 不能用 offsetTop —— 容器没定位，offsetTop 是相对更外层祖先的，会把所有标签都算成溢出）
+  const boxTop = box.getBoundingClientRect().top;
+  const cut = [...tags].filter((el) => el.getBoundingClientRect().bottom - boxTop > maxH + 1).length;
+  btn.textContent = Tn('dirFilterMore', cut);
+  box.classList.add('collapsed');
+  box.style.maxHeight = maxH + 'px';
+}
+
+function toggleFavDirExpanded() {
+  FavDir.expanded = !FavDir.expanded;
+  sessionStorage.setItem('favDirExpanded', FavDir.expanded ? '1' : '0');
+  applyFavDirCollapse();
+}
+
+// ── 目录标签右键/长按菜单：完整路径 + 目录内容概况 + 打开该目录 ──
+let dirCtxOpt = null;
+function openDirCtxMenu(opt, x, y) {
+  if (!opt) return;
+  dirCtxOpt = { ...opt };
+  const root = State.roots.find((r) => r.id === opt.rootId);
+  $('dirCtxName').textContent = opt.name;
+  $('dirCtxPath').textContent = (root && root.path) || T('dirCtxLoading');
+  $('dirCtxInfo').className = 'dir-ctx-info';
+  $('dirCtxInfo').textContent = T('dirCtxLoading');
+  $('dirCtxCopy').textContent = T('dirCtxCopyPath');
+  $('dirCtxOpen').textContent = T('dirCtxOpen');
+  $('dirCtxLock').textContent = '🔒 ' + lockLabel(root);
+  // 「打开该目录」是服务器本机行为：只有 hub 跑在有桌面的 Windows / macOS 上才给
+  $('dirCtxOpen').hidden = !['win32', 'darwin'].includes(State.settings.platform);
+  const menu = $('dirCtxMenu');
+  menu.hidden = false;
+  menu.style.left = Math.min(x, Math.max(8, window.innerWidth - 330)) + 'px';
+  menu.style.top = Math.min(y, Math.max(8, window.innerHeight - 220)) + 'px';
+  loadDirCtxInfo(opt);
+}
+
+// 目录详情（路径 / 文件夹数 / 文件数）现取现用：目录随时可能被外部删改，不缓存
+async function loadDirCtxInfo(opt) {
+  let info = null;
+  try {
+    info = await api(`/api/root/info?id=${encodeURIComponent(opt.rootId)}`);
+  } catch (e) {
+    if (dirCtxOpt && dirCtxOpt.rootId === opt.rootId) $('dirCtxInfo').textContent = e.message || 'failed';
+    return;
+  }
+  if (!dirCtxOpt || dirCtxOpt.rootId !== opt.rootId) return; // 菜单已关 / 已换目录
+  dirCtxOpt.path = info.path;
+  $('dirCtxPath').textContent = info.path;
+  const box = $('dirCtxInfo');
+  if (!info.exists) {
+    box.className = 'dir-ctx-info missing';
+    box.textContent = T('dirCtxMissing');
+    return;
+  }
+  box.className = 'dir-ctx-info';
+  box.textContent = [
+    Tn('dirCtxDirs', info.dirs),
+    Tn('dirCtxFiles', info.files),
+    Tn('dirCtxSessions', opt.count),
+  ].join(' · ');
+}
+
+function closeDirCtxMenu() {
+  $('dirCtxMenu').hidden = true;
+  dirCtxOpt = null;
+}
+
+// 复制完整路径：菜单不关，在按钮上给一次「✓」反馈（路径通常是用户接着要粘去别处的）
+async function dirCtxCopyPath() {
+  const dirPath = dirCtxOpt
+    && (dirCtxOpt.path || (State.roots.find((r) => r.id === dirCtxOpt.rootId) || {}).path);
+  if (!dirPath) return;
+  await copyText(dirPath, $('dirCtxCopy'), T('dirCtxCopyPath'));
+}
+
+async function dirCtxOpenFolder() {
+  const rootId = dirCtxOpt && dirCtxOpt.rootId;
+  closeDirCtxMenu();
+  if (!rootId) return;
+  try {
+    await api('/api/root/open', { rootId });
+  } catch (e) {
+    alert(e.message || 'Open folder failed');
+  }
+}
+
+// tab 切换：active(未完成) / completed(已完成) / all(全部)
+function switchTab(tab) {
+  State.tab = tab;
+  resetSessionPage();
+  document.querySelectorAll('.s-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  renderSessions();
+}
+
+const RUN_TAB_LABELS = { all: 'runTabAll', running: 'runTabRunning', justFinished: 'runTabJustFinished' };
+
+// 单个会话是否命中已勾选的运行状态（多选取并集）；「刚执行」=已停止且用户还没点开看过
+function matchRunFilters(s) {
+  const running = State.running.has(s.id);
+  if (State.runFilters.has('running') && running) return true;
+  // 已点开过的（justFinishedSeen）本轮仍留在列表里：点击不应让会话当场消失，等用户切走筛选再清掉
+  if (State.runFilters.has('justFinished') && !running && (State.justFinished.has(s.id) || State.justFinishedSeen.has(s.id))) return true;
+  return false;
+}
+
+// 运行状态筛选下的空列表文案：单选给专属文案，两个都勾给合并文案
+function runFilterEmptyKey() {
+  if (State.runFilters.size === 0) return '';
+  if (State.runFilters.size > 1) return 'noRunOrFinishedSessions';
+  return State.runFilters.has('running') ? 'noRunningSessions' : 'noJustFinishedSessions';
+}
+
+// 运行状态筛选：running(执行中) / justFinished(刚执行) 可同时勾选（并集），点「所有」清空互斥
+function toggleRunFilter(key) {
+  resetSessionPage();
+  if (key === 'all') State.runFilters.clear();
+  else if (State.runFilters.has(key)) State.runFilters.delete(key);
+  else State.runFilters.add(key);
+  State.justFinishedSeen.clear(); // 切换筛选=开启新一轮：上一轮点开过的会话到这时才真正移出「刚执行完」
+  syncRunTabs();
+  renderSessions();
+}
+
+// 刷新运行状态筛选按钮：勾中的加 ✓ 前缀；空集时高亮「所有」
+function syncRunTabs() {
+  const isAll = State.runFilters.size === 0;
+  document.querySelectorAll('.r-tab').forEach((b) => {
+    const key = b.dataset.runtab;
+    const on = key === 'all' ? isAll : State.runFilters.has(key);
+    b.classList.toggle('active', on);
+    b.textContent = (on && key !== 'all' ? '✓ ' : '') + T(RUN_TAB_LABELS[key] || 'runTabAll');
+  });
+}
+
+function renderSessions() {
+  const list = $('sessionList');
+  syncFavoritesButton();
+  renderFavDirFilter();
+  refreshLockRootBtn();
+  if (State.sessions.length === 0) {
+    list.innerHTML = `<div class="empty">${T(emptyListKey())}</div>`;
+    Page.more = 0;
+    return;
+  }
+  const q = Search.query;
+  let sessions = State.sessions;
+  // 收藏夹内的目录筛选：纯前端即时过滤
+  if (State.favoritesOnly && FavDir.rootId) sessions = sessions.filter((s) => s.rootId === FavDir.rootId);
+  if (State.tab !== 'all') sessions = sessions.filter((s) => (s.status || 'active') === State.tab);
+  // 运行状态筛选：执行中 / 刚执行（已停止且用户还没点开看过）——多选时取并集；空集不过滤
+  if (State.runFilters.size) sessions = sessions.filter(matchRunFilters);
+  if (q) {
+    sessions = sessions.filter((s) => {
+      if (sessionTitle(s).toLowerCase().includes(q)) return true;
+      if (Search.advanced) {
+        if (Search.hits.has(s.id)) return true; // 后端全文命中（覆盖全部会话）
+        // 当前打开会话正文已在本地，即时命中（不必等后端）
+        return sessionMessages(s).some((m) => (m.text || '').toLowerCase().includes(q));
+      }
+      return false;
+    });
+  }
+  if (sessions.length === 0) {
+    const emptyKeyByTab = { active: 'noActiveSessions', testing: 'noTestingSessions', completed: 'noCompletedSessions' };
+    const emptyKey = q ? 'noSearchResults'
+      : (runFilterEmptyKey() || emptyKeyByTab[State.tab] || emptyListKey());
+    list.innerHTML = `<div class="empty">${T(emptyKey)}</div>`;
+    Page.more = 0;
+    return;
+  }
+  // 分页：搜索时展示全部命中，否则只渲染前 Page.shown 条，剩下的滚到底再追加
+  const total = sessions.length;
+  if (!q && total > Page.shown) sessions = sessions.slice(0, Page.shown);
+  Page.more = total - sessions.length;
+  list.innerHTML = '';
+  setTimeout(() => ApiBill.flushList(), 0);
+  sessions.forEach((s) => {
+    const div = document.createElement('div');
+    if (s.locked) {
+      // 私有目录未解锁：只露「加密」占位，点击/右键都只能走输入密码
+      div.dataset.sid = s.id;
+      div.className = 'session-item locked';
+      div.title = T('lockedHint');
+      const dn = rootName(s.rootId);
+      div.innerHTML = `<div class="si-main"><div class="name">${escapeHtml(T('lockedTitle'))}</div>
+        <div class="meta"><span class="meta-tags">${dn ? `<span class="dir-badge">📁 ${escapeHtml(dn)}</span>` : ''}</span>
+        <span class="meta-time">${escapeHtml(fmtSessionListTime(s.updatedAt))}</span></div></div>`;
+      div.addEventListener('click', () => { if (!State.batchMode) unlockRoot(s.rootId); });
+      div.addEventListener('contextmenu', (e) => e.preventDefault());
+      list.appendChild(div);
+      return;
+    }
+    const status = s.status || 'active';
+    const isSel = State.batchMode && State.selectedSessions.has(s.id);
+    div.dataset.sid = s.id;
+    div.className = 'session-item'
+      + (s.id === State.sessionId ? ' active' : '')
+      + (s.pinned ? ' pinned' : '')
+      + (s.favorite ? ' favorite' : '')
+      + (status === 'completed' ? ' completed' : '')
+      + (isSel ? ' selected' : '');
+    const title = sessionTitle(s);
+    let snippet = '';
+    if (q && Search.advanced && !title.toLowerCase().includes(q)) {
+      // 当前打开会话用本地即时片段；其余会话用后端返回的片段
+      const snip = matchSnippet(s, q) || Search.hits.get(s.id) || '';
+      if (snip) snippet = `<div class="snippet">${escapeHtml(snip)}</div>`;
+    }
+    // 执行中标识：会话有任务在跑时显示脉冲圆点 + "执行中"，结束后自动消失
+    const runTag = State.running.has(s.id)
+      ? `<span class="run-tag"><span class="run-dot"></span>${escapeHtml(T('runningTag'))}</span>`
+      : '';
+    // 刚执行待查看：刚停止执行、用户还没点开看过，用醒目色标提醒
+    const justFinishedTag = (!State.running.has(s.id) && State.justFinished.has(s.id))
+      ? `<span class="just-finished-tag">${escapeHtml(T('justFinishedTag'))}</span>`
+      : '';
+    const pinTag = s.pinned ? `<span class="pin-tag">📌 ${escapeHtml(T('pinnedTag'))}</span>` : '';
+    const doneTag = status === 'completed' ? `<span class="done-tag">✓ ${escapeHtml(T('tabCompleted'))}</span>` : '';
+    const testingTag = status === 'testing' ? `<span class="testing-tag">🧪 ${escapeHtml(T('testingTag'))}</span>` : '';
+    // 引擎徽章（claude / codex）
+    const favoriteTag = s.favorite && State.listMode !== 'favorites' ? `<span class="favorite-tag">★ ${escapeHtml(T('favoriteTag'))}</span>` : '';
+    const engBadge = `<span class="eng-badge eng-${s.engine === 'codex' ? 'codex' : 'claude'}" title="${escapeHtml(engineLabel(s.engine))}">${escapeHtml(engineShortLabel(s.engine))}</span>`;
+    // 工作台模式：显示会话所属目录（根目录末段名）
+    const dirNm = (isWorkspace() || State.favoritesOnly) ? rootName(s.rootId) : '';
+    const dirBadgeClass = State.favoritesOnly ? 'dir-badge favorite-dir-badge' : 'dir-badge';
+    const dirBadge = dirNm ? `<span class="${dirBadgeClass}" title="${escapeHtml(dirNm)}">📁 ${escapeHtml(dirNm)}</span>` : '';
+    const updatedTime = fmtSessionListTime(s.updatedAt);
+    // 会话来源标记：手动(typed) / SDK 脚本(sdk) / 空会话(empty)
+    // 最近一条用户消息（与标题不同才显示，避免只有一条消息时重复）
+    const last = (s.lastUser || '').trim();
+    const lastLine = last && last.slice(0, 60) !== title
+      ? `<div class="last-user"><div class="lu-text">${escapeHtml(last)}</div></div>`
+      : '';
+    const checkbox = State.batchMode
+      ? `<label class="si-check"><input type="checkbox" ${isSel ? 'checked' : ''} /></label>`
+      : '';
+    div.innerHTML = `${checkbox}<div class="si-main">
+        <div class="name">${escapeHtml(title)}</div>
+        ${lastLine}
+        <div class="meta">
+          <span class="meta-tags">${dirBadge}${favoriteTag}${pinTag}${doneTag}${testingTag}${runTag}${justFinishedTag}${engBadge}${ApiBill.listTag(s)}</span>
+          <span class="meta-time">${escapeHtml(updatedTime)}</span>
+        </div>
+        ${snippet}
+      </div>
+      <div class="si-actions">
+        <span class="del" data-del="${s.id}">✕</span>
+        ${s.claudeSessionId ? `<button class="copy-id" title="${T('copySessionId')}">⧉</button>` : ''}
+      </div>`;
+    // 批量模式：点击整行=切换选中；否则=打开会话
+    if (State.batchMode) {
+      const cb = div.querySelector('.si-check input');
+      div.addEventListener('click', (e) => {
+        if (e.target !== cb) cb.checked = !cb.checked;
+        toggleSessionSelected(s.id, cb.checked);
+      });
+    } else {
+      div.addEventListener('click', (e) => {
+        if (e.target.dataset.del || e.target.classList.contains('copy-id')) return;
+        selectSession(s.id);
+        closeDrawer(); // 移动端：显式点开某条会话（右侧要展示内容）才收抽屉
+      });
+    }
+    const cidBtn = div.querySelector('.copy-id');
+    if (cidBtn) cidBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyText(s.claudeSessionId, e.currentTarget, '⧉');
+    });
+    div.querySelector('.del').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm(T('confirmRemoveSession'))) return;
+      await api('/api/session/remove', { id: s.id });
+      if (State.sessionId === s.id) await selectSession(null);
+      await loadSessions();
+    });
+    // 右键（桌面）/ 长按（移动端）弹出菜单：标记完成 / 置顶
+    div.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openSessionCtxMenu(s, e.clientX, e.clientY);
+    });
+    bindLongPress(div, (e) => {
+      const t = e.touches ? e.touches[0] : e;
+      openSessionCtxMenu(s, t.clientX, t.clientY);
+    });
+    list.appendChild(div);
+  });
+  if (Page.more > 0) {
+    const more = document.createElement('div');
+    more.className = 'session-more';
+    more.innerHTML = `<button type="button" class="sm">${escapeHtml(T('loadMoreSessions'))}</button>`
+      + `<span>${escapeHtml(T('sessionsShownOf').replace('{shown}', String(sessions.length)).replace('{total}', String(total)))}</span>`;
+    more.querySelector('button').addEventListener('click', growSessionPage);
+    list.appendChild(more);
+  }
+  if (State.batchMode) refreshBatchBar();
+}
+
+// 列表整体为空时的文案：按当前视图区分（单目录 / 收藏夹 / 全部目录）
+function emptyListKey() {
+  return State.listMode === 'all' ? 'noAllSessions'
+    : State.listMode === 'favorites' ? 'noFavoriteSessions' : 'noSessions';
+}
+
+// 长按识别（触屏）：按住 500ms 且移动距离 < 10px 视为长按
+function bindLongPress(el, onLongPress) {
+  let timer = null;
+  let startX = 0;
+  let startY = 0;
+  const clear = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  el.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    startX = t.clientX;
+    startY = t.clientY;
+    clear();
+    timer = setTimeout(() => { timer = null; onLongPress(e); }, 500);
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) clear();
+  }, { passive: true });
+  el.addEventListener('touchend', clear);
+  el.addEventListener('touchcancel', clear);
+}
+
+// 会话操作右键/长按菜单：标记状态（活跃/待测试/已完成，任意互切）/ 置顶（置顶最多 3 个，超出淘汰最早）
+let ctxSession = null;
+function openSessionCtxMenu(session, x, y) {
+  ctxSession = session;
+  const menu = $('sessionCtxMenu');
+  const status = session.status || 'active';
+  document.querySelectorAll('.ctx-status').forEach((b) => {
+    b.classList.toggle('current', b.dataset.status === status);
+  });
+  $('ctxToggleFavorite').textContent = session.favorite ? T('unfavoriteSession') : T('favoriteSession');
+  $('ctxTogglePinned').textContent = session.pinned ? T('unpinSession') : T('pinSession');
+  // 「打开工作目录」是服务器本机行为：只有本机跑在 Windows 上、且这个会话确实有根目录时才给
+  $('ctxOpenWorkdir').hidden = State.settings.platform !== 'win32' || !session.rootId;
+  menu.hidden = false;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const mw = 180;
+  const mh = 280;
+  menu.style.left = Math.min(x, vw - mw - 8) + 'px';
+  menu.style.top = Math.min(y, vh - mh - 8) + 'px';
+}
+function closeSessionCtxMenu() {
+  $('sessionCtxMenu').hidden = true;
+  ctxSession = null;
+}
+function applySessionCustomTitle(id, customTitle) {
+  State.sessions = State.sessions.map((x) => (x.id === id ? { ...x, customTitle } : x));
+  State.favoriteSessions = State.favoriteSessions.map((x) => (x.id === id ? { ...x, customTitle } : x));
+  if (State.sessionId === id && State.session) {
+    State.session.customTitle = customTitle;
+    $('sessionTitle').textContent = sessionTitle(State.session);
+  }
+  renderSessions();
+}
+async function ctxRenameTitle() {
+  if (!ctxSession) return;
+  const s = ctxSession;
+  closeSessionCtxMenu();
+  const next = prompt(T('renameSessionPrompt'), s.customTitle || sessionTitle(s));
+  if (next === null) return;
+  const customTitle = next.replace(/\s+/g, ' ').trim().slice(0, 120);
+  if (isFavoriteDraftId(s.id)) {
+    applySessionCustomTitle(s.id, customTitle);
+    return;
+  }
+  const previousTitle = s.customTitle || '';
+  applySessionCustomTitle(s.id, customTitle);
+  try {
+    const updated = await api('/api/session/title', { id: s.id, title: customTitle });
+    applySessionCustomTitle(s.id, updated.customTitle || '');
+    refreshFavoriteSessions(false);
+  } catch (e) {
+    applySessionCustomTitle(s.id, previousTitle);
+    alert(e.message || 'Rename failed');
+  }
+}
+async function ctxSetStatus(status) {
+  if (!ctxSession) return;
+  const s = ctxSession;
+  closeSessionCtxMenu();
+  await api('/api/session/status', { id: s.id, status });
+  await loadSessions();
+}
+// 在服务器本机的文件管理器中打开该会话的工作目录（Windows 上就是资源管理器）
+async function ctxOpenWorkdir() {
+  if (!ctxSession) return;
+  const rootId = ctxSession.rootId;
+  closeSessionCtxMenu();
+  if (!rootId) return;
+  try {
+    await api('/api/root/open', { rootId });
+  } catch (e) {
+    alert(e.message || 'Open folder failed');
+  }
+}
+function ctxOpenStats() {
+  if (!ctxSession) return;
+  const s = ctxSession;
+  closeSessionCtxMenu();
+  openSessionStats(s.id, sessionTitle(s));
+}
+async function ctxTogglePinned() {
+  if (!ctxSession) return;
+  const s = ctxSession;
+  const willPin = !s.pinned;
+  closeSessionCtxMenu();
+  if (willPin) {
+    const pinnedCount = State.sessions.filter((x) => x.pinned && x.id !== s.id).length;
+    if (pinnedCount >= 3) alert(T('pinLimitReached'));
+  }
+  await api('/api/session/pin', { id: s.id, pinned: willPin });
+  await loadSessions();
+}
+
+async function ctxToggleFavorite() {
+  if (!ctxSession) return;
+  const s = ctxSession;
+  const favorite = !s.favorite;
+  closeSessionCtxMenu();
+  State.sessions = State.sessions.map((x) => (x.id === s.id ? { ...x, favorite } : x));
+  // 只有收藏夹视图的成员集才随收藏与否增删；全部目录视图的成员集由索引决定，只改标记不动成员
+  if (State.listMode === 'all') {
+    State.favoriteSessions = State.favoriteSessions.map((x) => (x.id === s.id ? { ...x, favorite } : x));
+  } else if (favorite) {
+    const next = { ...s, favorite };
+    State.favoriteSessions = sortSessionsForList([
+      ...State.favoriteSessions.filter((x) => x.id !== s.id),
+      next,
+    ]);
+  } else {
+    State.favoriteSessions = State.favoriteSessions.filter((x) => x.id !== s.id);
+  }
+  renderSessions();
+  await api('/api/session/favorite', { id: s.id, favorite });
+  await loadSessions();
+  refreshFavoriteSessions(false);
+}
+
+// 新建会话后聚焦输入框：仅桌面端（移动端弹出软键盘会挡住内容，且用户通常先要选目录/看列表）
+// 断点与 styles.css 的 @media (max-width: 860px) 抽屉布局保持一致
+function focusTaskInputIfDesktop() {
+  const isDesktop = !window.matchMedia || window.matchMedia('(min-width: 861px)').matches;
+  if (!isDesktop) return;
+  const el = $('taskInput');
+  if (el) el.focus();
+}
+
+async function newSession() {
+  closeDrawer(); // 移动端：新建会话（右侧要开新对话/弹目录选择）收起抽屉
+  resetSessionSearch(false);
+  if (State.favoritesOnly) {
+    // 收藏夹里已按目录筛选 → 新会话直接用该目录，不再让用户重选；没筛选才留空等用户选
+    const favRoot = favFilterRootId();
+    const cur = State.session;
+    // 与主列表同规则：当前就是该目录下一个空的新会话时直接复用，不重复建
+    if (favRoot && cur && cur.rootId === favRoot && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
+      showMiniToast(T('alreadyNewSession'));
+      flashSessionRow(cur.id);
+      selectSession(cur.id);
+      focusTaskInputIfDesktop();
+      return;
+    }
+    // 已经是收藏草稿会话（哪怕还没选目录）也算「已经是新会话」，不重复弹目录选择
+    if (cur && isFavoriteDraftId(cur.id)) {
+      showMiniToast(T('alreadyNewSession'));
+      flashSessionRow(cur.id);
+      focusTaskInputIfDesktop();
+      return;
+    }
+    // 新建按钮只预选目录；点确认、发送消息或上传文件时再真正建会话。
+    createFavoriteDraftSession(favRoot);
+    focusTaskInputIfDesktop();
+    return;
+  }
+  // 工作台模式：先选择工作目录（近期用过的 / 手动添加，可创建不存在的目录）
+  if (isWorkspace()) {
+    openWsDir();
+    return;
+  }
+  if (!selectOnlyRoot()) {
+    requestRootSelection();
+    return;
+  }
+  // 当前已是空的新会话（未发起、无任务）则不再重复创建，直接复用并聚焦输入框
+  const cur = State.session;
+  if (cur && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
+    showMiniToast(T('alreadyNewSession'));
+    flashSessionRow(cur.id);
+    selectSession(cur.id);
+    focusTaskInputIfDesktop();
+    return;
+  }
+  const selection = sessionSelectionVersion;
+  const s = await api('/api/session/create', {
+    rootId: State.rootId,
+    name: '',
+    engine: State.settings.defaultEngine,
+  });
+  if (selection !== sessionSelectionVersion) { await loadSessions(); return; }
+  await selectSession(s.id);
+  await loadSessions();
+  if (State.sessionId === s.id) focusTaskInputIfDesktop();
+}
+
+function isFavoriteDraftId(id) {
+  return String(id || '').startsWith('favorite-draft-');
+}
+
+function createFavoriteDraftSession(preferredRootId = '') {
+  if (!preferredRootId && State.roots.length === 1) preferredRootId = State.roots[0].id;
+  const prevKey = State.sessionId;
+  const now = Date.now();
+  const draft = {
+    id: `favorite-draft-${now}`,
+    rootId: '',
+    preferredRootId,
+    pendingRootId: preferredRootId,
+    name: '',
+    engine: State.settings.defaultEngine,
+    claudeSessionId: '',
+    paused: false,
+    createdAt: now,
+    updatedAt: now,
+    tasks: [],
+    messages: [],
+    source: 'empty',
+    favorite: State.listMode === 'favorites', // 全部目录视图下新建的会话靠索引进列表，不该被自动收藏
+  };
+  State.favoriteSessions = sortSessionsForList([
+    draft,
+    ...State.favoriteSessions.filter((s) => !isFavoriteDraftId(s.id)),
+  ]);
+  State.sessions = State.favoriteSessions;
+  activateSession(draft.id);
+  State.session = draft;
+  quickCarryKey(prevKey, draft.id);
+  $('processLog').innerHTML = '';
+  $('sessionTitle').textContent = sessionTitle(draft);
+  renderMessages();
+  renderQueue();
+  refreshPauseBtn();
+  refreshEngineControl();
+  renderSessions();
+  renderQuick();
+}
+
+async function selectSession(id) {
+  const lk = id && State.sessions.find((x) => x.id === id && x.locked);
+  if (lk) { await unlockRoot(lk.rootId); return; }
+  const request = ++sessionDetailRequest;
+  const changed = State.sessionId !== (id || '');
+  activateSession(id);
+  const selection = sessionSelectionVersion;
+  // 用户点开查看，清除"刚执行"待读标识；若当前正处于「刚执行完」筛选，记入 seen 让它本轮仍留在列表里
+  if (id) {
+    if (State.justFinished.delete(id) && State.runFilters.has('justFinished')) State.justFinishedSeen.add(id);
+  }
+  renderQuick(); // 快捷前缀按会话持久化，切换会话即刷新选中态
+  State.noticeOpen = false; // 换会话 → 右下角错误浮层先收起，别把上一个会话的展开态带过来
+  if (!id) {
+    State.session = null;
+    $('sessionTitle').textContent = '—';
+    renderMessages(); // 无会话 → 主区域显示上手引导，而不是一片空白
+    refreshAiCollapseBtn();
+    renderQueue();
+    $('processLog').innerHTML = '';
+    refreshPauseBtn();
+    refreshEngineControl();
+    renderSessions();
+    return;
+  }
+  if (isFavoriteDraftId(id)) {
+    State.session = State.favoriteSessions.find((s) => s.id === id) || State.sessions.find((s) => s.id === id) || null;
+    if (!State.session) return;
+    $('processLog').innerHTML = '';
+    $('sessionTitle').textContent = sessionTitle(State.session);
+    renderMessages();
+    renderQueue();
+    refreshPauseBtn();
+    refreshEngineControl();
+    renderSessions();
+    return;
+  }
+  // 加载期间也不保留另一个会话的实体，避免显示和发送目标不一致。
+  if (changed) {
+    State.session = State.sessions.find((s) => s.id === id) || null;
+    $('sessionTitle').textContent = sessionTitle(State.session);
+    renderMessages();
+    renderQueue();
+    refreshPauseBtn();
+    refreshEngineControl();
+    renderSessions();
+  }
+  const session = await api('/api/session/get?id=' + encodeURIComponent(id));
+  if (request !== sessionDetailRequest || selection !== sessionSelectionVersion || State.sessionId !== id) return;
+  State.session = session;
+  // 详情补查也要校准侧栏标识，避免正文已结束、列表仍显示执行中。
+  const runningIds = (session.tasks || []).filter((t) => t.status === 'running').map((t) => t.id);
+  if (runningIds.length) {
+    State.runningTasks.set(id, new Set(runningIds));
+    State.running.add(id);
+  } else {
+    State.runningTasks.delete(id);
+    State.running.delete(id);
+  }
+  // 工作台模式：同步当前会话所属根目录，让文件抽屉 / 上传 / 「前往」等按会话目录工作
+  if (State.session && State.session.rootId && State.rootId !== State.session.rootId) {
+    setTabRootId(State.session.rootId);
+    const sel = $('rootSelect');
+    if (sel) sel.value = State.rootId;
+    renderWorkdirBar();
+    renderRootMeta();
+  }
+  $('processLog').innerHTML = '';
+  $('sessionTitle').textContent = sessionTitle(State.session);
+  renderMessages();
+  renderQueue();
+  refreshPauseBtn();
+  refreshEngineControl();
+  renderSessions();
+}
+
+// ── 渲染：最终消息 ──
+function renderMessages() {
+  const box = $('messages');
+  const keepScroll = box.dataset.sessionId === State.sessionId && box.scrollTop + box.clientHeight < box.scrollHeight - 40;
+  const scrollTop = box.scrollTop;
+  const toggling = !!MsgRenderAnchor;
+  box.dataset.sessionId = State.sessionId;
+  box.innerHTML = '';
+  SessionLimitUi.refresh();
+  // 没有会话可显示时给出「下一步该干什么」的引导（新用户否则面对一片空白，不知道该点哪个 ＋）
+  if (!State.session) {
+    box.appendChild(gettingStartedEl());
+    syncTypingIndicator();
+    return;
+  }
+  if (State.favoritesOnly && State.session && !State.session.rootId) {
+    box.appendChild(favoriteDraftRootPickerEl());
+  }
+  // 每条 AI 消息对应的轨迹时间窗（用于「🔍 过程」内联展开）
+  State.msgWindows = buildMsgWindows(State.session?.messages || []);
+  const units = messageRenderUnits(State.session?.messages || []);
+  units.forEach((unit) => {
+    if (unit.kind === 'message') addMessageEl(unit.message);
+    else if (unit.kind === 'assistantExpandedGroup') addExpandedAssistantGroupEl(unit);
+    else addAssistantGroupEl(unit);
+  });
+  renderNotices();
+  SessionLimitUi.render();
+  syncTypingIndicator();
+  renderElapsedNotes();
+  refreshAiCollapseBtn();
+  applyMsgScroll(box);
+  if (keepScroll && !toggling) box.scrollTop = scrollTop;
+}
+
+// 展开/收起某个 AI 消息组：整块重渲染前先记下这条消息在可视区里的位置，
+// 渲染后把它钉回原处 —— 用户点开就是为了看这一条，不该被推到会话底部。
+let MsgRenderAnchor = null;
+
+function toggleAssistantGroup(key, expand) {
+  const box = $('messages');
+  const el = findGroupEl(box, key);
+  MsgRenderAnchor = el
+    ? {
+        key,
+        top: el.getBoundingClientRect().top - box.getBoundingClientRect().top,
+        height: el.offsetHeight,
+        width: el.offsetWidth,
+        ghost: msgToggleGhost(el),
+      }
+    : null;
+  if (expand) State.aiExpandedGroups.add(key);
+  else State.aiExpandedGroups.delete(key);
+  renderMessages();
+}
+
+function findGroupEl(box, key) {
+  if (!box || !key) return null;
+  return Array.from(box.children).find((n) => n.dataset && n.dataset.groupKey === key) || null;
+}
+
+// 有锚点就保持位置（展开/收起），否则维持一贯的「滚到底部」（新消息、切会话等）
+function applyMsgScroll(box) {
+  const anchor = MsgRenderAnchor;
+  MsgRenderAnchor = null;
+  const el = anchor ? findGroupEl(box, anchor.key) : null;
+  if (!el) {
+    box.scrollTop = box.scrollHeight;
+    return;
+  }
+  const delta = el.getBoundingClientRect().top - box.getBoundingClientRect().top - anchor.top;
+  if (delta) box.scrollTop += delta;
+  animateMsgToggle(el, anchor);
+}
+
+const MSG_TOGGLE_MS = 800;
+// 从静止起步、到静止收住的缓动。之前那条 (.2,.7,.3,1) 起手斜率 3.5，一上来就窜出去，
+// 时长拉到 800ms 后这种「先弹一下再磨蹭」的感觉尤其别扭。
+const MSG_TOGGLE_EASE = 'cubic-bezier(.4, 0, .2, 1)';
+
+function motionOk() {
+  return !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+
+// 旧样子的快照。重渲染是把这一条整个换成另一个元素（折叠卡片 ⇄ 完整消息），
+// 不叠一张旧图淡出的话，第 0 帧就是「预览文字啪地变成正文」——外框补间得再慢也不像在展开。
+function msgToggleGhost(el) {
+  if (!motionOk() || typeof el.animate !== 'function') return null;
+  const ghost = el.cloneNode(true);
+  ghost.removeAttribute('id');
+  delete ghost.dataset.groupKey;
+  // 连点两下时，上一轮的快照可能还挂在里面，别把它也复制进来
+  ghost.querySelectorAll('.ai-toggle-ghost').forEach((n) => n.remove());
+  ghost.classList.remove('ai-toggling');
+  ghost.classList.add('ai-toggle-ghost');
+  return ghost;
+}
+
+// 自然展开：外框高度补间（内容被裁着一点点露出来）＋ 旧样子就地淡出 ＋ 新正文淡入落定
+function animateMsgToggle(el, anchor) {
+  const from = anchor.height;
+  const to = el.offsetHeight;
+  if (!motionOk() || typeof el.animate !== 'function' || !from || !to) return;
+  if (Math.abs(to - from) < 4) return;
+  el.classList.add('ai-toggling');
+  const anim = el.animate([{ height: from + 'px' }, { height: to + 'px' }], {
+    duration: MSG_TOGGLE_MS,
+    easing: MSG_TOGGLE_EASE,
+  });
+  const done = () => el.classList.remove('ai-toggling');
+  anim.addEventListener('finish', done);
+  anim.addEventListener('cancel', done);
+  fadeOutMsgGhost(el, anchor);
+  fadeInMsgBody(el, to > from);
+}
+
+function fadeOutMsgGhost(el, anchor) {
+  const ghost = anchor.ghost;
+  if (!ghost) return;
+  const cs = getComputedStyle(el);
+  // 绝对定位以 padding 盒为基准，减掉边框宽度才能和新元素的边框盒对齐
+  ghost.style.top = '-' + cs.borderTopWidth;
+  ghost.style.left = '-' + cs.borderLeftWidth;
+  ghost.style.width = anchor.width + 'px';
+  el.appendChild(ghost);
+  const fade = ghost.animate([{ opacity: 1 }, { opacity: 0 }], {
+    duration: Math.round(MSG_TOGGLE_MS * 0.45),
+    easing: 'ease-out',
+    fill: 'forwards',
+  });
+  const drop = () => ghost.remove();
+  fade.addEventListener('finish', drop);
+  fade.addEventListener('cancel', drop);
+}
+
+function fadeInMsgBody(el, growing) {
+  const body = el.querySelector('.msg-body');
+  if (!body || typeof body.animate !== 'function') return;
+  // fill:'backwards' —— 延迟这段时间里正文保持透明，让位给正在淡出的旧样子，两者才真的交叠
+  body.animate(
+    [
+      { opacity: 0, transform: 'translateY(' + (growing ? -6 : 6) + 'px)' },
+      { opacity: 1, transform: 'none' },
+    ],
+    {
+      duration: Math.round(MSG_TOGGLE_MS * 0.6),
+      delay: Math.round(MSG_TOGGLE_MS * 0.2),
+      easing: MSG_TOGGLE_EASE,
+      fill: 'backwards',
+    }
+  );
+}
+
+// 空白主区域的上手引导：三步 ① 添加项目目录 ② 新建会话 ③ 输入任务，
+// 当前该做的那一步高亮并带一个直接可点的按钮（省得用户猜哪个图标是加目录）。
+function gettingStartedEl() {
+  const stage = State.roots.length === 0 ? 1 : !State.rootId ? 2 : 3;
+  const wrap = document.createElement('div');
+  wrap.className = 'getting-started';
+  const step = (n, text, hint) =>
+    `<div class="gs-step${n === stage ? ' on' : n < stage ? ' done' : ''}">
+       <span class="gs-n">${n < stage ? '✓' : n}</span>
+       <div><div class="gs-t">${text}</div>${hint ? `<div class="gs-h">${hint}</div>` : ''}</div>
+     </div>`;
+  wrap.innerHTML =
+    `<div class="gs-title">${T('gsTitle')}</div>` +
+    step(1, T('gsStep1'), T('gsStep1Hint')) +
+    step(2, T('gsStep2'), T('gsStep2Hint')) +
+    step(3, T('gsStep3'), T('gsStep3Hint'));
+  // 第二步「选择目录」：用户多半早就加过很多目录，不该逼他去浏览/创建，
+  // 直接给「从已有目录里选」的下拉 ＋「＋ 添加新目录」兜底。
+  if (stage === 2) {
+    wrap.appendChild(gsRootChooserEl());
+  } else {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'primary';
+    btn.id = 'gsAction';
+    btn.textContent = stage === 1 ? T('gsAddRoot') : T('gsNewSession');
+    btn.onclick = () => (stage === 1 ? addRoot() : newSession());
+    wrap.appendChild(btn);
+  }
+  return wrap;
+}
+
+// 引导第二步的目录选择器：列出已有根目录供直接选用，另给「＋ 添加新目录」走目录浏览新增。
+function gsRootChooserEl() {
+  const row = document.createElement('div');
+  row.className = 'gs-root-chooser';
+  const sel = document.createElement('select');
+  sel.className = 'frr-select';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = T('selectRootFirst');
+  sel.appendChild(empty);
+  sortedRoots().forEach((r) => {
+    const o = document.createElement('option');
+    o.value = r.id;
+    o.textContent = `${r.name} (${r.path})`;
+    sel.appendChild(o);
+  });
+  sel.addEventListener('change', () => {
+    if (sel.value) applyRootSelection(sel.value);
+  });
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'sm';
+  addBtn.textContent = '＋ ' + T('addNewDir');
+  addBtn.addEventListener('click', guidePickRoot);
+  row.appendChild(sel);
+  row.appendChild(addBtn);
+  return row;
+}
+
+// 收藏夹草稿会话缺目录时的引导：左边是「选已注册目录（默认当前筛选目录）＋确认」，
+// 右边「＋ 新建目录」与左侧「＋」按钮完全复用同一套引导（选已有目录/新建项目）。
+function favoriteDraftRootPickerEl() {
+  const wrap = document.createElement('div');
+  wrap.className = 'favorite-root-required';
+  const label = document.createElement('div');
+  label.className = 'frr-label';
+  label.textContent = T('favoriteRootRequired');
+  const row = document.createElement('div');
+  row.className = 'frr-row';
+  const sel = document.createElement('select');
+  sel.className = 'frr-select';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = T('selectRootFirst');
+  sel.appendChild(empty);
+  sortedRoots().forEach((r) => {
+    const o = document.createElement('option');
+    o.value = r.id;
+    o.textContent = `${r.name} (${r.path})`;
+    sel.appendChild(o);
+  });
+  // 保留用户当前选择（包括主动清空）；确认、发送消息或上传文件时才真正建会话。
+  const preferredRootId = State.session?.pendingRootId ?? State.session?.preferredRootId ?? '';
+  if (preferredRootId && sortedRoots().some((r) => r.id === preferredRootId)) {
+    sel.value = preferredRootId;
+  }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'primary sm';
+  btn.textContent = T('confirm');
+  const progress = document.createElement('div');
+  progress.className = 'frr-progress';
+  progress.setAttribute('role', 'progressbar');
+  progress.hidden = true;
+  const controls = { wrap, sel, btn, progress };
+  btn.addEventListener('click', () => bindFavoriteDraftRoot(sel.value, controls));
+  // 下拉选中的目录先记到草稿会话上：不立刻绑定，但若用户直接发消息，就用它当默认确认
+  sel.addEventListener('change', () => {
+    if (State.session) State.session.pendingRootId = sel.value;
+  });
+  if (State.session) State.session.pendingRootId = sel.value;
+  // 与左侧「＋」按钮完全同一套引导：选已有目录（走目录浏览器）或新建项目，再回调绑定本草稿会话
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'sm';
+  addBtn.textContent = '＋ ' + T('addNewDir');
+  addBtn.addEventListener('click', pickNewFavoriteRoot);
+  row.appendChild(sel);
+  row.appendChild(btn);
+  row.appendChild(addBtn);
+  wrap.appendChild(label);
+  wrap.appendChild(row);
+  wrap.appendChild(progress);
+  setFavoriteRootBindingUi(controls, State.favoriteRootBindingDraftId === State.session?.id);
+  return wrap;
+}
+
+// 为待绑定的收藏草稿会话新增一个目录并直接绑定：与左侧「＋」走同一套引导
+// （已有目录 / 新建项目 → 缺模板即弹选 → 带进度条执行），流程完成后再绑定到当前草稿会话，
+// 保证「加目录」这件事在收藏夹入口与主入口体验一致。
+function pickNewFavoriteRoot() {
+  const draft = State.session;
+  if (!draft || !isFavoriteDraftId(draft.id)) return;
+  openAddRootGuide((rootId) => bindFavoriteDraftRoot(rootId));
+}
+
+function setFavoriteRootBindingUi(controls, busy) {
+  if (!controls) return;
+  const { wrap, sel, btn, progress } = controls;
+  if (wrap) wrap.classList.toggle('is-busy', busy);
+  if (sel) sel.disabled = busy;
+  if (btn) {
+    btn.disabled = busy;
+    btn.textContent = busy ? T('loading') : T('confirm');
+  }
+  if (progress) progress.hidden = !busy;
+}
+
+async function bindFavoriteDraftRoot(rootId, controls = null) {
+  if (!State.session || !isFavoriteDraftId(State.session.id) || !rootId) return;
+  if (State.favoriteRootBindingDraftId) return;
+  const draftId = State.session.id;
+  const scope = sessionListScope();
+  const wantFav = State.listMode === 'favorites';
+  const selection = sessionSelectionVersion;
+  State.favoriteRootBindingDraftId = draftId;
+  setFavoriteRootBindingUi(controls, true);
+  try {
+    const s = await api('/api/session/create', {
+      rootId,
+      name: '',
+      engine: State.session.engine || State.settings.defaultEngine,
+    });
+    // 收藏夹视图下的草稿绑定目录后需要真收藏才留得住；全部目录视图靠后端建索引，不动收藏标记
+    const favorited = wantFav ? await api('/api/session/favorite', { id: s.id, favorite: true }) : s;
+    const real = favorited || { ...s, favorite: wantFav };
+    if (scope !== sessionListScope()) return;
+    State.favoriteSessions = sortSessionsForList([
+      real,
+      ...State.favoriteSessions.filter((x) => x.id !== draftId && x.id !== real.id),
+    ]);
+    State.sessions = State.favoriteSessions;
+    quickCarryKey(draftId, real.id);
+    if (selection !== sessionSelectionVersion || State.sessionId !== draftId) { renderSessions(); return; }
+    activateSession(real.id);
+    State.session = real;
+    setTabRootId(rootId);
+    $('sessionTitle').textContent = sessionTitle(real);
+    renderMessages();
+    renderQueue();
+    refreshPauseBtn();
+    refreshEngineControl();
+    renderSessions();
+    renderQuick();
+    refreshRootRecency().then(() => renderSessions()).catch(() => {});
+    // 从下拉直接选已有目录绑定时，同样按「选用该目录工作」的通用规则至少问一次模板
+    // （走加号引导新建/新建项目时模板早已问过，TemplateAsk.asked 会让这里自然跳过，不重复打扰）
+    if (typeof offerTemplateForRoot === 'function') offerTemplateForRoot(rootId);
+    return real.id;
+  } catch (e) {
+    alert(e.message || 'Create session failed');
+    setFavoriteRootBindingUi(controls, false);
+  } finally {
+    if (State.favoriteRootBindingDraftId === draftId) State.favoriteRootBindingDraftId = '';
+  }
+}
+
+function messageRenderUnits(messages) {
+  const units = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === 'user') {
+      units.push({ kind: 'message', message: m });
+      continue;
+    }
+    const group = [];
+    const startIndex = i;
+    while (i < messages.length && messages[i]?.role !== 'user') {
+      group.push(messages[i]);
+      i++;
+    }
+    i--;
+    const key = assistantGroupKey(group, startIndex, messages[startIndex - 1]);
+    if (!State.aiCollapsed) {
+      group.forEach((message) => units.push({ kind: 'message', message }));
+    } else if (State.aiExpandedGroups.has(key)) {
+      units.push({ kind: 'assistantExpandedGroup', messages: group, key });
+    } else {
+      units.push({ kind: 'assistantGroup', messages: group, key });
+    }
+  }
+  return units;
+}
+
+function assistantGroupKey(messages, startIndex, userMessage) {
+  const anchor = userMessage || messages[0];
+  return JSON.stringify([State.sessionId || '', userMessage ? 'user' : 'assistant',
+    anchor?.createdAt ?? anchor?.id ?? '', startIndex]);
+}
+
+function addAssistantGroupEl(unit) {
+  const box = $('messages');
+  const div = document.createElement('div');
+  div.className = 'msg assistant ai-collapsed-msg';
+  div.dataset.groupKey = unit.key;
+
+  const count = unit.messages.length;
+  const last = unit.messages[count - 1];
+  const preview = assistantGroupPreview(unit.messages);
+
+  const head = document.createElement('div');
+  head.className = 'msg-head';
+  const who = document.createElement('span');
+  who.className = 'who';
+  who.textContent = assistantLabel();
+  const meta = document.createElement('span');
+  meta.className = 'ai-collapse-meta';
+  meta.textContent = T('aiCollapsedCount').replace('{n}', count);
+  head.appendChild(who);
+  head.appendChild(meta);
+  if (last?.createdAt) {
+    const time = document.createElement('span');
+    time.className = 'msg-time';
+    time.textContent = fmtDateTime(last.createdAt);
+    head.appendChild(time);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'msg-body ai-collapse-preview';
+  body.textContent = preview || T('aiCollapsedEmpty');
+
+  div.appendChild(head);
+  div.appendChild(body);
+  Clootee.attachCreditActions(div, unit.messages.map((m) => m.text || '').join('\n'));
+
+  // 底部明确的「展开」按钮（图标 + 文字），让用户知道这条 AI 消息可点开
+  const foot = document.createElement('div');
+  foot.className = 'ai-collapse-foot';
+  const expandBtn = document.createElement('button');
+  expandBtn.type = 'button';
+  expandBtn.className = 'ai-collapse-toggle-btn';
+  expandBtn.textContent = `▾ ${T('expand')}`;
+  expandBtn.title = T('aiExpandGroup');
+  foot.appendChild(expandBtn);
+  div.appendChild(foot);
+
+  div.title = T('aiExpandGroup');
+  div.addEventListener('click', () => toggleAssistantGroup(unit.key, true));
+  box.appendChild(div);
+}
+
+function assistantGroupPreview(messages) {
+  const last = messages[messages.length - 1];
+  const text = (last?.text || '').replace(/\s+/g, ' ').trim();
+  return text.length > 180 ? text.slice(0, 180) + '...' : text;
+}
+
+function addExpandedAssistantGroupEl(unit) {
+  const last = unit.messages[unit.messages.length - 1];
+  if (!last) return;
+  const div = addMessageEl(last);
+  div.classList.add('ai-expanded-last');
+  div.dataset.groupKey = unit.key;
+  // 底部明确的「收起」按钮（图标 + 文字），与展开按钮位置对称
+  const foot = document.createElement('div');
+  foot.className = 'ai-collapse-foot';
+  const collapseBtn = document.createElement('button');
+  collapseBtn.type = 'button';
+  collapseBtn.className = 'ai-collapse-toggle-btn';
+  collapseBtn.textContent = `▴ ${T('collapse')}`;
+  collapseBtn.title = T('aiCollapseGroup');
+  collapseBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleAssistantGroup(unit.key, false);
+  });
+  foot.appendChild(collapseBtn);
+  div.appendChild(foot);
+}
+
+function toggleAiCollapse() {
+  State.aiCollapsed = !State.aiCollapsed;
+  State.aiExpandedGroups.clear();
+  localStorage.setItem('aiCollapsed', State.aiCollapsed ? '1' : '0');
+  renderMessages();
+}
+
+function refreshAiCollapseBtn() {
+  const btn = $('aiCollapseBtn');
+  if (!btn) return;
+  const messages = State.session?.messages || [];
+  const assistantCount = messages.filter((m) => m?.role !== 'user').length;
+  btn.disabled = assistantCount === 0;
+  btn.textContent = State.aiCollapsed ? '▣' : '▢';
+  btn.title = State.aiCollapsed ? T('aiExpandAll') : T('aiCollapseAll');
+  btn.setAttribute('aria-label', btn.title);
+}
+
+// 本轮完成后，在 AI 最后一条回复下方显示唯一一行「耗时：X」
+// = 该回复的时间 − 触发它的那条用户消息的时间。仅在本轮结束（不再执行）后出现。
+function renderElapsedNotes() {
+  const box = $('messages');
+  if (!box) return;
+  box.querySelectorAll('.msg-elapsed').forEach((el) => el.remove());
+  const msgs = State.session?.messages || [];
+  const running = isSessionRunning();
+  let lastUserTime = 0;
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role === 'user') { lastUserTime = m.createdAt || 0; continue; }
+    // assistant：仅当它是本轮最后一条回复（后面紧跟用户消息，或它是全场最后一条且已结束）才标注耗时
+    const next = msgs[i + 1];
+    const turnEnd = (next && next.role === 'user') || (i === msgs.length - 1 && !running);
+    if (!turnEnd || !lastUserTime || !m.createdAt) continue;
+    // AI 消息被「收拢」成一组时没有单条节点，挂到包含它的那个组上（组 key 里带着组内最后一条的 id）
+    const node = box.querySelector(`[data-mid="${CSS.escape(m.id)}"]`)
+      || [...box.querySelectorAll('[data-group-key]')].find((g) => g.dataset.groupKey.split(':').includes(m.id));
+    if (!node) continue;
+    const el = document.createElement('div');
+    el.className = 'msg-elapsed';
+    el.textContent = `${T('elapsed')}${T('colon')}${fmtElapsed(m.createdAt - lastUserTime)}`;
+    // 用的是 Clootee 默认服务商：就地写上这一轮花了多少、还剩多少（最近几轮才查，历史会话不刷请求）
+    const turnEndAt = next && next.createdAt ? next.createdAt : Date.now();
+    const cost = Clootee.turnText(Clootee.taskOfTurn(lastUserTime, turnEndAt), !next, i >= msgs.length - 12);
+    if (cost) el.textContent += ` · ${cost}`;
+    ApiBill.attach(el, Clootee.taskOfTurn(lastUserTime, turnEndAt));
+    node.appendChild(el); // 放进气泡内部（末尾），而非气泡外部
+    lastUserTime = 0; // 本轮已消费
+  }
+}
+
+// ── 每轮费用 + 可展开明细 + 会话列表合计（订阅 / OpenRouter / DeepSeek / 官方 API）──
+// 数据源 GET /api/session/api-cost（后端按每条消息 usage × 服务商价目逐项计算，含 5m/1h 缓存写、缓存读）。
+// 订阅登录跑的轮次不实扣，但同样按 Claude 价目折算成「相当于花了多少」，用「订阅」+ 黄色区分。
+const ApiBill = {
+  bySession: {},     // sessionId → ApiSessionCost | 'loading'
+  totals: {},        // sessionId → { usd: 合计, sub: 其中订阅轮次的等价估价 }（会话列表用）
+  asked: new Set(),  // 已请求过合计的会话
+  pending: new Set(),
+  open: new Set(),   // 已展开明细的 taskId
+  usd(v) {
+    const n = Number(v) || 0;
+    return `$${n < 1 ? n.toFixed(6) : n.toFixed(4)}`;
+  },
+  tok(n) { return fmtNum(Number(n) || 0); },
+  // 轮次性质：订阅登录（等价估价）/ OpenRouter / DeepSeek / 其它按量服务商
+  kind(turn) {
+    if (turn.billing === 'subscription') return 'sub';
+    const m = String((turn.lines[0] && turn.lines[0].model) || '').toLowerCase();
+    if (turn.provider === 'openrouter' || m.includes('/')) return 'or';
+    if (m.startsWith('deepseek')) return 'ds';
+    return 'api';
+  },
+  labelKey(kind) {
+    return { sub: 'apiTurnCostSub', or: 'apiTurnCostOr', ds: 'apiTurnCostDs' }[kind] || 'apiTurnCost';
+  },
+  load(sid) {
+    if (!sid || this.bySession[sid] === 'loading') return;
+    this.bySession[sid] = 'loading';
+    api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
+      .then((r) => {
+        this.bySession[sid] = r;
+        if (r.turns.length) { this.totals[sid] = { usd: r.totalUsd, sub: r.subscriptionUsd }; this.paintListTag(sid); this.paintSelection(); }
+        if (State.session && State.session.id === sid) renderElapsedNotes();
+      })
+      .catch(() => { delete this.bySession[sid]; });
+  },
+  // 在「耗时」行后追加「API 本轮 $x ▸」，点开显示按模型 × 计费项的明细
+  attach(el, taskId) {
+    const sid = State.session && State.session.id;
+    if (!sid || !taskId) return;
+    const data = this.bySession[sid];
+    if (!data) { this.load(sid); return; }
+    if (data === 'loading') return;
+    const turn = data.turns.find((t) => t.taskId === taskId);
+    if (!turn) return;
+    const isOpen = this.open.has(taskId);
+    const kind = this.kind(turn);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `api-cost-toggle${kind === 'sub' ? ' sub' : ''}`;
+    btn.textContent = `${T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.usd(turn.totalUsd))} ${isOpen ? '▾' : '▸'}`;
+    btn.title = T(kind === 'sub' ? 'apiCostTipSub' : 'apiCostTip');
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      if (this.open.has(taskId)) this.open.delete(taskId); else this.open.add(taskId);
+      renderElapsedNotes();
+    };
+    el.appendChild(document.createTextNode(' · '));
+    el.appendChild(btn);
+    if (isOpen) el.appendChild(this.detail(turn, data));
+  },
+  detail(turn, data) {
+    const box = document.createElement('div');
+    box.className = 'api-cost-detail';
+    const items = [
+      ['apiInput', 'inputTokens', 'input'],
+      ['apiOutput', 'outputTokens', 'output'],
+      ['apiCacheRead', 'cacheReadTokens', 'cacheRead'],
+      ['apiCacheWrite5m', 'cacheWrite5mTokens', 'cacheWrite5m'],
+      ['apiCacheWrite1h', 'cacheWrite1hTokens', 'cacheWrite1h'],
+      ['apiWebSearch', 'webSearches', 'webSearch'],
+    ];
+    const blocks = turn.lines.map((l) => {
+      const rows = items
+        .filter(([, tk]) => l[tk] > 0)
+        .map(([k, tk, uk]) => `<tr><td>${escapeHtml(T(k))}</td><td class="num">${this.tok(l[tk])}</td>` +
+          `<td class="num">${l.priced || uk === 'webSearch' ? this.usd(l.usd[uk]) : '?'}</td></tr>`)
+        .join('');
+      const actual = l.requests > 0 && l.reportedRequests === l.requests;
+      const tags = [l.extra ? T('apiExtra') : '', actual ? T('apiActual') : '', l.priced || actual ? '' : T('apiUnpriced')].filter(Boolean).join(' · ');
+      const reqs = l.requests ? ` · ${T('apiRequests').replace('{n}', l.requests)}` : '';
+      return `<div class="api-cost-model"><b>${escapeHtml(l.model)}</b>${reqs}${tags ? ` · <em>${escapeHtml(tags)}</em>` : ''}` +
+        `<span class="api-cost-sum">${this.usd(l.totalUsd)}</span></div>` +
+        `<table class="api-cost-table"><tr><th>${escapeHtml(T('apiItem'))}</th><th class="num">${escapeHtml(T('apiTokens'))}</th>` +
+        `<th class="num">${escapeHtml(T('apiUsd'))}</th></tr>${rows}</table>`;
+    }).join('');
+    const sub = turn.billing === 'subscription'
+      ? `<div class="api-cost-note sub">${escapeHtml(T('apiSubscription'))}</div>` : '';
+    const cli = turn.cliUsd !== null && turn.cliUsd !== undefined
+      ? `<div class="api-cost-note">${escapeHtml(T('apiCliRef').replace('{c}', this.usd(turn.cliUsd)))}</div>` : '';
+    box.innerHTML = blocks + sub +
+      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${this.usd(turn.totalUsd)}</b> · ` +
+      `${escapeHtml(T('apiSessionTotal'))} <b>${this.usd(this.runningTotal(turn, data))}</b></div>${cli}`;
+    box.addEventListener('click', (ev) => ev.stopPropagation());
+    return box;
+  },
+  // 截至这一轮（含）的累计：每条消息显示的是它当时的累计，而不是会话现在的总额（总额在左侧会话列表）
+  runningTotal(turn, data) {
+    return data.turns.filter((t) => t.startedAt <= turn.startedAt).reduce((n, t) => n + t.totalUsd, 0);
+  },
+  // 会话列表：已知合计就出徽章；有订阅轮次的话额外用黄色标出其中「订阅」的那部分
+  listTag(s) {
+    if (!this.asked.has(s.id)) this.pending.add(s.id);
+    const t = this.totals[s.id];
+    return `<span class="api-cost-tag" data-api-sid="${escapeHtml(s.id)}" title="${escapeHtml(T('apiListTip'))}"${t ? '' : ' hidden'}>${t ? this.tagHtml(t) : ''}</span>`;
+  },
+  tagHtml(t) {
+    const sub = t.sub > 0 ? `<span class="api-cost-sub">${escapeHtml(T('apiSubBadge').replace('{c}', this.usd(t.sub)))}</span>` : '';
+    return `${this.usd(t.usd)}${sub}`;
+  },
+  paintListTag(sid) {
+    document.querySelectorAll('.api-cost-tag').forEach((tag) => {
+      if (tag.dataset.apiSid !== sid) return;
+      const t = this.totals[sid];
+      tag.hidden = !t;
+      tag.innerHTML = t ? this.tagHtml(t) : '';
+    });
+  },
+  flushList() {
+    if (!this.pending.size) return;
+    const ids = [...this.pending].slice(0, 300);
+    ids.forEach((id) => { this.pending.delete(id); this.asked.add(id); });
+    api('/api/sessions/api-cost', { ids })
+      .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); this.paintSelection(); })
+      .catch(() => { ids.forEach((id) => this.asked.delete(id)); });
+  },
+  // 批量勾选：工具条上即时显示已选会话的费用合计；没取过合计的会话先补取再刷新
+  paintSelection() {
+    const el = $('batchCost');
+    const ids = [...State.selectedSessions];
+    $('batchCostDetails').hidden = !ids.length;
+    $('batchCostDetails').textContent = T('apiBatchDetails');
+    const miss = ids.filter((id) => !this.asked.has(id)).slice(0, 300);
+    if (miss.length) {
+      miss.forEach((id) => this.asked.add(id));
+      api('/api/sessions/api-cost', { ids: miss.slice(0, 300) })
+        .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); this.paintSelection(); })
+        .catch(() => { miss.forEach((id) => this.asked.delete(id)); });
+    }
+    const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.sub += t.sub || 0; } return a; }, { usd: 0, sub: 0 });
+    el.hidden = sum.usd <= 0;
+    el.innerHTML = sum.usd > 0 ? this.tagHtml(sum) : '';
+  },
+  selectionStats(data) {
+    const stats = { sessions: 0, messages: 0, usd: 0, sub: 0,
+      costs: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, webSearch: 0 },
+      tokens: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } };
+    for (const t of Object.values(data)) {
+      if (!(t.usd > 0)) continue;
+      if (!t.breakdown || !t.tokens || !Number.isFinite(t.consumedMessages)) throw new Error(T('apiBatchUnavailable'));
+      stats.sessions++;
+      stats.messages += t.consumedMessages;
+      stats.usd += t.usd;
+      stats.sub += t.sub || 0;
+      for (const key of Object.keys(stats.costs)) stats.costs[key] += key === 'cacheWrite'
+        ? t.breakdown.cacheWrite5m + t.breakdown.cacheWrite1h : t.breakdown[key];
+      for (const key of Object.keys(stats.tokens)) stats.tokens[key] += t.tokens[key];
+    }
+    return stats;
+  },
+  selectionHtml(s) {
+    const text = (key) => escapeHtml(T(key));
+    const average = (v, n) => n > 0 ? this.usd(v / n) : '—';
+    const items = [['apiCacheRead', 'cacheRead'], ['apiCacheWrite', 'cacheWrite'], ['apiInput', 'input'], ['apiOutput', 'output']];
+    if (s.costs.webSearch > 0) items.push(['apiWebSearch', 'webSearch']);
+    const cells = (cost, tokens) => `<td class="num">${tokens === undefined ? '—' : this.tok(tokens)}</td>` +
+      `<td class="num">${this.usd(cost)}</td><td class="num">${average(cost, s.sessions)}</td><td class="num">${average(cost, s.messages)}</td>`;
+    const rows = items.map(([label, key]) => `<tr><td>${text(label)}</td>${cells(s.costs[key], s.tokens[key])}</tr>`).join('');
+    const categoryTotal = Object.values(s.costs).reduce((n, v) => n + v, 0);
+    const adjustment = s.usd - categoryTotal;
+    const extra = Math.abs(adjustment) > 1e-8 ? `<tr><td>${text('apiBatchAdjustment')}</td>${cells(adjustment)}</tr>` : '';
+    return `<p>${text('apiBatchSessions')}: <b>${s.sessions}</b> · ${text('apiBatchMessages')}: <b>${s.messages}</b></p>` +
+      `<div class="batch-cost-scroll"><table class="api-cost-table"><thead><tr><th>${text('apiItem')}</th><th class="num">${text('apiTokens')}</th>` +
+      `<th class="num">${text('apiBatchTotal')}</th><th class="num">${text('apiBatchSessionAvg')}</th><th class="num">${text('apiBatchMessageAvg')}</th></tr></thead>` +
+      `<tbody>${rows}${extra}<tr class="batch-cost-total"><td>${text('apiBatchTotal')}</td>${cells(s.usd)}</tr></tbody></table></div>` +
+      (s.sub > 0 ? `<p class="api-cost-note sub">${text('apiSubBadge').replace('{c}', this.usd(s.sub))} · ${text('apiSubscription')}</p>` : '') +
+      `<p class="api-cost-note batch-cost-help">${text('apiBatchRule')}</p>`;
+  },
+  async showSelection() {
+    const ids = [...State.selectedSessions];
+    if (!ids.length) return;
+    const modal = $('batchCostModal');
+    const request = this.selectionRequest = (this.selectionRequest || 0) + 1;
+    $('batchCostTitle').textContent = T('apiBatchDetails');
+    $('batchCostClose').setAttribute('aria-label', T('close'));
+    $('batchCostBody').textContent = T('loading');
+    if (!modal.open) modal.showModal();
+    try {
+      const data = {};
+      for (let i = 0; i < ids.length; i += 300) {
+        const result = await api('/api/sessions/api-cost', { ids: ids.slice(i, i + 300) });
+        Object.assign(data, result);
+        if (request !== this.selectionRequest || !modal.open) return;
+      }
+      $('batchCostBody').innerHTML = this.selectionHtml(this.selectionStats(data));
+    } catch (e) {
+      const message = ErrorHandler.handle(e, 'ApiBill.showSelection');
+      if (request === this.selectionRequest && modal.open) $('batchCostBody').textContent = `${T('apiBatchFail')} ${message}`;
+    }
+  },
+  // 任务结束：该会话缓存作废，重新取明细与合计
+  onTaskEnd(sessionId) {
+    delete this.bySession[sessionId];
+    if (State.session && State.session.id === sessionId) this.load(sessionId);
+    else { this.asked.delete(sessionId); this.pending.add(sessionId); this.flushList(); }
+  },
+};
+
+// ── Clootee 默认服务商：余额徽章 / 每轮花费 / 额度用完弹层 ──
+// 只是一个普通服务商的「账户视图」：数据都来自 console.clootee.com（经后端 /api/console/* 转述），
+// 不用 clootee 时整个模块静默（徽章不显示、不发任何请求）。
+const Clootee = {
+  signIn() {
+    if (this.loginPromise) return this.loginPromise;
+    this.loginPromise = this.emailDialog().finally(() => { this.loginPromise = null; });
+    return this.loginPromise;
+  },
+  emailDialog() {
+    return new Promise((resolve, reject) => {
+      const previous = document.activeElement;
+      const box = document.createElement('dialog');
+      box.className = 'clootee-login';
+      box.setAttribute('aria-labelledby', 'clooteeLoginHeading');
+      box.innerHTML = `<form><h2 id="clooteeLoginHeading">${escapeHtml(T('clooteeLoginTitle'))}</h2><p>${escapeHtml(T('clooteeLoginBody'))}</p>
+        <label for="clooteeEmail">${escapeHtml(T('clooteeLoginEmail'))}</label>
+        <input id="clooteeEmail" name="email" type="email" autocomplete="email" maxlength="254" required autofocus>
+        <button type="button" data-send>${escapeHtml(T('clooteeLoginSend'))}</button>
+        <p data-sent role="status" aria-live="polite"></p>
+        <label for="clooteeEmailCode">${escapeHtml(T('clooteeLoginCode'))}</label>
+        <input id="clooteeEmailCode" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+        <p data-error role="alert"></p>
+        <div class="clootee-login-actions"><button type="button" data-cancel>${escapeHtml(T('clooteeLoginCancel'))}</button><button type="submit" class="primary">${escapeHtml(T('clooteeLoginSubmit'))}</button></div></form>`;
+      document.body.appendChild(box);
+      const form = box.querySelector('form'), email = form.elements.email, code = form.elements.code;
+      const send = box.querySelector('[data-send]'), submit = box.querySelector('[type=submit]');
+      const error = box.querySelector('[data-error]'), sent = box.querySelector('[data-sent]');
+      let busy = false, until = 0, closed = false;
+      const oldOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      const tick = () => {
+        const seconds = Math.max(0, Math.ceil((until - Date.now()) / 1000));
+        send.disabled = busy || seconds > 0;
+        send.textContent = seconds ? T('clooteeLoginResend').replace('{s}', seconds) : T('clooteeLoginSend');
+      };
+      const timer = setInterval(tick, 1000);
+      const finish = ok => {
+        if (closed) return;
+        closed = true; clearInterval(timer); box.close(); box.remove();
+        document.body.style.overflow = oldOverflow; previous?.focus();
+        if (ok) resolve(); else reject(new Error(T('clooteeLoginExpired')));
+      };
+      box.oncancel = event => { event.preventDefault(); if (!busy) finish(false); };
+      box.querySelector('[data-cancel]').onclick = () => finish(false);
+      email.oninput = () => { code.value = ''; sent.textContent = ''; error.textContent = ''; };
+      send.onclick = async () => {
+        if (busy || Date.now() < until || !email.reportValidity()) return;
+        busy = true; email.readOnly = true; submit.disabled = true; send.disabled = true;
+        error.textContent = ''; send.textContent = T('clooteeLoginSending');
+        try {
+          await api('/api/console/login/code', {email:email.value.trim(), lang:currentLang()});
+          until = Date.now() + 60000;
+          if (!closed) { sent.textContent = T('clooteeLoginSent').replace('{email}', email.value.trim()); code.focus(); }
+        } catch (e) { if (!closed) error.textContent = e.message; }
+        finally { busy = false; email.readOnly = false; submit.disabled = false; tick(); }
+      };
+      form.onsubmit = async event => {
+        event.preventDefault();
+        if (busy || !form.reportValidity()) return;
+        busy = true; email.readOnly = code.readOnly = true; submit.disabled = true; send.disabled = true;
+        box.querySelector('[data-cancel]').disabled = true;
+        error.textContent = ''; submit.textContent = T('clooteeLoginSubmitting');
+        try {
+          await api('/api/console/login/email', {email:email.value.trim(), code:code.value.trim(), lang:currentLang()});
+          finish(true);
+        } catch (e) { if (!closed) error.textContent = e.message; }
+        finally {
+          busy = false; email.readOnly = code.readOnly = false; submit.disabled = false;
+          box.querySelector('[data-cancel]').disabled = false;
+          submit.textContent = T('clooteeLoginSubmit'); tick();
+        }
+      };
+      box.showModal();
+    });
+  },
+  st: null,          // /api/console/status 的结果
+  turns: {},         // taskId → { costMicro, calls, balanceMicro } | 'loading' | 'fail'
+  usd(micro, fine) {
+    const v = Number(micro || 0) / 1e6;
+    // fine：小于 $1 显示 4 位小数，否则一次几厘钱的消耗在数字上根本看不出变化
+    return new Intl.NumberFormat(currentLang(),{style:'currency',currency:'CNY',minimumFractionDigits:fine?4:2,maximumFractionDigits:fine?4:2}).format(v);
+  },
+  active() { return !!(this.st && this.st.active && this.st.registered); },
+  async refresh() {
+    try { this.st = await api('/api/console/status'); } catch { this.st = null; }
+    this.renderBadge();
+    (State.session?.messages || []).filter((m) => m.role !== 'user').forEach((m) => {
+      const box = $('messages');
+      const node = box?.querySelector(`[data-mid="${CSS.escape(m.id)}"]`)
+        || [...(box?.querySelectorAll('[data-group-key]') || [])].find((g) => g.dataset.groupKey.split(':').includes(m.id));
+      if (node) this.attachCreditActions(node, m.text);
+    });
+  },
+  renderBadge() {
+    const b = $('clooteeBal');
+    if (!b) return;
+    const show = this.active() && this.st.balanceMicro !== null;
+    b.hidden = !show;
+    if (!show) return;
+    b.textContent = `◎ ${this.usd(this.st.balanceMicro, true)}`;
+    b.title = T('clooteeBalTitle');
+    b.classList.toggle('low', this.st.balanceMicro < 50000);
+    b.onclick = () => this.openBilling();
+  },
+  billingUrl() {
+    try {
+      const url = new URL(this.st?.consoleUrl || 'https://console.clootee.com');
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Invalid billing URL');
+      url.pathname = '/billing'; url.search = ''; url.hash = '';
+      url.searchParams.set('lang', currentLang());
+      return url.toString();
+    } catch { return 'https://console.clootee.com/billing'; }
+  },
+  openBilling() { window.open(this.billingUrl(), '_blank', 'noopener,noreferrer'); },
+  usesClootee() {
+    const engine = State.session?.engine || State.settings?.defaultEngine || 'claude';
+    return this.st?.engines ? this.st.engines.includes(engine) : this.active();
+  },
+  attachCreditActions(node, text) {
+    if (!this.usesClootee() || !this.isOutOfCredit(text) || node.querySelector('.credit-actions')) return;
+    const actions = document.createElement('div'); actions.className = 'credit-actions';
+    const hint = document.createElement('p'); hint.textContent = T('clooteeReserveHint');
+    const link = document.createElement('a');
+    link.href = this.billingUrl(); link.target = '_blank'; link.rel = 'noopener noreferrer';
+    link.textContent = T('clooteeTopupNow');
+    link.addEventListener('click', (e) => e.stopPropagation());
+    const own = document.createElement('button'); own.type = 'button'; own.textContent = T('clooteeUseOwn');
+    own.addEventListener('click', (e) => { e.stopPropagation(); openSettings(); });
+    actions.append(hint, link, own); node.appendChild(actions);
+  },
+  // 这一轮对应的任务：开始时间落在「本轮用户消息 ~ 下一轮用户消息」之间的最后一条。
+  // 两端各放宽 5 秒：任务常比它的用户消息早几毫秒入账，结束端不收窄就会把下一轮的任务算进来
+  taskOfTurn(since, until) {
+    const tasks = (State.session && State.session.tasks) || [];
+    const hit = tasks.filter((t) => t.startedAt && t.startedAt >= since - 5000 && t.startedAt < until - 5000);
+    return hit.length ? hit[hit.length - 1].id : '';
+  },
+  // 每轮花费文案；没查过就后台查一次，查完重渲染（fetch=false 的老轮次不查）。
+  // 余额只跟在最新一轮后面（老轮次后面写的余额早就过时了）。
+  turnText(taskId, latest, fetch) {
+    if (!this.active() || !taskId) return '';
+    const v = this.turns[taskId];
+    if (v && typeof v === 'object') {
+      if (!v.calls) return '';
+      const parts = [T('clooteeTurnCost').replace('{c}', this.usd(v.costMicro, true))];
+      if (latest) parts.push(T('clooteeLeft').replace('{b}', this.usd(v.balanceMicro, true)));
+      return parts.join(' · ');
+    }
+    if (!v && fetch) {
+      this.turns[taskId] = 'loading';
+      api(`/api/console/turn?taskId=${encodeURIComponent(taskId)}`)
+        .then((r) => {
+          this.turns[taskId] = r;
+          if (this.st && latest) { this.st.balanceMicro = r.balanceMicro; this.renderBadge(); }
+          renderElapsedNotes();
+        })
+        .catch(() => { this.turns[taskId] = 'fail'; });
+    }
+    return '';
+  },
+  onTaskEnd(task) {
+    if (!this.usesClootee()) return;
+    // 本会话最后一轮的缓存作废（任务刚结束，最后几个请求可能还没落账），稍等片刻再取
+    setTimeout(() => {
+      delete this.turns[task.id];
+      Object.keys(this.turns).forEach((k) => { if (this.turns[k] === 'fail') delete this.turns[k]; });
+      this.refresh().then(() => { if (State.session) renderElapsedNotes(); });
+    }, 1200);
+    if (task.status === 'error' && this.isOutOfCredit(task.error)) this.showOutOfCredit();
+  },
+  isOutOfCredit(text) {
+    const s = String(text || '');
+    return /billing_error|insufficient[_ ](?:available[_ ])?(?:balance|credit)|balance is used up|余额(?:不足|已用完)|额度(?:不足|已用完)/i.test(s)
+      || /(?:API Error[:：]?\s*402|\b(?:HTTP|status)\s*[:=]?\s*402\b)/i.test(s);
+  },
+  // 额度用完：就地弹层，「充值」与「改用自己的服务商」两条路并列，都是一步到位
+  showOutOfCredit() {
+    if (!this.usesClootee() || $('clooteeOut')) return;
+    const box = document.createElement('div');
+    box.className = 'login-overlay';
+    box.id = 'clooteeOut';
+    box.innerHTML = `<div class="onboard-card" style="max-width:460px">
+      <h2>${escapeHtml(T('clooteeOutTitle'))}</h2>
+      <div class="ob-sub">${escapeHtml(T('clooteeOutBody'))}</div>
+      <div class="ob-foot">
+        <button type="button" data-act="own">${escapeHtml(T('clooteeUseOwn'))}</button>
+        <span style="flex:1"></span>
+        <button type="button" data-act="close">✕</button>
+        <button type="button" class="primary" data-act="topup">${escapeHtml(T('clooteeTopupNow'))}</button>
+      </div></div>`;
+    document.body.appendChild(box);
+    box.querySelector('[data-act=topup]').onclick = () => { box.remove(); this.openBilling(); };
+    box.querySelector('[data-act=own]').onclick = () => { box.remove(); openSettings(); };
+    box.querySelector('[data-act=close]').onclick = () => box.remove();
+  },
+};
+
+// ── 渲染：执行失败 / 引擎无响应的提示卡片 ──
+// 后台跑挂了（引擎没装好、被安全软件拦下、退出码 0 却零输出）时界面必须看得到原因，
+// 否则用户看到的就是「发了消息什么都不回、也不报错」。信息有两个来源：
+//   ① 任务失败：task.status='error'，原因在 task.error（后端已带上命令/工作目录/stderr）
+//   ② 运行提示：kind='notice' 事件（任务还没结束，但已经出现必须告知的情况）
+function noticeItems() {
+  const items = [];
+  (State.session?.tasks || []).forEach((t) => {
+    if (t.status !== 'error' || !t.error) return;
+    items.push({
+      key: `task:${t.id}`,
+      level: 'error',
+      at: t.finishedAt || t.startedAt || t.createdAt || 0,
+      title: T('runFailedTitle'),
+      message: t.error,
+    });
+  });
+  State.notices
+    .filter((n) => n.sessionId === State.sessionId)
+    .forEach((n) => {
+      items.push({
+        key: `notice:${n.id}`,
+        level: n.level === 'error' ? 'error' : 'warn',
+        at: n.at,
+        title: n.level === 'error' ? T('runFailedTitle') : T('runWarnTitle'),
+        message: n.message,
+      });
+    });
+  return items.filter((it) => !State.dismissedNotices.has(it.key)).sort((a, b) => a.at - b.at);
+}
+
+// 渲染成会话右下角的悬浮小圆圈：平时只占一个圆点（带条数），点开才展开详情浮层。
+// 之前是把大卡片直接插进正文，一出错就把对话挤没了。
+function renderNotices() {
+  const dock = $('noticeDock');
+  const fab = $('noticeFab');
+  const pop = $('noticePop');
+  if (!dock || !fab || !pop) return;
+  const items = noticeItems();
+  if (!items.length) {
+    State.noticeOpen = false;
+    dock.hidden = true;
+    pop.hidden = true;
+    pop.textContent = '';
+    fab.setAttribute('aria-expanded', 'false');
+    return;
+  }
+  const hasError = items.some((it) => it.level === 'error');
+  dock.hidden = false;
+  dock.classList.toggle('warn', !hasError);
+  const count = $('noticeCount');
+  if (count) {
+    count.textContent = items.length > 99 ? '99+' : String(items.length);
+    count.hidden = items.length < 2; // 只有一条时不必标数字
+  }
+  fab.title = `${State.noticeOpen ? T('noticeFabClose') : T('noticeFabOpen')}（${items.length}）`;
+  fab.setAttribute('aria-label', fab.title);
+  fab.setAttribute('aria-expanded', State.noticeOpen ? 'true' : 'false');
+
+  pop.hidden = !State.noticeOpen;
+  pop.textContent = '';
+  if (!State.noticeOpen) return;
+  const head = document.createElement('div');
+  head.className = 'np-head';
+  const title = document.createElement('span');
+  title.className = 'np-title';
+  title.textContent = `${hasError ? '✕' : '⚠'} ${T('noticePopTitle')}（${items.length}）`;
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'np-clear sm';
+  clear.textContent = T('noticeClearAll');
+  clear.addEventListener('click', () => clearNotices());
+  head.appendChild(title);
+  head.appendChild(clear);
+  pop.appendChild(head);
+  items.forEach((item) => pop.appendChild(noticeEl(item)));
+}
+
+// 圆圈的开合。展开时把最新一条滚进视野（浮层是倒不过来的正序列表，最新在底部）
+function toggleNoticePop(open) {
+  const items = noticeItems();
+  if (!items.length) return;
+  State.noticeOpen = typeof open === 'boolean' ? open : !State.noticeOpen;
+  renderNotices();
+  const pop = $('noticePop');
+  if (State.noticeOpen && pop) pop.scrollTop = pop.scrollHeight;
+}
+
+function noticeEl(item) {
+  const div = document.createElement('div');
+  div.className = `msg-notice ${item.level}`;
+  const head = document.createElement('div');
+  head.className = 'mn-head';
+  const title = document.createElement('span');
+  title.className = 'mn-title';
+  title.textContent = `${item.level === 'error' ? '✕' : '⚠'} ${item.title}`;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'mn-copy sm';
+  copy.textContent = T('copyDiag');
+  copy.title = T('copyDiag');
+  copy.addEventListener('click', () => copyText(item.message, copy, T('copyDiag')));
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'mn-close sm';
+  close.textContent = '✕';
+  close.title = T('noticeClose');
+  close.setAttribute('aria-label', T('noticeClose'));
+  close.addEventListener('click', () => dismissNotice(item.key));
+  head.appendChild(title);
+  head.appendChild(copy);
+  head.appendChild(close);
+  const body = document.createElement('pre');
+  body.className = 'mn-body';
+  body.textContent = item.message;
+  div.appendChild(head);
+  div.appendChild(body);
+  Clootee.attachCreditActions(div, item.message);
+  return div;
+}
+
+// 收到后端运行提示：存下来并即时显示（只保留最近 60 条，避免长跑会话堆积）
+function pushNotice(e) {
+  State.notices.push({
+    id: ++NOTICE_SEQ,
+    sessionId: e.sessionId,
+    taskId: e.taskId,
+    level: e.level === 'error' ? 'error' : 'warn',
+    message: String(e.message || ''),
+    at: Date.now(),
+  });
+  if (State.notices.length > 60) State.notices.splice(0, State.notices.length - 60);
+  if (e.sessionId === State.sessionId) { renderNotices(); pulseNoticeFab(); }
+}
+
+// 新提示到达：小圆圈脉冲两下（不自动展开——那就等于又把正文挡住了）
+function pulseNoticeFab() {
+  const fab = $('noticeFab');
+  if (!fab || $('noticeDock')?.hidden) return;
+  fab.classList.remove('pulse');
+  void fab.offsetWidth; // 强制回流，让动画能重播
+  fab.classList.add('pulse');
+}
+
+// 用户手动关掉一张提示卡：任务失败的原因来自 task.error（后端持久化，删不掉），
+// 所以只在前端记下 key，渲染时跳过；运行提示则直接从内存里丢掉。
+function dismissNotice(key) {
+  State.dismissedNotices.add(key);
+  const id = key.startsWith('notice:') ? Number(key.slice(7)) : 0;
+  if (id) State.notices = State.notices.filter((n) => n.id !== id);
+  renderNotices();
+}
+
+// 开始新一轮消息 → 过去的失败/告警都翻篇了，全部清空（含顶部后端异常横幅）
+function clearNotices() {
+  noticeItems().forEach((it) => State.dismissedNotices.add(it.key));
+  State.notices = State.notices.filter((n) => n.sessionId !== State.sessionId);
+  const bar = $('globalError');
+  if (bar) bar.hidden = true;
+  State.noticeOpen = false;
+  renderNotices();
+}
+
+// 任务最终成功了 → 它中途的「无输出」告警已无意义，撤掉，别留着吓人
+function dropTaskNotices(taskId) {
+  if (!taskId) return;
+  State.notices = State.notices.filter((n) => n.taskId !== taskId || n.level === 'error');
+}
+
+// 后端级异常（未捕获异常）：顶部横幅，与具体会话无关
+function showServerError(message) {
+  let bar = $('globalError');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'globalError';
+    bar.className = 'global-error';
+    bar.innerHTML =
+      `<span class="ge-title"></span><span class="ge-text"></span>` +
+      `<button type="button" class="ge-copy sm"></button>` +
+      `<button type="button" class="ge-close sm">✕</button>`;
+    document.body.appendChild(bar);
+    bar.querySelector('.ge-close').addEventListener('click', () => { bar.hidden = true; });
+    bar.querySelector('.ge-copy').addEventListener('click', (ev) =>
+      copyText(bar.querySelector('.ge-text').textContent, ev.currentTarget, T('copyDiag')),
+    );
+  }
+  bar.querySelector('.ge-title').textContent = T('serverErrorTitle');
+  bar.querySelector('.ge-copy').textContent = T('copyDiag');
+  bar.querySelector('.ge-close').title = T('close');
+  bar.querySelector('.ge-text').textContent = String(message || '');
+  bar.hidden = false;
+}
+
+// 当前会话是否有任务在执行
+function isSessionRunning() {
+  return !!(State.session?.tasks || []).some((t) => t.status === 'running');
+}
+// 执行中：在消息区底部显示一个动画气泡（"执行中…"）；非执行中则移除
+function syncTypingIndicator() {
+  if (isSessionRunning()) showTypingIndicator();
+  else removeTypingIndicator();
+}
+function showTypingIndicator() {
+  const box = $('messages');
+  if (!box || $('typingMsg')) return;
+  const follow = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  const div = document.createElement('div');
+  div.className = 'msg assistant typing';
+  div.id = 'typingMsg';
+  div.innerHTML =
+    `<div class="msg-head"><span class="who">${escapeHtml(assistantLabel())}</span></div>` +
+    `<div class="msg-body"><span class="typing-dots"><i></i><i></i><i></i></span>` +
+    `<span class="typing-label">${T('running')}</span>` +
+    `<button class="typing-expand" id="typingExpandBtn" type="button" aria-label="process"></button></div>`;
+  box.appendChild(div);
+  const btn = div.querySelector('#typingExpandBtn');
+  // 收起（箭头向右 ▸）时附带「详情」文案；展开（▾）时只留箭头
+  const paintExpandBtn = () => {
+    const open = document.body.classList.contains('show-process');
+    btn.textContent = open ? '▾' : `▸ ${T('details')}`;
+  };
+  if (btn) {
+    paintExpandBtn();
+    btn.addEventListener('click', () => {
+      document.body.classList.toggle('show-process');
+      paintExpandBtn();
+    });
+  }
+  if (follow) box.scrollTop = box.scrollHeight;
+}
+function removeTypingIndicator() {
+  const el = $('typingMsg');
+  if (el) el.remove();
+}
+function addMessageEl(m) {
+  const box = $('messages');
+  const div = document.createElement('div');
+  div.className = 'msg ' + m.role;
+  if (m.id) div.dataset.mid = m.id;
+
+  const head = document.createElement('div');
+  head.className = 'msg-head';
+  const who = document.createElement('span');
+  who.className = 'who';
+  who.textContent = m.role === 'user' ? T('you') : assistantLabel();
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'copy-btn';
+  copyBtn.title = T('copy');
+  copyBtn.textContent = '📋';
+  copyBtn.addEventListener('click', () => copyText(m.text, copyBtn));
+  head.appendChild(who);
+  if (m.createdAt) {
+    const time = document.createElement('span');
+    time.className = 'msg-time';
+    time.textContent = fmtDateTime(m.createdAt);
+    head.appendChild(time);
+  }
+  head.appendChild(copyBtn);
+
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  // AI 消息按 markdown 渲染（代码块/列表/表格/链接等）；用户输入保持纯文本，避免 prompt 被误解析
+  let charts = [];
+  if (m.role === 'user') {
+    body.textContent = m.text;
+  } else {
+    // AI 消息：先抽取内联 <chart> 数据块，正文（去掉 chart 块）按 markdown 渲染，图表单独成卡片
+    const parsed = parseCharts(m.text);
+    charts = parsed.charts;
+    renderMarkdown(body, parsed.text);
+  }
+
+  div.appendChild(head);
+  div.appendChild(body);
+  if (m.role !== 'user') Clootee.attachCreditActions(div, m.text);
+  // AI 消息：挂「🔍 过程」按钮，点开即在本条下方内联展开这一轮的完整轨迹
+  if (m.role !== 'user') attachTraceBtn(div, m);
+  // AI 内联图表：每个 <chart> 渲染为一张图表卡片（ECharts），追加在正文之后
+  charts.forEach((c) => div.appendChild(chartCardEl(c)));
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+
+  // AI 消息：异步解析其引用到的根目录文件，追加可预览/下载的附件卡片
+  if (m.role !== 'user') attachFilesToMessage(div, m);
+  return div;
+}
+
+// 复制文本到剪贴板（优先 Clipboard API，非安全上下文回退 execCommand），并在按钮上短暂反馈
+// restore：反馈结束后按钮恢复的文本（默认 📋）
+async function copyText(text, btn, restore = '📋') {
+  let ok = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    ok = true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      ta.remove();
+    } catch {
+      ok = false;
+    }
+  }
+  if (btn) {
+    btn.textContent = ok ? '✓' : '✕';
+    btn.classList.toggle('copied', ok);
+    btn.title = ok ? T('copied') : T('copy');
+    setTimeout(() => {
+      btn.textContent = restore;
+      btn.classList.remove('copied');
+      btn.title = T('copy');
+    }, 1200);
+  }
+}
+
+// ── 渲染：任务队列 ──
+const Queue = { showDone: false };
+const QUEUE_INLINE_CAP = 8; // 内联队列最多展示的任务数，多出的点「展开管理」进弹窗
+// 已完成（含停止/出错）任务：默认折叠，点按钮展开/收起
+const FINISHED = ['done', 'stopped', 'error'];
+function toggleDone() {
+  Queue.showDone = !Queue.showDone;
+  renderQueue();
+}
+
+// 「展开管理」按钮：打开整体弹窗（更大空间 + 批量删除/修改/复制/暂定）
+function toggleQueue() {
+  openQueueModal();
+}
+
+function renderQueue() {
+  const box = $('queue');
+  const tasks = State.session?.tasks || [];
+  box.innerHTML = '';
+  if (tasks.length === 0) {
+    box.innerHTML = `<div class="queue-empty">${T('noTasks')}</div>`;
+    updateQueueToggle(0);
+    syncQueueModal();
+    refreshComposerControls();
+    return;
+  }
+  const finished = tasks.filter((t) => FINISHED.includes(t.status));
+  // 已完成任务折叠到一个带数字的按钮（点击展开/收起）
+  if (finished.length > 0) {
+    const bar = document.createElement('div');
+    bar.className = 'done-toggle';
+    bar.textContent = `✓ ${T('doneTasks')} (${finished.length}) ${Queue.showDone ? '▲' : '▼'}`;
+    bar.addEventListener('click', toggleDone);
+    box.appendChild(bar);
+  }
+  // 内联区只展示一部分（紧凑 chip）；折叠时隐藏已完成项，超出上限的收进「+N 更多」
+  const visible = tasks.filter((t) => !(FINISHED.includes(t.status) && !Queue.showDone));
+  let shown = 0;
+  tasks.forEach((t, i) => {
+    if (FINISHED.includes(t.status) && !Queue.showDone) return;
+    if (shown >= QUEUE_INLINE_CAP) return;
+    box.appendChild(taskEl(t, i));
+    shown += 1;
+  });
+  const hidden = visible.length - shown;
+  if (hidden > 0) {
+    const more = document.createElement('div');
+    more.className = 'qmore';
+    more.textContent = `+${hidden} ${T('more')}`;
+    more.title = T('expandManage');
+    more.addEventListener('click', () => openQueueModal());
+    box.appendChild(more);
+  }
+  updateQueueToggle(tasks.length);
+  syncQueueModal();
+  refreshComposerControls();
+}
+
+function updateQueueToggle(count) {
+  const btn = $('queueToggle');
+  btn.textContent = `📋 ${T('taskListN')} (${count}) ${T('expandManage')}`;
+}
+
+// 内联紧凑 chip（只做预览：序号 + 状态点 + 截断文本 + 快捷删除）
+function taskEl(t, i) {
+  const el = document.createElement('div');
+  el.className = 'qtask' + (t.held ? ' held' : '');
+  el.dataset.task = t.id;
+  // 失败任务的悬浮提示直接带上原因，不用点进弹窗才知道为什么没跑起来
+  el.title = t.status === 'error' && t.error ? `${t.prompt}\n\n${t.error}` : t.prompt;
+  el.addEventListener('click', () => openQueueModal(t.id));
+  const text = escapeHtml(t.prompt.slice(0, 24));
+  const holdMark = t.held ? `<span class="qhold" title="${T('held')}">⏸</span>` : '';
+  // 仅 pending（尚未开始）任务可直接删除
+  const del =
+    t.status === 'pending'
+      ? `<span class="qdel" title="${T('delete')}" data-del="${t.id}">✕</span>`
+      : '';
+  el.innerHTML =
+    `<span class="qidx">${i + 1}.</span>` +
+    `<span class="dot ${t.status}"></span>` +
+    holdMark +
+    `<span class="qtext">${text}</span>` +
+    `<span style="color:var(--muted)">${t.held ? T('held') : T(t.status)}</span>` +
+    del;
+  const delBtn = el.querySelector('.qdel');
+  if (delBtn) delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeTask(t.id); });
+  return el;
+}
+async function removeTask(taskId) {
+  if (!State.sessionId) return;
+  await api('/api/task/remove', { sessionId: State.sessionId, taskId });
+}
+function removeTaskLocal(taskId) {
+  if (!State.session) return;
+  const tasks = State.session.tasks;
+  const i = tasks.findIndex((x) => x.id === taskId);
+  if (i >= 0) tasks.splice(i, 1);
+  renderQueue();
+}
+function upsertTask(t) {
+  if (!State.session) return;
+  const tasks = State.session.tasks;
+  const i = tasks.findIndex((x) => x.id === t.id);
+  if (i >= 0) tasks[i] = t;
+  else tasks.push(t);
+  renderQueue();
+}
+
+// ── 任务管理弹窗（整体展开：更大空间 + 批量删除 / 修改 / 复制 / 暂定）──
+const QueueModal = { selected: new Set(), editing: null };
+
+function openQueueModal(focusTaskId) {
+  if (!State.session) return;
+  QueueModal.selected.clear();
+  QueueModal.editing = null;
+  $('queueModal').hidden = false;
+  renderQueueModal();
+  if (focusTaskId) requestAnimationFrame(() => focusQueueModalTask(focusTaskId));
+}
+// 滚动定位到指定任务行并闪烁一次高亮（点内联任务 chip 进弹窗时，让用户一眼找到点的是哪条）
+function focusQueueModalTask(taskId) {
+  const row = $('qmList').querySelector(`[data-task="${CSS.escape(taskId)}"]`);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.remove('flash-highlight');
+  void row.offsetWidth; // 强制重排，允许连续点击同一任务时动画能重新触发
+  row.classList.add('flash-highlight');
+  row.addEventListener('animationend', () => row.classList.remove('flash-highlight'), { once: true });
+}
+function closeQueueModal() {
+  $('queueModal').hidden = true;
+  QueueModal.editing = null;
+}
+// 队列有变化时，若弹窗开着就同步重绘（并清理已消失任务的选中态）
+function syncQueueModal() {
+  if ($('queueModal').hidden) return;
+  const ids = new Set((State.session?.tasks || []).map((t) => t.id));
+  [...QueueModal.selected].forEach((id) => { if (!ids.has(id)) QueueModal.selected.delete(id); });
+  // 正在编辑且该任务仍在 → 保留编辑框，不整表重绘（避免输入被 WS 事件冲掉）
+  if (QueueModal.editing && ids.has(QueueModal.editing)) return;
+  QueueModal.editing = null;
+  renderQueueModal();
+}
+
+function renderQueueModal() {
+  const tasks = State.session?.tasks || [];
+  $('qmTitle').textContent = `${T('manageTasks')} (${tasks.length})`;
+  const list = $('qmList');
+  list.innerHTML = '';
+  if (tasks.length === 0) {
+    list.innerHTML = `<div class="queue-empty">${T('noTasks')}</div>`;
+  } else {
+    tasks.forEach((t, i) => list.appendChild(qmRow(t, i)));
+  }
+  // 工具栏：全选态 + 已选计数 + 批量删除可用性
+  const pendingIds = tasks.filter((t) => t.status === 'pending').map((t) => t.id);
+  const selCount = QueueModal.selected.size;
+  const allChk = $('qmSelectAll');
+  allChk.checked = pendingIds.length > 0 && pendingIds.every((id) => QueueModal.selected.has(id));
+  allChk.indeterminate = selCount > 0 && !allChk.checked;
+  allChk.disabled = pendingIds.length === 0;
+  const delBtn = $('qmBatchDelete');
+  delBtn.disabled = selCount === 0;
+  delBtn.textContent = selCount > 0 ? `🗑 ${T('batchDelete')} (${selCount})` : `🗑 ${T('batchDelete')}`;
+}
+
+function qmRow(t, i) {
+  const row = document.createElement('div');
+  row.className = 'qm-row' + (t.held ? ' held' : '') + (QueueModal.editing === t.id ? ' editing' : '');
+  row.dataset.task = t.id;
+  const editable = t.status === 'pending';
+
+  // 选择框（仅 pending 可批量删除；非 pending 也占位一个禁用勾选框以保持对齐）
+  const chkWrap = document.createElement('label');
+  chkWrap.className = 'qm-check';
+  const chk = document.createElement('input');
+  chk.type = 'checkbox';
+  if (editable) {
+    chk.checked = QueueModal.selected.has(t.id);
+    chk.addEventListener('change', () => {
+      if (chk.checked) QueueModal.selected.add(t.id);
+      else QueueModal.selected.delete(t.id);
+      renderQueueModal();
+    });
+  } else {
+    chk.checked = false;
+    chk.disabled = true;
+    chkWrap.classList.add('disabled');
+    chkWrap.title = T('taskDoneNoSelect');
+    // 禁用状态下点击不会触发 change，用 mousedown 弹提示
+    chkWrap.addEventListener('mousedown', (ev) => { ev.preventDefault(); alert(T('taskDoneNoSelect')); });
+  }
+  chkWrap.appendChild(chk);
+  row.appendChild(chkWrap);
+
+  // 序号 + 状态
+  const head = document.createElement('div');
+  head.className = 'qm-head';
+  head.innerHTML =
+    `<span class="qm-idx">${i + 1}</span>` +
+    `<span class="dot ${t.status}"></span>` +
+    `<span class="qm-status">${t.held ? T('held') : T(t.status)}</span>`;
+  row.appendChild(head);
+
+  // 正文 / 编辑区
+  const body = document.createElement('div');
+  body.className = 'qm-body';
+  if (QueueModal.editing === t.id) {
+    const ta = document.createElement('textarea');
+    ta.className = 'qm-edit';
+    ta.value = t.prompt;
+    ta.rows = Math.min(14, Math.max(5, t.prompt.split('\n').length + 1));
+    const bar = document.createElement('div');
+    bar.className = 'qm-editbar';
+    const save = document.createElement('button');
+    save.className = 'sm primary';
+    save.textContent = T('save');
+    save.addEventListener('click', () => saveTaskEdit(t.id, ta.value));
+    const cancel = document.createElement('button');
+    cancel.className = 'sm';
+    cancel.textContent = T('cancel');
+    cancel.addEventListener('click', () => { QueueModal.editing = null; renderQueueModal(); });
+    bar.appendChild(save);
+    bar.appendChild(cancel);
+    body.appendChild(ta);
+    body.appendChild(bar);
+    setTimeout(() => ta.focus(), 30);
+  } else {
+    const txt = document.createElement('div');
+    txt.className = 'qm-text';
+    txt.textContent = t.prompt;
+    body.appendChild(txt);
+    // 失败任务：把后端给的失败原因（命令/工作目录/stderr）直接摊在这条任务下面
+    if (t.status === 'error' && t.error) {
+      const err = document.createElement('pre');
+      err.className = 'qm-error';
+      err.textContent = t.error;
+      body.appendChild(err);
+    }
+  }
+  row.appendChild(body);
+
+  // 操作按钮
+  const acts = document.createElement('div');
+  acts.className = 'qm-acts';
+  if (QueueModal.editing !== t.id) {
+    const copy = mkActBtn('📋', T('copy'), (b) => copyText(t.prompt, b, '📋'));
+    acts.appendChild(copy);
+    if (editable) {
+      acts.appendChild(mkActBtn('✎', T('edit'), () => { QueueModal.editing = t.id; renderQueueModal(); }));
+      const hb = mkActBtn(t.held ? '▶' : '⏸', t.held ? T('resume') : T('hold'), () => holdTask(t.id, !t.held));
+      hb.classList.toggle('on', !!t.held);
+      acts.appendChild(hb);
+      const db = mkActBtn('🗑', T('delete'), () => removeTask(t.id));
+      db.classList.add('danger');
+      acts.appendChild(db);
+    }
+  }
+  row.appendChild(acts);
+  return row;
+}
+
+function mkActBtn(icon, title, onClick) {
+  const b = document.createElement('button');
+  b.className = 'qm-act';
+  b.textContent = icon;
+  b.title = title;
+  b.addEventListener('click', (ev) => { ev.stopPropagation(); onClick(b); });
+  return b;
+}
+
+function toggleSelectAll() {
+  const tasks = State.session?.tasks || [];
+  const pendingIds = tasks.filter((t) => t.status === 'pending').map((t) => t.id);
+  const allSelected = pendingIds.length > 0 && pendingIds.every((id) => QueueModal.selected.has(id));
+  if (allSelected) QueueModal.selected.clear();
+  else pendingIds.forEach((id) => QueueModal.selected.add(id));
+  renderQueueModal();
+}
+
+async function batchDeleteTasks() {
+  if (!State.sessionId || QueueModal.selected.size === 0) return;
+  if (!confirm(T('confirmDeleteTasks'))) return;
+  const taskIds = [...QueueModal.selected];
+  QueueModal.selected.clear();
+  await api('/api/task/removeBatch', { sessionId: State.sessionId, taskIds });
+}
+
+async function saveTaskEdit(taskId, prompt) {
+  const cleaned = (prompt || '').trim();
+  if (!cleaned || !State.sessionId) return;
+  QueueModal.editing = null;
+  await api('/api/task/update', { sessionId: State.sessionId, taskId, prompt: cleaned });
+}
+
+async function holdTask(taskId, held) {
+  if (!State.sessionId) return;
+  await api('/api/task/hold', { sessionId: State.sessionId, taskId, held });
+}
+
+// ── 斜杠命令（透传给 claude 的原生 slash 命令）──
+// 输入框打 / 弹候选；选中后填入输入框，可继续补参数，回车发送给 claude 执行。
+const SLASH_COMMANDS = [
+  { cmd: '/clear', desc: 'Clear conversation history' },
+  { cmd: '/compact', desc: 'Compact conversation to save context' },
+  { cmd: '/cost', desc: 'Show token usage / cost' },
+  { cmd: '/context', desc: 'Show current context usage' },
+  { cmd: '/model', desc: 'Show or switch model' },
+  { cmd: '/review', desc: 'Review the current changes' },
+  { cmd: '/init', desc: 'Generate a CLAUDE.md for the project' },
+  { cmd: '/memory', desc: 'Edit memory / CLAUDE.md' },
+  { cmd: '/help', desc: 'List available commands' },
+  { cmd: '/status', desc: 'Show session status' },
+];
+const Slash = { open: false, items: [], active: 0 };
+
+function updateSlashMenu() {
+  const ta = $('taskInput');
+  const v = ta.value;
+  // 仅当输入以 / 开头且尚未输入空格（即正在敲命令名）时显示候选
+  const m = /^\/(\S*)$/.exec(v);
+  if (!m) return closeSlashMenu();
+  const q = m[1].toLowerCase();
+  const items = SLASH_COMMANDS.filter((c) => c.cmd.slice(1).toLowerCase().startsWith(q));
+  if (items.length === 0) return closeSlashMenu();
+  Slash.open = true;
+  Slash.items = items;
+  Slash.active = 0;
+  renderSlashMenu();
+}
+function renderSlashMenu() {
+  const menu = $('slashMenu');
+  menu.innerHTML = '';
+  Slash.items.forEach((c, i) => {
+    const row = document.createElement('div');
+    row.className = 'slash-item' + (i === Slash.active ? ' active' : '');
+    row.innerHTML = `<span class="slash-cmd">${escapeHtml(c.cmd)}</span><span class="slash-desc">${escapeHtml(c.desc)}</span>`;
+    row.addEventListener('mousedown', (e) => { e.preventDefault(); pickSlash(i); });
+    menu.appendChild(row);
+  });
+  menu.hidden = false;
+}
+function closeSlashMenu() {
+  Slash.open = false;
+  $('slashMenu').hidden = true;
+}
+function moveSlash(delta) {
+  if (!Slash.open) return;
+  Slash.active = (Slash.active + delta + Slash.items.length) % Slash.items.length;
+  renderSlashMenu();
+}
+function pickSlash(i) {
+  const c = Slash.items[i != null ? i : Slash.active];
+  if (!c) return;
+  const ta = $('taskInput');
+  ta.value = c.cmd + ' '; // 填入命令名+空格，可继续补参数
+  ta.focus();
+  closeSlashMenu();
+}
+
+// ── 会话工具命令菜单（/usage /goal /skill …）──
+// 三种条目类型：
+//   'exec'   — 点击即调后端立即执行 claude 原生斜杠命令，结果展示在弹窗里（如 /usage）
+//   'prefix' — 点击不执行、不改写输入框，只是"标记"本次发送将以该命令开头（如 /goal）
+//   'group'  — 点击展开二级列表（如 /skill → 具体 skill 名），叶子节点按 'prefix' 处理
+const SKILL_LIST = [
+  'dataviz', 'update-config', 'keybindings-help', 'code-review', 'simplify',
+  'fewer-permission-prompts', 'loop', 'schedule', 'claude-api', 'run', 'init', 'security-review',
+];
+const CMD_ITEMS = [
+  { id: 'usage', slash: '/usage', type: 'exec' },
+  { id: 'goal', slash: '/goal', type: 'prefix' },
+  { id: 'skill', slash: '/skill', type: 'group', children: SKILL_LIST.map((name) => ({ id: 'skill-' + name, slash: '/' + name, type: 'prefix' })) },
+];
+const CmdMenu = { open: false, running: false, view: 'root' };
+
+function toggleCmdMenu() {
+  if (CmdMenu.open) closeCmdMenu();
+  else openCmdMenu();
+}
+function openCmdMenu() {
+  CmdMenu.view = 'root';
+  renderCmdMenu();
+  $('cmdMenu').hidden = false;
+  CmdMenu.open = true;
+}
+function closeCmdMenu() {
+  $('cmdMenu').hidden = true;
+  CmdMenu.open = false;
+}
+function renderCmdMenu() {
+  const menu = $('cmdMenu');
+  menu.innerHTML = '';
+  if (CmdMenu.view === 'root') {
+    CMD_ITEMS.forEach((c) => menu.appendChild(buildCmdItemRow(c)));
+    return;
+  }
+  // 二级列表（目前只有 /skill）：带一个返回按钮回到根菜单
+  const group = CMD_ITEMS.find((c) => c.id === CmdMenu.view);
+  if (!group) { CmdMenu.view = 'root'; return renderCmdMenu(); }
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'cmd-back';
+  back.textContent = '← ' + group.slash;
+  back.addEventListener('click', () => { CmdMenu.view = 'root'; renderCmdMenu(); });
+  menu.appendChild(back);
+  const sep = document.createElement('div');
+  sep.className = 'cmd-menu-sep';
+  menu.appendChild(sep);
+  (group.children || []).forEach((c) => menu.appendChild(buildCmdItemRow(c)));
+}
+function buildCmdItemRow(c) {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'cmd-item';
+  const hasMeta = DICT['cmd_' + c.id + '_name'] != null;
+  const name = hasMeta ? T('cmd_' + c.id + '_name') : '';
+  const desc = hasMeta ? T('cmd_' + c.id + '_desc') : '';
+  row.innerHTML =
+    `<span class="cmd-item-top"><span class="cmd-item-cmd">${escapeHtml(c.slash)}</span>` +
+    (name ? `<span class="cmd-item-name">${escapeHtml(name)}</span>` : '') +
+    (c.type === 'group' ? `<span class="cmd-item-arrow">›</span>` : '') +
+    `</span>` +
+    (desc ? `<span class="cmd-item-desc">${escapeHtml(desc)}</span>` : '');
+  row.addEventListener('click', () => {
+    if (c.type === 'exec') runCommand(c.id);
+    else if (c.type === 'group') { CmdMenu.view = c.id; renderCmdMenu(); }
+    else setSlashPrefix(c.slash);
+  });
+  return row;
+}
+
+// ── 斜杠命令前缀标记：只标记、不改写输入框，发送时才拼接 ──
+const SlashPrefix = { cmd: null };
+function setSlashPrefix(cmd) {
+  SlashPrefix.cmd = cmd;
+  renderSlashPrefixPill();
+  closeCmdMenu();
+  const ta = $('taskInput');
+  if (ta) ta.focus();
+}
+function clearSlashPrefix() {
+  SlashPrefix.cmd = null;
+  renderSlashPrefixPill();
+}
+function renderSlashPrefixPill() {
+  const pill = $('slashPrefixPill');
+  if (!pill) return;
+  if (!SlashPrefix.cmd) { pill.hidden = true; return; }
+  $('slashPrefixLabel').textContent = SlashPrefix.cmd;
+  pill.hidden = false;
+}
+// 发送前把标记的斜杠命令拼到正文最前面（单次使用，发送成功后清除；失败则保留，方便重试）
+function applySlashPrefix(text) {
+  return SlashPrefix.cmd ? SlashPrefix.cmd + ' ' + text : text;
+}
+
+// 执行某个工具命令：调后端 → 弹窗展示输出（执行中→结果/错误）
+async function runCommand(id) {
+  if (CmdMenu.running) return;
+  const item = CMD_ITEMS.find((c) => c.id === id);
+  if (!item) return;
+  closeCmdMenu();
+  if (!State.sessionId) { alert(T('selectRootFirst')); return; }
+  CmdMenu.running = true;
+  openCmdResult(item, T('cmdRunning'), true);
+  try {
+    const data = await api('/api/command/run', { id: State.sessionId, cmd: id });
+    const out = data && data.output ? data.output : T('cmdNoOutput');
+    openCmdResult(item, out, false);
+  } catch (e) {
+    openCmdResult(item, T('cmdFailed') + '\n\n' + (e && e.message ? e.message : String(e)), false);
+  } finally {
+    CmdMenu.running = false;
+  }
+}
+
+function openCmdResult(item, output, running) {
+  $('cmdTitle').textContent = item.slash + '  ·  ' + T('cmd_' + item.id + '_name');
+  $('cmdDesc').textContent = T('cmd_' + item.id + '_desc');
+  const pre = $('cmdOutput');
+  pre.textContent = output;
+  pre.classList.toggle('running', !!running);
+  // 执行中：隐藏输出框、显示专属进度条（斜杠命令无流式进度，用不确定进度条 + 已用时长）
+  pre.hidden = !!running;
+  if (running) startCmdProgress(); else stopCmdProgress();
+  $('cmdGotIt').textContent = T('guideGotIt');
+  $('cmdGotIt').disabled = !!running; // 执行中禁止「知道了」，避免关掉弹窗后结果覆盖显示
+  $('cmdOverlay').hidden = false;
+}
+function closeCmdResult() {
+  stopCmdProgress();
+  $('cmdOverlay').hidden = true;
+}
+
+// ── 命令执行进度条（不确定态动画 + 已用时长计时）──
+let CmdProgTimer = null;
+let CmdProgStart = 0;
+function startCmdProgress() {
+  $('cmdProgress').hidden = false;
+  $('cmdProgressLabel').textContent = T('cmdRunning');
+  CmdProgStart = Date.now();
+  const tick = () => {
+    const s = Math.max(0, Math.floor((Date.now() - CmdProgStart) / 1000));
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    $('cmdProgressTime').textContent = mm + ':' + ss;
+  };
+  tick();
+  if (CmdProgTimer) clearInterval(CmdProgTimer);
+  CmdProgTimer = setInterval(tick, 1000);
+}
+function stopCmdProgress() {
+  if (CmdProgTimer) { clearInterval(CmdProgTimer); CmdProgTimer = null; }
+  $('cmdProgress').hidden = true;
+}
+
+// ── 上传进度遮罩（全局挡住，可随时取消） ──
+const Upload = { xhr: null, canceled: false };
+function showUpProgress(total) {
+  Upload.canceled = false;
+  $('upTitle').textContent = T('uploading');
+  $('upCancelBtn').textContent = T('uploadCancel');
+  $('upOverlay').hidden = false;
+  setUpProgress(0, '', 0, total);
+}
+function setUpProgress(pct, name, idx, total) {
+  const v = Math.max(0, Math.min(100, Math.round(pct)));
+  $('upBarFill').style.width = v + '%';
+  $('upPct').textContent = v + '%';
+  $('upName').textContent = name || '';
+  $('upCount').textContent = total > 1 ? (idx + 1) + ' / ' + total : '';
+}
+function hideUpProgress() {
+  $('upOverlay').hidden = true;
+  Upload.xhr = null;
+}
+function cancelUpload() {
+  Upload.canceled = true;
+  if (Upload.xhr) { try { Upload.xhr.abort(); } catch (e) {} }
+  hideUpProgress();
+}
+// 单个文件上传：用 XHR 才能拿到 upload.onprogress（fetch 拿不到上传进度）
+function uploadOne(file, fname, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    Upload.xhr = xhr;
+    xhr.open(
+      'POST',
+      '/api/session/upload?id=' + encodeURIComponent(State.sessionId) +
+        '&name=' + encodeURIComponent(fname),
+    );
+    xhr.setRequestHeader('x-auth-token', TOKEN);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total * 100);
+    };
+    xhr.onload = () => {
+      if (xhr.status === 413) {
+        reject(new Error(T('uploadTooLarge')));
+        return;
+      }
+      let json = null;
+      try { json = JSON.parse(xhr.responseText); } catch (e) {}
+      if (!json || !json.success) reject(new Error((json && json.error) || ('HTTP ' + xhr.status)));
+      else resolve(json.data);
+    };
+    xhr.onerror = () => reject(new Error('network error'));
+    xhr.onabort = () => reject(new Error('__canceled__'));
+    xhr.send(file);
+  });
+}
+
+// ── 上传文件到 <会话根目录>/tmp/ ──
+async function uploadFiles(files) {
+  if (!files || !files.length) return;
+  if (!(await ensureSession())) return;
+  const ta = $('taskInput');
+  const names = [];
+  const list = Array.prototype.slice.call(files);
+  showUpProgress(list.length);
+  for (let i = 0; i < list.length; i++) {
+    if (Upload.canceled) break;
+    const file = list[i];
+    // 粘贴/截屏的图片可能没有文件名，补一个带时间戳的默认名（扩展名取自 MIME）
+    const fname = file.name || ('pasted-' + Date.now() + '.' + ((file.type && file.type.split('/')[1]) || 'png'));
+    setUpProgress(0, fname, i, list.length);
+    try {
+      const data = await uploadOne(file, fname, (pct) => setUpProgress(pct, fname, i, list.length));
+      names.push(data.rel);
+      attachAdd(data.rel, file);
+    } catch (e) {
+      const msg = e && e.message ? e.message : fname;
+      if (msg === '__canceled__' || Upload.canceled) break;
+      hideUpProgress();
+      alert(T('uploadFailed') + ': ' + msg);
+    }
+  }
+  hideUpProgress();
+  if (names.length) {
+    // 不再把路径塞进输入框：挂到输入框上方的附件区，发送时才拼进正文
+    renderAttachBar();
+    ta.focus();
+  }
+}
+
+// ── 附件区：上传成功的文件先停在输入框上方，可预览/删除，发送时才把相对路径拼进正文 ──
+const Attach = { items: [], seq: 0 };
+function attachAdd(rel, file) {
+  const isImg = !!(file && file.type && file.type.indexOf('image/') === 0);
+  Attach.items.push({
+    id: ++Attach.seq,
+    rel,
+    name: rel.split('/').pop(),
+    size: file ? file.size : 0,
+    type: (file && file.type) || '',
+    isImg,
+    url: isImg ? URL.createObjectURL(file) : '',
+  });
+}
+function attachRemove(id) {
+  const i = Attach.items.findIndex((a) => a.id === id);
+  if (i < 0) return;
+  if (Attach.items[i].url) URL.revokeObjectURL(Attach.items[i].url);
+  Attach.items.splice(i, 1);
+  renderAttachBar();
+}
+function clearAttachments() {
+  for (const a of Attach.items) if (a.url) URL.revokeObjectURL(a.url);
+  Attach.items = [];
+  renderAttachBar();
+}
+function attachPaths() {
+  return Attach.items.map((a) => a.rel);
+}
+function fmtBytes(n) {
+  if (!n) return '';
+  const u = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+  return (i ? v.toFixed(1) : String(v)) + ' ' + u[i];
+}
+function renderAttachBar() {
+  const bar = $('attachBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  bar.hidden = Attach.items.length === 0;
+  for (const a of Attach.items) {
+    const chip = document.createElement('div');
+    chip.className = 'attach-chip';
+    chip.title = a.rel;
+    const thumb = document.createElement('div');
+    thumb.className = 'attach-thumb';
+    if (a.isImg) {
+      const img = document.createElement('img');
+      img.src = a.url;
+      thumb.appendChild(img);
+    } else {
+      thumb.textContent = '📄';
+    }
+    const meta = document.createElement('div');
+    meta.className = 'attach-meta';
+    const nm = document.createElement('div');
+    nm.className = 'attach-name';
+    nm.textContent = a.name;
+    const sz = document.createElement('div');
+    sz.className = 'attach-size';
+    sz.textContent = fmtBytes(a.size);
+    meta.appendChild(nm);
+    meta.appendChild(sz);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'attach-del';
+    del.textContent = '✕';
+    del.title = T('attachRemove');
+    del.addEventListener('click', (e) => { e.stopPropagation(); attachRemove(a.id); });
+    chip.appendChild(thumb);
+    chip.appendChild(meta);
+    chip.appendChild(del);
+    chip.addEventListener('click', () => openAttachPreview(a.id));
+    bar.appendChild(chip);
+  }
+}
+function openAttachPreview(id) {
+  const a = Attach.items.find((x) => x.id === id);
+  if (!a) return;
+  $('attachPvName').textContent = a.name;
+  const body = $('attachPvBody');
+  body.innerHTML = '';
+  if (a.isImg) {
+    const img = document.createElement('img');
+    img.src = a.url;
+    body.appendChild(img);
+  }
+  const info = document.createElement('div');
+  info.className = 'attach-info';
+  info.textContent = [
+    T('attachPath') + ': ' + a.rel,
+    T('attachSize') + ': ' + (fmtBytes(a.size) || '-'),
+    T('attachType') + ': ' + (a.type || '-'),
+  ].join(String.fromCharCode(10));
+  body.appendChild(info);
+  $('attachOverlay').hidden = false;
+}
+function closeAttachPreview() {
+  $('attachOverlay').hidden = true;
+  $('attachPvBody').innerHTML = '';
+}
+
+// ── 拖拽上传：把文件/图片拖到 composer 释放即上传 ──
+function initDragUpload() {
+  const composer = $('composer');
+  const hint = $('dropHint');
+  if (!composer) return;
+  const show = () => { hint.hidden = false; composer.classList.add('drag-over'); };
+  const hide = () => { hint.hidden = true; composer.classList.remove('drag-over'); };
+  composer.addEventListener('dragover', (e) => {
+    if (!State.sessionId || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+    e.preventDefault();
+    show();
+  });
+  composer.addEventListener('dragleave', (e) => {
+    // 仅当离开整个 composer（而非进入子元素）才取消高亮
+    if (e.target === composer || !composer.contains(e.relatedTarget)) hide();
+  });
+  composer.addEventListener('drop', async (e) => {
+    if (!State.sessionId) return;
+    e.preventDefault();
+    hide();
+    const fs = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+    if (fs.length) await uploadFiles(fs);
+  });
+  // textarea 是可编辑控件，浏览器有独立的拖放默认行为（会把文件名插进文本）。
+  // 直接在它上面拦截，保证拖到输入框内也走上传通道，不落入文本。
+  const ta = $('taskInput');
+  if (ta) {
+    ta.addEventListener('dragover', (e) => {
+      if (!State.sessionId || !Array.from(e.dataTransfer.types || []).includes('Files')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      show();
+    });
+    ta.addEventListener('drop', async (e) => {
+      if (!State.sessionId) return;
+      const fs = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+      if (!fs.length) return; // 非文件（纯文本拖拽）放行默认插入
+      e.preventDefault();
+      e.stopPropagation();
+      hide();
+      await uploadFiles(fs);
+    });
+  }
+}
+
+// ── 粘贴上传：从剪贴板取图片（截图/复制的图片）直接上传，正常文本粘贴放行 ──
+async function onPasteImage(e) {
+  if (!State.sessionId) return;
+  const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
+  const imgs = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'));
+  if (!imgs.length) return;
+  e.preventDefault();
+  const files = imgs.map((it) => it.getAsFile()).filter(Boolean);
+  if (files.length) await uploadFiles(files);
+}
+
+// ── 截屏：屏幕共享抓一帧 → 预览（裁剪 + 圈/框/箭头/文字标注）→ 确定后上传 ──
+// 标注坐标统一存"原图像素"，SVG 预览用 viewBox=原图尺寸，导出时同一套坐标直接画到 canvas，预览与结果一致
+const SHOT_TOOLS = ['crop', 'circle', 'rect', 'arrow', 'text'];
+const SHOT_COLORS = ['#ff3b30', '#ffcc00', '#34c759', '#0a84ff', '#ffffff', '#000000'];
+const SHOT_SIZES = [{ id: 'S', k: 2.2 }, { id: 'M', k: 3.4 }, { id: 'L', k: 5.2 }];
+const Shot = {
+  dataUrl: null, w: 0, h: 0, sel: null, drag: null,
+  tool: 'crop', color: SHOT_COLORS[0], sizeId: 'S', anns: [], draft: null,
+  selId: null, gesture: null, ptrs: new Map(), seq: 0, editId: null, textAt: null,
+};
+
+// 当前字号/线宽（按原图尺寸自适应，保证在 4K 截图上也看得见）
+function shotFontPx() {
+  const k = (SHOT_SIZES.find((x) => x.id === Shot.sizeId) || SHOT_SIZES[0]).k;
+  return Math.max(10, (Math.max(Shot.w, Shot.h) / 100) * k);
+}
+function shotLinePx() { return Math.max(1, shotFontPx() / 8); }
+function shotHandlePx() { return Math.max(5, Math.max(Shot.w, Shot.h) / 130); }
+
+async function captureScreenshot() {
+  if (!State.sessionId) { alert(T('selectRootFirst')); return; }
+  try {
+    const md = navigator.mediaDevices;
+    if (!md || !md.getDisplayMedia) throw new Error(T('shotUnsupported'));
+    const stream = await md.getDisplayMedia({ video: true, audio: false });
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    await video.play();
+    await new Promise((r) => setTimeout(r, 250)); // 等首帧就绪
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    stream.getTracks().forEach((tk) => tk.stop());
+    openShot(canvas.toDataURL('image/png'), canvas.width, canvas.height);
+  } catch (e) {
+    alert((e && e.message) ? e.message : T('shotUnsupported'));
+  }
+}
+
+function openShot(dataUrl, w, h) {
+  Shot.sel = null; Shot.drag = null; Shot.draft = null; Shot.anns = [];
+  Shot.selId = null; Shot.gesture = null; Shot.ptrs.clear(); Shot.tool = 'crop';
+  setShotImage(dataUrl, w, h);
+  $('shotSel').hidden = true;
+  $('shotOverlay').hidden = false;
+  renderShotTools();
+  // 工具条渲染完、布局稳定后再量一次可用区域
+  requestAnimationFrame(fitShotImage);
+}
+function setShotImage(dataUrl, w, h) {
+  Shot.dataUrl = dataUrl;
+  Shot.w = w || 0; Shot.h = h || 0;
+  const img = $('shotImg');
+  img.onload = () => { Shot.w = img.naturalWidth; Shot.h = img.naturalHeight; fitShotImage(); paintAnn(); };
+  img.src = dataUrl;
+  fitShotImage();
+  paintAnn();
+}
+// 显示尺寸=按可用区域等比缩放（小于容器的图——比如刚裁完的一小块——也会放大居中，最多 3 倍免得糊得没法看）
+function fitShotImage() {
+  const img = $('shotImg');
+  if (!Shot.w || !Shot.h) { img.style.width = ''; return; }
+  // 可用区域 = 视口 - 弹窗里除图片外的那些行（标题/提示/工具条/底部按钮）的实测高度。
+  // 不能写死 64vh：手机上工具条会折行、地址栏又让 100vh 大于真实可视区，图片和底部按钮会被顶出屏幕。
+  // 也不直接量 .shot-body（它的尺寸反过来由图片撑出来，会互相咬）。
+  const vw = window.innerWidth;
+  const vh = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+  const narrow = vw <= 640;
+  const pad = narrow ? 10 : 16, gap = narrow ? 8 : 10, ratio = narrow ? 0.94 : 0.9;
+  let chrome = pad * 2;
+  ['shotHead', 'shotTip', 'shotTools', 'shotActions'].forEach((id) => {
+    const el = $(id);
+    if (!el || el.hidden || el.offsetParent === null) return;
+    chrome += el.getBoundingClientRect().height + gap;
+  });
+  const maxW = Math.max(80, vw * ratio - pad * 2 - 4);
+  const maxH = Math.max(80, vh * ratio - chrome - 4);
+  const k = Math.min(maxW / Shot.w, maxH / Shot.h, 3);
+  img.style.width = Math.round(Shot.w * k) + 'px';
+  img.style.height = 'auto';
+  img.style.maxWidth = 'none';
+  img.style.maxHeight = 'none';
+}
+function closeShot() {
+  Shot.dataUrl = null; Shot.sel = null; Shot.drag = null; Shot.draft = null; Shot.anns = [];
+  Shot.selId = null; Shot.gesture = null; Shot.ptrs.clear();
+  $('shotOverlay').hidden = true;
+  closeShotText();
+  $('shotImg').src = '';
+  paintAnn();
+}
+
+// 工具条（工具 / 颜色 / 字号 / 确定裁剪 / 选中文字的编辑与删除）
+function renderShotTools() {
+  const tools = $('shotToolBtns');
+  tools.innerHTML = '';
+  SHOT_TOOLS.forEach((id) => {
+    const b = document.createElement('button');
+    b.className = 'shot-tool' + (Shot.tool === id ? ' on' : '');
+    b.textContent = T('shotTool' + id.charAt(0).toUpperCase() + id.slice(1));
+    b.addEventListener('click', () => { Shot.tool = id; if (id !== 'text') Shot.selId = null; renderShotTools(); paintAnn(); });
+    tools.appendChild(b);
+  });
+  const colors = $('shotColors');
+  colors.innerHTML = '';
+  SHOT_COLORS.forEach((c) => {
+    const b = document.createElement('button');
+    b.className = 'shot-swatch' + (Shot.color === c ? ' on' : '');
+    b.style.background = c;
+    b.addEventListener('click', () => { Shot.color = c; applyToSelected(); renderShotTools(); });
+    colors.appendChild(b);
+  });
+  const sizes = $('shotSizes');
+  sizes.innerHTML = '';
+  SHOT_SIZES.forEach((sz) => {
+    const b = document.createElement('button');
+    b.className = 'shot-tool' + (Shot.sizeId === sz.id ? ' on' : '');
+    b.textContent = T('shotSize' + sz.id);
+    b.addEventListener('click', () => { Shot.sizeId = sz.id; applyToSelected(); renderShotTools(); });
+    sizes.appendChild(b);
+  });
+  const sel = selectedAnn();
+  const crop = $('shotCropBtn');
+  crop.textContent = T('shotCropApply');
+  crop.hidden = !(Shot.tool === 'crop' && Shot.sel);
+  $('shotEditBtn').textContent = T('shotEditText');
+  $('shotEditBtn').hidden = !(sel && sel.type === 'text'); // 只有文字能编辑内容
+  $('shotDelBtn').textContent = T('shotDelSel');
+  $('shotDelBtn').hidden = !sel;
+  $('shotUndo').textContent = T('shotUndo');
+  $('shotClear').textContent = T('shotClear');
+  $('shotStage').style.cursor = Shot.tool === 'text' ? 'text' : 'crosshair'; // 悬停时再由 updateShotCursor 覆盖
+}
+// 颜色/字号点击时，若正选中一条文字标注，就改它（否则只改"下一条"的默认值）
+function applyToSelected() {
+  const a = selectedAnn();
+  if (!a) return;
+  a.color = Shot.color;
+  if (a.type === 'text') { a.font = shotFontPx(); measureAnn(a); }
+  else a.line = shotLinePx();
+  paintAnn();
+}
+function selectedAnn() {
+  return Shot.anns.find((a) => a.id === Shot.selId) || null;
+}
+
+// 文字尺寸测量（离屏 canvas，原图像素）
+let ShotMeasureCtx = null;
+function measureAnn(a) {
+  if (!ShotMeasureCtx) ShotMeasureCtx = document.createElement('canvas').getContext('2d');
+  const ctx = ShotMeasureCtx;
+  const lines = String(a.text || '').split('\n');
+  let w = 1;
+  if (ctx) {
+    ctx.font = a.font + 'px sans-serif';
+    lines.forEach((ln) => { w = Math.max(w, ctx.measureText(ln || ' ').width); });
+  } else {
+    lines.forEach((ln) => { w = Math.max(w, (ln.length || 1) * a.font * 0.6); });
+  }
+  a.lines = lines;
+  a.lineH = a.font * 1.25;
+  a.w = w;
+  a.h = lines.length * a.lineH;
+  return a;
+}
+
+// ── 坐标与命中判定（都在原图像素坐标系里算）──
+function shotPos(e) {
+  const r = $('shotStage').getBoundingClientRect();
+  return {
+    nx: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+    ny: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+  };
+}
+function shotImgPos(e) {
+  const { nx, ny } = shotPos(e);
+  return { x: nx * Shot.w, y: ny * Shot.h };
+}
+// 选中盒的局部坐标（以盒心为原点、未旋转）↔ 图片坐标
+function boxLocalToImg(b, lx, ly) {
+  const rad = (b.rot || 0) * Math.PI / 180;
+  return {
+    x: b.cx + lx * Math.cos(rad) - ly * Math.sin(rad),
+    y: b.cy + lx * Math.sin(rad) + ly * Math.cos(rad),
+  };
+}
+function boxImgToLocal(b, x, y) {
+  const rad = -(b.rot || 0) * Math.PI / 180;
+  const dx = x - b.cx, dy = y - b.cy;
+  return { lx: dx * Math.cos(rad) - dy * Math.sin(rad), ly: dx * Math.sin(rad) + dy * Math.cos(rad) };
+}
+function annPad(a) { return Math.max(a.font * 0.25, shotHandlePx()); }
+// 每条标注的"选中盒"：文字带旋转，形状就是外接框
+function annBox(a) {
+  if (a.type === 'text') {
+    const pad = annPad(a);
+    return { cx: a.cx, cy: a.cy, hw: a.w / 2 + pad, hh: a.h / 2 + pad, rot: a.rot || 0 };
+  }
+  const pad = Math.max((a.line || 2) * 2, shotHandlePx());
+  return {
+    cx: (a.x1 + a.x2) / 2, cy: (a.y1 + a.y2) / 2,
+    hw: Math.abs(a.x2 - a.x1) / 2 + pad, hh: Math.abs(a.y2 - a.y1) / 2 + pad, rot: 0,
+  };
+}
+// 句柄：文字 = 上方旋转 + 右下缩放；形状 = 两个端点（箭头就是首尾，方框/圆就是对角）
+function annHandles(a) {
+  const b = annBox(a);
+  if (a.type === 'text') {
+    return {
+      rotate: boxLocalToImg(b, 0, -b.hh - shotHandlePx() * 3),
+      scale: boxLocalToImg(b, b.hw, b.hh),
+    };
+  }
+  return { pt1: { x: a.x1, y: a.y1 }, pt2: { x: a.x2, y: a.y2 } };
+}
+function distToSeg(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2)) : 0;
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+// 命中：先句柄，再本体。返回 'rotate'|'scale'|'pt1'|'pt2'|'move'|null
+function hitHandle(a, x, y) {
+  const r = shotHandlePx() * 2.6;
+  const hs = annHandles(a);
+  const keys = Object.keys(hs);
+  for (let i = 0; i < keys.length; i++) {
+    const p = hs[keys[i]];
+    if (Math.hypot(x - p.x, y - p.y) <= r) return keys[i];
+  }
+  return hitBody(a, x, y) ? 'move' : null;
+}
+// 本体命中：文字按整个盒子；形状只认"描边附近"，免得大圈/大框把里面挡住没法再画
+function hitBody(a, x, y) {
+  const b = annBox(a);
+  const { lx, ly } = boxImgToLocal(b, x, y);
+  const inBox = Math.abs(lx) <= b.hw && Math.abs(ly) <= b.hh;
+  if (a.type === 'text') return inBox;
+  const tol = Math.max((a.line || 2) * 3, shotHandlePx() * 1.6);
+  if (a.type === 'arrow') return distToSeg(x, y, a.x1, a.y1, a.x2, a.y2) <= tol;
+  const rx = Math.abs(a.x2 - a.x1) / 2, ry = Math.abs(a.y2 - a.y1) / 2;
+  if (rx <= tol || ry <= tol) return inBox; // 太小就整块可点
+  if (a.type === 'circle') {
+    const t = Math.hypot(lx / rx, ly / ry);
+    return Math.abs(t - 1) * Math.min(rx, ry) <= tol;
+  }
+  return inBox && !(Math.abs(lx) <= rx - tol && Math.abs(ly) <= ry - tol); // rect：只认边框那一圈
+}
+function hitAnyAnn(x, y) {
+  for (let i = Shot.anns.length - 1; i >= 0; i--) {
+    if (hitHandle(Shot.anns[i], x, y)) return Shot.anns[i];
+  }
+  return null;
+}
+const SHOT_CURSOR = { move: 'move', scale: 'nwse-resize', pt1: 'nwse-resize', pt2: 'nwse-resize', rotate: 'grab' };
+// 鼠标悬停在标注/句柄上就换成"能拖"的光标——不然看不出来可以拖
+function updateShotCursor(x, y) {
+  const stage = $('shotStage');
+  const sel = selectedAnn();
+  let kind = sel ? hitHandle(sel, x, y) : null;
+  if (!kind) { const a = hitAnyAnn(x, y); if (a) kind = 'move'; }
+  stage.style.cursor = kind ? SHOT_CURSOR[kind] : (Shot.tool === 'text' ? 'text' : 'crosshair');
+}
+
+// ── 指针交互：画标注 / 框选裁剪 / 选中后拖动·旋转·缩放·改端点 / 双指手势 ──
+function shotDown(e) {
+  e.currentTarget.setPointerCapture(e.pointerId);
+  Shot.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  const { x, y } = shotImgPos(e);
+
+  if (Shot.ptrs.size === 2) { startGesture(); return; } // 双指：缩放+旋转选中项
+  const sel = selectedAnn();
+  const hit = sel ? hitHandle(sel, x, y) : null;
+  if (sel && hit) { startAnnDrag(sel, hit, x, y); return; } // 已选中的：句柄优先，任何工具下都能操作
+  const target = hitAnyAnn(x, y);
+  if (target) { // 点到别的标注 → 选中它并可直接拖走
+    Shot.selId = target.id;
+    renderShotTools();
+    paintAnn();
+    startAnnDrag(target, 'move', x, y);
+    return;
+  }
+  if (Shot.selId) { Shot.selId = null; renderShotTools(); paintAnn(); }
+  if (Shot.tool === 'text') { openShotText(null, x, y); return; }
+  if (Shot.tool === 'crop') {
+    const { nx, ny } = shotPos(e);
+    Shot.drag = { kind: 'crop', ox: nx, oy: ny };
+    Shot.sel = { x: nx, y: ny, w: 0, h: 0 };
+    paintSel();
+    return;
+  }
+  Shot.drag = { kind: 'draw' };
+  Shot.draft = { type: Shot.tool, x1: x, y1: y, x2: x, y2: y, color: Shot.color, line: shotLinePx() };
+  paintAnn();
+}
+function startAnnDrag(a, kind, x, y) {
+  const b = annBox(a);
+  Shot.drag = {
+    kind, id: a.id, x0: x, y0: y,
+    cx: a.cx, cy: a.cy, font: a.font, rot: a.rot || 0,
+    pts: a.type === 'text' ? null : { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2 },
+  };
+  if (kind === 'scale') Shot.drag.d0 = Math.hypot(x - b.cx, y - b.cy) || 1;
+  if (kind === 'rotate') Shot.drag.a0 = Math.atan2(y - b.cy, x - b.cx);
+}
+function shotMove(e) {
+  if (Shot.ptrs.has(e.pointerId)) Shot.ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (Shot.gesture) { moveGesture(); return; }
+  const d = Shot.drag;
+  const { x, y } = shotImgPos(e);
+  if (!d) { updateShotCursor(x, y); return; }
+  if (d.kind === 'crop') {
+    const { nx, ny } = shotPos(e);
+    Shot.sel = { x: Math.min(d.ox, nx), y: Math.min(d.oy, ny), w: Math.abs(nx - d.ox), h: Math.abs(ny - d.oy) };
+    paintSel();
+    return;
+  }
+  if (d.kind === 'draw') {
+    if (!Shot.draft) return;
+    Shot.draft.x2 = x; Shot.draft.y2 = y;
+    paintAnn();
+    return;
+  }
+  const a = Shot.anns.find((it) => it.id === d.id);
+  if (!a) return;
+  const dx = x - d.x0, dy = y - d.y0;
+  if (d.kind === 'move') {
+    if (a.type === 'text') { a.cx = d.cx + dx; a.cy = d.cy + dy; }
+    else { a.x1 = d.pts.x1 + dx; a.y1 = d.pts.y1 + dy; a.x2 = d.pts.x2 + dx; a.y2 = d.pts.y2 + dy; }
+  } else if (d.kind === 'pt1') { a.x1 = d.pts.x1 + dx; a.y1 = d.pts.y1 + dy; }
+  else if (d.kind === 'pt2') { a.x2 = d.pts.x2 + dx; a.y2 = d.pts.y2 + dy; }
+  else if (d.kind === 'scale') {
+    const ratio = (Math.hypot(x - a.cx, y - a.cy) || 1) / d.d0;
+    a.font = Math.max(8, Math.min(Math.max(Shot.w, Shot.h) / 2, d.font * ratio));
+    measureAnn(a);
+  } else if (d.kind === 'rotate') {
+    a.rot = d.rot + (Math.atan2(y - a.cy, x - a.cx) - d.a0) * 180 / Math.PI;
+  }
+  paintAnn();
+}
+function shotUp(e) {
+  if (e && e.pointerId != null) Shot.ptrs.delete(e.pointerId);
+  if (Shot.gesture && Shot.ptrs.size < 2) Shot.gesture = null;
+  const d = Shot.drag;
+  Shot.drag = null;
+  if (!d) return;
+  if (d.kind === 'crop') {
+    if (Shot.sel && (Shot.sel.w < 0.01 || Shot.sel.h < 0.01)) Shot.sel = null; // 误点/过小 → 不裁
+    paintSel();
+    renderShotTools();
+    return;
+  }
+  if (d.kind === 'draw') {
+    const df = Shot.draft;
+    Shot.draft = null;
+    if (df && Math.abs(df.x2 - df.x1) + Math.abs(df.y2 - df.y1) > shotLinePx() * 2) Shot.anns.push(df); // 误点忽略
+    paintAnn();
+  }
+}
+// 双指：两指距离比 → 缩放，夹角差 → 旋转（文字改字号/角度，形状则把两个端点绕中心变换）
+function startGesture() {
+  const a = selectedAnn();
+  if (!a || Shot.ptrs.size !== 2) return;
+  const [p1, p2] = Array.from(Shot.ptrs.values());
+  Shot.drag = null;
+  Shot.gesture = {
+    id: a.id,
+    d0: Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1,
+    a0: Math.atan2(p2.y - p1.y, p2.x - p1.x),
+    font: a.font, rot: a.rot || 0,
+    pts: a.type === 'text' ? null : { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2 },
+  };
+}
+function moveGesture() {
+  const g = Shot.gesture;
+  const a = Shot.anns.find((it) => it.id === g.id);
+  if (!a || Shot.ptrs.size < 2) return;
+  const [p1, p2] = Array.from(Shot.ptrs.values());
+  const k = (Math.hypot(p2.x - p1.x, p2.y - p1.y) || 1) / g.d0;
+  const da = Math.atan2(p2.y - p1.y, p2.x - p1.x) - g.a0;
+  if (a.type === 'text') {
+    a.font = Math.max(8, Math.min(Math.max(Shot.w, Shot.h) / 2, g.font * k));
+    a.rot = g.rot + da * 180 / Math.PI;
+    measureAnn(a);
+  } else {
+    const cx = (g.pts.x1 + g.pts.x2) / 2, cy = (g.pts.y1 + g.pts.y2) / 2;
+    const tf = (px, py) => {
+      const rx = (px - cx) * k, ry = (py - cy) * k;
+      return { x: cx + rx * Math.cos(da) - ry * Math.sin(da), y: cy + rx * Math.sin(da) + ry * Math.cos(da) };
+    };
+    const q1 = tf(g.pts.x1, g.pts.y1), q2 = tf(g.pts.x2, g.pts.y2);
+    a.x1 = q1.x; a.y1 = q1.y; a.x2 = q2.x; a.y2 = q2.y;
+  }
+  paintAnn();
+}
+
+// ── 文字输入弹窗（多行，替代原生 prompt）──
+function openShotText(id, x, y) {
+  Shot.editId = id;
+  Shot.textAt = { x, y };
+  const a = id ? Shot.anns.find((it) => it.id === id) : null;
+  $('shotTextTitle').textContent = T('shotTextTitle');
+  const ta = $('shotTextArea');
+  ta.placeholder = T('shotTextPh');
+  ta.value = a ? a.text : '';
+  $('shotTextCancel').textContent = T('cancel');
+  $('shotTextOk').textContent = T('confirm');
+  $('shotTextOverlay').hidden = false;
+  setTimeout(() => { ta.focus(); ta.select(); }, 0);
+}
+function closeShotText() {
+  $('shotTextOverlay').hidden = true;
+  Shot.editId = null; Shot.textAt = null;
+}
+function confirmShotText() {
+  const txt = $('shotTextArea').value.replace(/\s+$/, '');
+  const id = Shot.editId;
+  const at = Shot.textAt || { x: Shot.w / 2, y: Shot.h / 2 };
+  closeShotText();
+  if (!txt) { if (id) deleteSelected(id); return; } // 清空内容 = 删掉这条
+  if (id) {
+    const a = Shot.anns.find((it) => it.id === id);
+    if (a) { a.text = txt; measureAnn(a); }
+  } else {
+    const a = measureAnn({ id: ++Shot.seq, type: 'text', cx: at.x, cy: at.y, text: txt, color: Shot.color, font: shotFontPx(), rot: 0 });
+    // 落点当左上角更符合直觉：把中心挪到落点右下
+    a.cx = at.x + a.w / 2; a.cy = at.y + a.h / 2;
+    Shot.anns.push(a);
+    Shot.selId = a.id;
+  }
+  renderShotTools();
+  paintAnn();
+}
+
+function undoShot() {
+  const a = Shot.anns.pop();
+  if (a && a.id === Shot.selId) Shot.selId = null;
+  renderShotTools();
+  paintAnn();
+}
+function clearShot() {
+  Shot.anns = []; Shot.draft = null; Shot.sel = null; Shot.selId = null;
+  paintSel(); renderShotTools(); paintAnn();
+}
+function deleteSelected(id) {
+  const target = id || Shot.selId;
+  Shot.anns = Shot.anns.filter((a) => a.id !== target);
+  Shot.selId = null;
+  renderShotTools();
+  paintAnn();
+}
+function editSelected() {
+  const a = selectedAnn();
+  if (a && a.type === 'text') openShotText(a.id, a.cx, a.cy);
+}
+
+// ── 裁剪：确定后只保留框选区域（原图真的被换掉，标注坐标随之平移）──
+function paintSel() {
+  const box = $('shotSel');
+  if (!Shot.sel) { box.hidden = true; return; }
+  const s = Shot.sel;
+  box.hidden = false;
+  box.style.left = (s.x * 100) + '%';
+  box.style.top = (s.y * 100) + '%';
+  box.style.width = (s.w * 100) + '%';
+  box.style.height = (s.h * 100) + '%';
+}
+function applyCrop() {
+  const sel = Shot.sel;
+  if (!sel || !Shot.dataUrl) return;
+  const img = new Image();
+  img.onload = () => {
+    const sx = Math.round(sel.x * img.naturalWidth);
+    const sy = Math.round(sel.y * img.naturalHeight);
+    const sw = Math.max(1, Math.round(sel.w * img.naturalWidth));
+    const sh = Math.max(1, Math.round(sel.h * img.naturalHeight));
+    const cv = document.createElement('canvas');
+    cv.width = sw; cv.height = sh;
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    Shot.anns.forEach((a) => { // 已有标注跟着平移，别裁歪
+      if (a.type === 'text') { a.cx -= sx; a.cy -= sy; return; }
+      a.x1 -= sx; a.x2 -= sx; a.y1 -= sy; a.y2 -= sy;
+    });
+    Shot.anns = Shot.anns.filter((a) => annVisible(a, sw, sh)); // 完全落在裁掉区域的标注就地丢弃，免得留下摸不到的选中框
+    if (!Shot.anns.some((a) => a.id === Shot.selId)) Shot.selId = null;
+    Shot.sel = null;
+    $('shotSel').hidden = true;
+    setShotImage(cv.toDataURL('image/png'), sw, sh);
+    renderShotTools();
+  };
+  img.src = Shot.dataUrl;
+}
+
+// 标注是否还与图片有交集（裁剪后用）
+function annVisible(a, w, h) {
+  const box = a.type === 'text'
+    ? { x1: a.cx - a.w / 2, y1: a.cy - a.h / 2, x2: a.cx + a.w / 2, y2: a.cy + a.h / 2 }
+    : a;
+  return Math.min(box.x1, box.x2) < w && Math.max(box.x1, box.x2) > 0
+    && Math.min(box.y1, box.y2) < h && Math.max(box.y1, box.y2) > 0;
+}
+
+// 箭头头部三角形的三个点（在原图坐标系里算）
+function arrowHead(a) {
+  const ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
+  const len = Math.max((a.line || 2) * 11, 14); // 头要够大够肥，不然细线上看不出是箭头
+  const spread = 0.5;
+  return [
+    [a.x2, a.y2],
+    [a.x2 - len * Math.cos(ang - spread), a.y2 - len * Math.sin(ang - spread)],
+    [a.x2 - len * Math.cos(ang + spread), a.y2 - len * Math.sin(ang + spread)],
+  ];
+}
+function textSvg(a) {
+  const tsp = a.lines.map((ln, i) => `<tspan x="0" y="${-a.h / 2 + i * a.lineH + a.lineH * 0.8}">${escapeHtml(ln) || ' '}</tspan>`).join('');
+  return `<g transform="translate(${a.cx} ${a.cy}) rotate(${a.rot || 0})">`
+    + `<text text-anchor="middle" fill="${a.color}" font-size="${a.font}" font-family="sans-serif"`
+    + ` style="paint-order:stroke;stroke:rgba(0,0,0,.45);stroke-width:${a.font / 14}">${tsp}</text></g>`;
+}
+function selBoxSvg(a) {
+  const b = annBox(a);
+  const hs = shotHandlePx();
+  const sw = Math.max(1, hs / 4);
+  let g = `<g transform="translate(${b.cx} ${b.cy}) rotate(${b.rot || 0})" opacity="0.95">`
+    + `<rect x="${-b.hw}" y="${-b.hh}" width="${b.hw * 2}" height="${b.hh * 2}" fill="none" stroke="#0a84ff" stroke-width="${sw}" stroke-dasharray="${hs * 1.4} ${hs}" />`;
+  if (a.type === 'text') {
+    g += `<line x1="0" y1="${-b.hh}" x2="0" y2="${-b.hh - hs * 3}" stroke="#0a84ff" stroke-width="${sw}" />`
+      + `<circle cx="0" cy="${-b.hh - hs * 3}" r="${hs}" fill="#fff" stroke="#0a84ff" stroke-width="${sw}" />`
+      + `<circle cx="${b.hw}" cy="${b.hh}" r="${hs}" fill="#0a84ff" stroke="#fff" stroke-width="${sw}" />`;
+  }
+  g += '</g>';
+  if (a.type !== 'text') { // 形状：两个端点句柄画在原坐标上（箭头首尾可分别拖）
+    const hd = annHandles(a);
+    g += `<circle cx="${hd.pt1.x}" cy="${hd.pt1.y}" r="${hs}" fill="#0a84ff" stroke="#fff" stroke-width="${sw}" />`
+      + `<circle cx="${hd.pt2.x}" cy="${hd.pt2.y}" r="${hs}" fill="#0a84ff" stroke="#fff" stroke-width="${sw}" />`;
+  }
+  return g;
+}
+
+// SVG 预览：与导出 drawAnns 用同一份坐标
+function paintAnn() {
+  const svg = $('shotAnn');
+  if (!svg) return;
+  svg.setAttribute('viewBox', '0 0 ' + (Shot.w || 1) + ' ' + (Shot.h || 1));
+  const list = Shot.anns.concat(Shot.draft ? [Shot.draft] : []);
+  let html = list.map((a) => {
+    if (a.type === 'text') return textSvg(a);
+    if (a.type === 'rect') {
+      const x = Math.min(a.x1, a.x2), y = Math.min(a.y1, a.y2);
+      return `<rect x="${x}" y="${y}" width="${Math.abs(a.x2 - a.x1)}" height="${Math.abs(a.y2 - a.y1)}" fill="none" stroke="${a.color}" stroke-width="${a.line}" />`;
+    }
+    if (a.type === 'circle') {
+      return `<ellipse cx="${(a.x1 + a.x2) / 2}" cy="${(a.y1 + a.y2) / 2}" rx="${Math.abs(a.x2 - a.x1) / 2}" ry="${Math.abs(a.y2 - a.y1) / 2}" fill="none" stroke="${a.color}" stroke-width="${a.line}" />`;
+    }
+    const pts = arrowHead(a).map((pt) => pt.join(',')).join(' ');
+    return `<line x1="${a.x1}" y1="${a.y1}" x2="${a.x2}" y2="${a.y2}" stroke="${a.color}" stroke-width="${a.line}" stroke-linecap="round" /><polygon points="${pts}" fill="${a.color}" />`;
+  }).join('');
+  const sel = selectedAnn();
+  if (sel) html += selBoxSvg(sel); // 选中框只在预览里画，不进导出
+  svg.innerHTML = html;
+}
+
+// 导出：把标注按原图坐标画到 canvas（选中框不画）
+function drawAnns(ctx) {
+  Shot.anns.forEach((a) => {
+    ctx.save();
+    ctx.strokeStyle = a.color;
+    ctx.fillStyle = a.color;
+    ctx.lineWidth = a.line || 2;
+    if (a.type === 'text') {
+      ctx.translate(a.cx, a.cy);
+      ctx.rotate((a.rot || 0) * Math.PI / 180);
+      ctx.font = a.font + 'px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.lineWidth = a.font / 14;
+      ctx.lineJoin = 'round';
+      a.lines.forEach((ln, i) => {
+        const y = -a.h / 2 + i * a.lineH + a.lineH * 0.8;
+        ctx.strokeStyle = 'rgba(0,0,0,.45)';
+        ctx.strokeText(ln, 0, y);
+        ctx.fillStyle = a.color;
+        ctx.fillText(ln, 0, y);
+      });
+    } else if (a.type === 'rect') {
+      ctx.strokeRect(Math.min(a.x1, a.x2), Math.min(a.y1, a.y2), Math.abs(a.x2 - a.x1), Math.abs(a.y2 - a.y1));
+    } else if (a.type === 'circle') {
+      ctx.beginPath();
+      ctx.ellipse((a.x1 + a.x2) / 2, (a.y1 + a.y2) / 2, Math.abs(a.x2 - a.x1) / 2, Math.abs(a.y2 - a.y1) / 2, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(a.x1, a.y1); ctx.lineTo(a.x2, a.y2);
+      ctx.stroke();
+      const pts = arrowHead(a);
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      ctx.lineTo(pts[1][0], pts[1][1]);
+      ctx.lineTo(pts[2][0], pts[2][1]);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+// 先画原图 + 标注，再按（尚未确定的）框选裁剪
+function renderShot() {
+  return new Promise((resolve) => {
+    if (!Shot.dataUrl) { resolve(''); return; }
+    const img = new Image();
+    img.onload = () => {
+      const full = document.createElement('canvas');
+      full.width = img.naturalWidth; full.height = img.naturalHeight;
+      const fctx = full.getContext('2d');
+      if (!fctx) { resolve(Shot.dataUrl); return; }
+      fctx.drawImage(img, 0, 0);
+      drawAnns(fctx);
+      if (!Shot.sel) { resolve(full.toDataURL('image/png')); return; }
+      const sel = Shot.sel;
+      const sx = Math.round(sel.x * full.width);
+      const sy = Math.round(sel.y * full.height);
+      const sw = Math.max(1, Math.round(sel.w * full.width));
+      const sh = Math.max(1, Math.round(sel.h * full.height));
+      const cv = document.createElement('canvas');
+      cv.width = sw; cv.height = sh;
+      const ctx = cv.getContext('2d');
+      if (ctx) ctx.drawImage(full, sx, sy, sw, sh, 0, 0, sw, sh);
+      resolve(cv.toDataURL('image/png'));
+    };
+    img.onerror = () => resolve(Shot.dataUrl);
+    img.src = Shot.dataUrl;
+  });
+}
+
+function dataUrlToFile(dataUrl, name) {
+  const [head, b64] = dataUrl.split(',');
+  const mime = (head.match(/data:([^;]+)/) || [])[1] || 'image/png';
+  const bin = atob(b64 || '');
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new File([arr], name, { type: mime });
+}
+
+async function confirmShot() {
+  if (!Shot.dataUrl) return;
+  Shot.selId = null; // 选中框不该进图
+  const out = await renderShot();
+  const file = dataUrlToFile(out, 'screenshot-' + Date.now() + '.png');
+  closeShot();
+  await uploadFiles([file]);
+}
+
+// ── 过程视图（思考/工具/输出，不进入最终消息） ──
+function appendProcess(kind, text) {
+  const log = $('processLog');
+  const div = document.createElement('div');
+  div.className = 'plog ' + kind;
+  const tag = kind === 'thinking' ? '💭' : kind === 'tool' ? '🔧' : '·';
+  div.innerHTML = `<span class="tag">${tag}</span>${escapeHtml(text)}`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  while (log.children.length > 600) log.removeChild(log.firstChild);
+}
+
+// ── 全过程（Trace）：AI 干活的完整时间线 + 耗时统计 ──
+// 数据源 GET /api/session/trace（live 轨迹 + claude 原生 jsonl 合并），详见 data.md
+const Trace = { data: null, kinds: new Set(), raw: false, sid: '', stale: true, loading: null };
+
+// 拉取当前会话轨迹（带缓存；有新事件或换会话时失效）
+async function ensureTrace(force) {
+  if (Trace.sid !== State.sessionId) {
+    Trace.data = null;
+    Trace.sid = State.sessionId;
+    Trace.stale = true;
+  }
+  if (Trace.data && !Trace.stale && !force) return Trace.data;
+  if (Trace.loading) return Trace.loading;
+  const q = '/api/session/trace?id=' + encodeURIComponent(State.sessionId) + (Trace.raw ? '&raw=1' : '');
+  Trace.loading = api(q)
+    .then((d) => {
+      Trace.data = d;
+      Trace.stale = false;
+      return d;
+    })
+    .finally(() => {
+      Trace.loading = null;
+    });
+  return Trace.loading;
+}
+
+// ── 单条消息的「过程细节」：把该轮的轨迹事件内联展开在消息下方 ──
+// 归属规则：事件时间落在 (上一条消息时间, 本条消息时间] 区间内 = 属于这一轮
+function buildMsgWindows(messages) {
+  const map = new Map();
+  let prev = 0;
+  for (const m of messages) {
+    if (!m || !m.createdAt) continue;
+    if (m.role !== 'user' && m.id) map.set(m.id, { from: prev, to: m.createdAt });
+    prev = m.createdAt;
+  }
+  return map;
+}
+
+function traceEventsIn(win) {
+  if (!Trace.data || !win) return [];
+  // 上边界放宽 1.5s：最终回复落库时间略早于 result/task_end 事件
+  return Trace.data.events.filter((e) => e.ts > win.from && e.ts <= win.to + 1500);
+}
+
+async function toggleMsgTrace(msgEl, win, btn) {
+  const exist = msgEl.querySelector(':scope > .tr-inline');
+  if (exist) {
+    exist.remove();
+    btn.classList.remove('on');
+    return;
+  }
+  btn.classList.add('on');
+  const box = document.createElement('div');
+  box.className = 'tr-inline';
+  box.innerHTML = '<div class="tr-inline-empty">' + T('trLoading') + '</div>';
+  msgEl.appendChild(box);
+  try {
+    await ensureTrace();
+  } catch (e) {
+    box.innerHTML = '<div class="tr-inline-empty">' + T('trLoadFail') + escapeHtml(String(e.message || e)) + '</div>';
+    return;
+  }
+  const evs = traceEventsIn(win);
+  box.innerHTML = '';
+  if (!evs.length) {
+    box.innerHTML = '<div class="tr-inline-empty">' + T('trNoData') + '</div>';
+    return;
+  }
+  // 小结条：工具次数 / 工具耗时 / 模型耗时
+  const toolMs = evs.reduce((s, e) => s + (e.durationMs || 0), 0);
+  const span = evs[evs.length - 1].ts - evs[0].ts;
+  const calls = evs.filter((e) => e.kind === 'tool_use').length;
+  const sum = document.createElement('div');
+  sum.className = 'tr-inline-sum';
+  sum.innerHTML = T('trSum')
+    .replace('{span}', fmtMs(span))
+    .replace('{calls}', calls)
+    .replace('{tool}', fmtMs(toolMs))
+    .replace('{model}', fmtMs(Math.max(0, span - toolMs)))
+    .replace('{events}', evs.length);
+  box.appendChild(sum);
+  const slowLine = Math.max(0, ...evs.map((e) => e.durationMs || 0));
+  evs.forEach((e) => box.appendChild(traceEl(e, slowLine)));
+}
+
+// 给一条 AI 消息的头部挂「🔍 过程」按钮
+function attachTraceBtn(div, m) {
+  const win = State.msgWindows?.get(m.id);
+  if (!win) return;
+  const head = div.querySelector('.msg-head');
+  if (!head) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'trace-btn';
+  btn.title = T('trBtnTitle');
+  btn.textContent = '⤢';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleMsgTrace(div, win, btn);
+  });
+  head.appendChild(btn);
+}
+
+
+async function openTrace() {
+  if (!State.sessionId) return;
+  $('trOverlay').hidden = false;
+  $('trList').innerHTML = '<div class="tr-empty">' + T('trLoading') + '</div>';
+  await loadTrace();
+}
+
+function closeTrace() {
+  $('trOverlay').hidden = true;
+}
+
+// ── 会话统计详情（右键 → 统计详情）：对任意会话做「时间花在哪」的细分分析 ──
+// 数据源 GET /api/session/trace-stats（后端 TraceStore 已算好 phases/activeMs/rounds）。
+// 与 trOverlay 不同：这里按传入的 sessionId 取数，不依赖当前打开的会话。
+const Stats = { sid: '', title: '', charts: [], charChart: null };
+// 阶段元数据：key 对应后端 TracePhaseBreakdown 字段，label 走 i18n，color 固定配色
+const STAT_PHASES = [
+  { key: 'ttft', tk: 'phTtft', color: '#f59e0b' },
+  { key: 'think', tk: 'phThink', color: '#8b5cf6' },
+  { key: 'genTool', tk: 'phGenTool', color: '#2563eb' },
+  { key: 'genText', tk: 'phGenText', color: '#06b6d4' },
+  { key: 'toolExec', tk: 'phToolExec', color: '#16a34a' },
+  { key: 'bgTask', tk: 'phBgTask', color: '#ec4899' },
+  { key: 'startup', tk: 'phStartup', color: '#84cc16' },
+  { key: 'idle', tk: 'phIdle', color: '#64748b' },
+  { key: 'other', tk: 'phOther', color: '#94a3b8' },
+];
+
+async function openSessionStats(sessionId, title) {
+  if (!sessionId) return;
+  Stats.sid = sessionId;
+  Stats.title = title || '';
+  $('statsTitle').textContent = '📊 ' + T('statsTitle') + (title ? ' · ' + title : '');
+  $('statsOverlay').hidden = false;
+  await loadSessionStats();
+}
+
+function closeSessionStats() {
+  _disposeStatsCharts();
+  $('statsOverlay').hidden = true;
+  Stats.sid = '';
+}
+
+function _disposeStatsCharts() {
+  Stats.charts.forEach((c) => { try { c.dispose(); } catch { /* ignore */ } });
+  Stats.charts = [];
+  if (Stats.charChart) { try { Stats.charChart.dispose(); } catch { /* ignore */ } }
+  Stats.charChart = null;
+}
+
+async function loadSessionStats() {
+  const body = $('statsBody');
+  body.innerHTML = '<div class="tr-empty">' + T('statsLoading') + '</div>';
+  let s;
+  try {
+    s = await api('/api/session/trace-stats?id=' + encodeURIComponent(Stats.sid));
+  } catch (e) {
+    body.innerHTML = '<div class="tr-empty">' + T('statsFailed') + escapeHtml(String(e.message || e)) + '</div>';
+    return;
+  }
+  renderSessionStats(s);
+}
+
+function renderSessionStats(s) {
+  _disposeStatsCharts();
+  const body = $('statsBody');
+  if (!s || !s.events) {
+    body.innerHTML = '<div class="tr-empty">' + T('statsEmpty') + '</div>';
+    return;
+  }
+  // 后端尚未重启（老进程无 phases 字段）时优雅降级，避免整页 JS 崩
+  if (!s.phases) {
+    body.innerHTML = '<div class="tr-empty">' + T('statsNeedRestart') + '</div>';
+    return;
+  }
+  // 汇总条
+  const cost = s.usage && s.usage.costUsd ? `<span>${T('statsCost')} <b>$${s.usage.costUsd.toFixed(4)}</b></span>` : '';
+  const summary =
+    `<div class="st-sum">
+       <span>${T('statsSpan')} <b>${fmtMs(s.spanMs)}</b></span>
+       <span>${T('statsActive')} <b>${fmtMs(s.activeMs)}</b></span>
+       <span>${T('statsIdle')} <b>${fmtMs(s.phases.idle)}</b></span>
+       <span>${T('statsRounds')} <b>${s.rounds}</b></span>
+       <span>${T('statsEvents')} <b>${s.events}</b></span>
+       <span>token in/out <b>${s.usage.inputTokens}/${s.usage.outputTokens}</b></span>
+       ${cost}
+     </div>`;
+
+  // 阶段细分只看「AI 实际工作时间」如何分配（排除 idle——用户空闲已在汇总条单列）。
+  // 占比按 activeMs 归一，各段之和≈100%。
+  const rows = STAT_PHASES
+    .filter((p) => p.key !== 'idle')
+    .map((p) => ({ p, ms: s.phases[p.key] || 0 }))
+    .filter((r) => r.ms > 0)
+    .sort((a, b) => b.ms - a.ms);
+  const legend = rows
+    .map((r) => {
+      const pct = s.activeMs ? Math.round((r.ms / s.activeMs) * 100) : 0;
+      return `<div class="st-leg-i"><i style="background:${r.p.color}"></i>` +
+        `<span class="st-leg-n">${T(r.p.tk)}</span>` +
+        `<b>${fmtMs(r.ms)}</b><span class="st-leg-p">${pct}%</span></div>`;
+    })
+    .join('');
+
+  // 按任务表（列同样排除 idle：任务内不含用户空闲）
+  const colPhases = STAT_PHASES.filter((p) => p.key !== 'idle');
+  const taskRows = (s.byTask || [])
+    .map((t, i) => {
+      const cells = colPhases.map((p) => {
+        const ms = t.phases[p.key] || 0;
+        return `<td>${ms ? fmtMs(ms) : '·'}</td>`;
+      }).join('');
+      const label = t.taskId === 'native' ? T('trNative') : (T('statsTaskCol') + ' ' + (i + 1));
+      return `<tr><td class="st-tk">${escapeHtml(label)}</td><td><b>${fmtMs(t.totalMs)}</b></td>${cells}</tr>`;
+    })
+    .join('');
+  const taskHead = colPhases.map((p) => `<th>${T(p.tk)}</th>`).join('');
+  const taskTable = (s.byTask && s.byTask.length)
+    ? `<div class="st-h">${T('statsByTaskTitle')}</div>
+       <div class="st-tblwrap"><table class="st-tbl">
+         <thead><tr><th>${T('statsTaskCol')}</th><th>${T('statsSpan')}</th>${taskHead}</tr></thead>
+         <tbody>${taskRows}</tbody>
+       </table></div>`
+    : '';
+
+  // 最慢工具调用
+  const slow = (s.slowest || [])
+    .filter((x) => x.ms > 0)
+    .map((x) => `<div class="st-slow-i"><b>${fmtMs(x.ms)}</b><span class="st-slow-n">${escapeHtml(x.name)}</span>` +
+      `<span class="st-slow-b">${escapeHtml(String(x.brief || '').replace(/\s+/g, ' ').slice(0, 120))}</span></div>`)
+    .join('');
+  const slowBlock = slow ? `<div class="st-h">${T('statsSlowTitle')}</div><div class="st-slow">${slow}</div>` : '';
+
+  // 次数/数量统计块
+  const c = s.counts || {};
+  const kchips = [
+    ['cTasks', c.tasks], ['cTurns', c.turns], ['cToolUses', c.toolUses], ['cToolErrors', c.toolErrors],
+    ['cBgTasks', c.bgTasks], ['cRetries', c.retries], ['cTextBlocks', c.textBlocks], ['cThinkingBlocks', c.thinkingBlocks],
+  ]
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<span class="st-kc"><b>${v}</b>${T(k)}</span>`)
+    .join('');
+  const kchars = [
+    ['cTextChars', c.textChars], ['cThinkingChars', c.thinkingChars], ['cToolOutputChars', c.toolOutputChars],
+  ]
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<span class="st-kc"><b>${fmtNum(v)}</b>${T(k)}</span>`)
+    .join('');
+  const countsBlock = (kchips || kchars)
+    ? `<div class="st-h">${T('statsCountsTitle')}</div><div class="st-counts">${kchips}${kchars}</div>`
+    : '';
+  const charBlock = `<div class="st-char-head"><div class="st-h">${T('statsCharsTitle')}</div>` +
+    `<div class="st-char-controls"><span>${T('statsCharsInterval')}</span>` +
+    [1, 2, 5].map((minutes) => `<button type="button" class="st-char-btn${minutes === 1 ? ' active' : ''}" data-minutes="${minutes}">${minutes}m</button>`).join('') +
+    `</div></div><div class="st-char-chart" id="statsCharChart"></div>`;
+
+  body.innerHTML =
+    charBlock +
+    summary +
+    countsBlock +
+    `<div class="st-h">${T('statsPhaseTitle')}</div>` +
+    `<div class="st-chart" id="statsPhaseChart"></div>` +
+    `<div class="st-legend">${legend}</div>` +
+    taskTable +
+    slowBlock +
+    `<div class="st-note">${T('statsNote')}</div>`;
+
+  // ECharts 需要容器有尺寸：入文档后再画
+  body.querySelectorAll('.st-char-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      body.querySelectorAll('.st-char-btn').forEach((item) => item.classList.toggle('active', item === button));
+      _renderCharChart(s, Number(button.dataset.minutes) || 1);
+    });
+  });
+  setTimeout(() => { _renderCharChart(s, 1); _renderPhaseChart(rows); }, 0);
+}
+
+function _renderCharChart(stats, intervalMinutes) {
+  const el = $('statsCharChart');
+  if (Stats.charChart) { try { Stats.charChart.dispose(); } catch { /* ignore */ } Stats.charChart = null; }
+  if (!el || !el.isConnected || typeof echarts === 'undefined') return;
+  const source = Array.isArray(stats.charTimeline) ? stats.charTimeline : [];
+  const size = Math.max(1, intervalMinutes) * 60000;
+  const buckets = new Map();
+  source.forEach((item) => {
+    const startTs = Math.floor(Number(item.startTs) / size) * size;
+    const current = buckets.get(startTs) || { startTs, textChars: 0, thinkingChars: 0 };
+    current.textChars += Number(item.textChars) || 0;
+    current.thinkingChars += Number(item.thinkingChars) || 0;
+    buckets.set(startTs, current);
+  });
+  const rows = [...buckets.values()].sort((a, b) => a.startTs - b.startTs);
+  if (!rows.length) return;
+  const cs = getComputedStyle(document.body);
+  const cText = (cs.getPropertyValue('--text') || '#cbd5e1').trim();
+  const cBorder = (cs.getPropertyValue('--border') || '#475569').trim();
+  const formatTime = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const chart = echarts.init(el);
+  chart.setOption({
+    backgroundColor: 'transparent',
+    grid: { left: 12, right: 18, top: 28, bottom: 28, containLabel: true },
+    legend: { top: 0, textStyle: { color: cText }, data: [T('statsCharsThinking'), T('statsCharsText')] },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, valueFormatter: (value) => fmtNum(value) + ' ' + T('statsCharsUnit') },
+    xAxis: { type: 'category', data: rows.map((row) => formatTime(row.startTs)), axisLabel: { color: cText }, axisLine: { lineStyle: { color: cBorder } } },
+    yAxis: { type: 'value', axisLabel: { color: cText, formatter: (value) => fmtNum(value) }, splitLine: { lineStyle: { color: cBorder, opacity: 0.4 } } },
+    series: [
+      { name: T('statsCharsThinking'), type: 'bar', stack: 'chars', data: rows.map((row) => row.thinkingChars), itemStyle: { color: '#8b5cf6' }, barMaxWidth: 42 },
+      { name: T('statsCharsText'), type: 'bar', stack: 'chars', data: rows.map((row) => row.textChars), itemStyle: { color: '#06b6d4' }, barMaxWidth: 42 },
+    ],
+  });
+  Stats.charChart = chart;
+}
+
+// 横向条形图：每个阶段一根条（秒）。跟随明暗主题取色。
+function _renderPhaseChart(rows) {
+  const el = $('statsPhaseChart');
+  if (!el || !el.isConnected || typeof echarts === 'undefined' || !rows.length) return;
+  const cs = getComputedStyle(document.body);
+  const cText = (cs.getPropertyValue('--text') || '#cbd5e1').trim();
+  const cBorder = (cs.getPropertyValue('--border') || '#475569').trim();
+  const ordered = [...rows].reverse(); // ECharts y 轴从下往上，反转后最大在顶
+  const ch = echarts.init(el);
+  ch.setOption({
+    backgroundColor: 'transparent',
+    grid: { left: 8, right: 48, top: 8, bottom: 8, containLabel: true },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      valueFormatter: (v) => (v / 1000).toFixed(1) + 's' },
+    xAxis: { type: 'value', axisLabel: { color: cText, formatter: (v) => (v / 1000).toFixed(0) + 's' },
+      splitLine: { lineStyle: { color: cBorder, opacity: 0.4 } } },
+    yAxis: { type: 'category', data: ordered.map((r) => T(r.p.tk)),
+      axisLabel: { color: cText }, axisLine: { lineStyle: { color: cBorder } } },
+    series: [{
+      type: 'bar', data: ordered.map((r) => ({ value: r.ms, itemStyle: { color: r.p.color } })),
+      barMaxWidth: 22, label: { show: true, position: 'right', color: cText,
+        formatter: (o) => (o.value / 1000).toFixed(1) + 's' },
+    }],
+  });
+  Stats.charts.push(ch);
+}
+
+async function loadTrace() {
+  try {
+    await ensureTrace(true);
+  } catch (e) {
+    $('trList').innerHTML = '<div class="tr-empty">' + T('trLoadFail') + escapeHtml(String(e.message || e)) + '</div>';
+    return;
+  }
+  renderTrace();
+}
+
+// 执行中轨迹事件很密集，抽屉打开时按 1.2s 节流刷新，避免频繁重绘
+let traceReloadTimer = null;
+function scheduleTraceReload() {
+  if (traceReloadTimer) return;
+  traceReloadTimer = setTimeout(() => {
+    traceReloadTimer = null;
+    if (!$('trOverlay').hidden) loadTrace();
+  }, 1200);
+}
+
+function fmtNum(n) {
+  n = Number(n) || 0;
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 10000) return Math.round(n / 1000) + 'k';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+function fmtMs(ms) {
+  if (ms === undefined || ms === null) return '';
+  if (ms < 1000) return ms + 'ms';
+  if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+  return Math.floor(ms / 60000) + 'm' + Math.round((ms % 60000) / 1000) + 's';
+}
+
+function renderTrace() {
+  const d = Trace.data;
+  if (!d) return;
+  const s = d.stats;
+  const pctTool = s.spanMs ? Math.round((s.toolMs / s.spanMs) * 100) : 0;
+  const tools = s.byTool
+    .map((t) => T('trToolLine')
+      .replace('{name}', escapeHtml(t.name))
+      .replace('{count}', t.count)
+      .replace('{total}', fmtMs(t.totalMs))
+      .replace('{avg}', fmtMs(t.avgMs)))
+    .join(' · ');
+  $('trStats').innerHTML =
+    `<div class="tr-row">
+       <span>${T('trStatEvents').replace('{n}', s.events).replace('{live}', d.liveCount).replace('{jsonl}', d.jsonlCount)}</span>
+       <span>${T('trStatSpan').replace('{v}', fmtMs(s.spanMs))}</span>
+       <span>${T('trStatTool').replace('{v}', fmtMs(s.toolMs)).replace('{pct}', pctTool).replace('{calls}', s.toolCalls)}</span>
+       <span>${T('trStatModel').replace('{v}', fmtMs(s.modelMs)).replace('{pct}', 100 - pctTool)}</span>
+       <span>${T('trStatTokens').replace('{in}', s.usage.inputTokens).replace('{out}', s.usage.outputTokens).replace('{cache}', s.usage.cacheReadTokens)}</span>
+       ${s.usage.costUsd ? `<span>${T('trStatCost').replace('{v}', s.usage.costUsd.toFixed(4))}</span>` : ''}
+     </div>
+     <div class="tr-bar"><i class="tool" style="width:${pctTool}%"></i><i class="model" style="width:${100 - pctTool}%"></i></div>
+     <div class="tr-tools">${tools || T('trNoTools')}</div>`;
+
+  // 种类过滤 chips
+  const counts = {};
+  d.events.forEach((e) => (counts[e.kind] = (counts[e.kind] || 0) + 1));
+  $('trFilters').innerHTML = Object.keys(counts)
+    .map(
+      (k) =>
+        `<button class="tr-chip${Trace.kinds.size === 0 || Trace.kinds.has(k) ? ' on' : ''}" data-kind="${k}">${k} ${counts[k]}</button>`,
+    )
+    .join('');
+  $('trFilters').querySelectorAll('.tr-chip').forEach((b) =>
+    b.addEventListener('click', () => {
+      const k = b.dataset.kind;
+      if (Trace.kinds.has(k)) Trace.kinds.delete(k);
+      else Trace.kinds.add(k);
+      renderTrace();
+    }),
+  );
+
+  const slowLine = s.slowest.length ? s.slowest[0].ms : 0;
+  const list = $('trList');
+  list.innerHTML = '';
+  const shown = d.events.filter((e) => Trace.kinds.size === 0 || Trace.kinds.has(e.kind));
+  if (!shown.length) {
+    list.innerHTML = '<div class="tr-empty">' + T('trNoEvents') + '</div>';
+    return;
+  }
+  for (const e of shown) list.appendChild(traceEl(e, slowLine));
+}
+
+function traceEl(e, slowLine) {
+  const el = document.createElement('details');
+  el.className = 'tr-ev k-' + e.kind;
+  const t = new Date(e.ts).toTimeString().slice(0, 8);
+  const brief =
+    e.kind === 'tool_use'
+      ? `${e.name} ${JSON.stringify(e.input || {})}`
+      : e.kind === 'tool_result'
+        ? e.output || ''
+        : e.text || e.name || '';
+  const ms = e.durationMs !== undefined ? e.durationMs : e.gapMs;
+  const slow = e.durationMs !== undefined && slowLine && e.durationMs >= slowLine * 0.5;
+  const sum = document.createElement('summary');
+  sum.innerHTML =
+    `<span class="tr-t">${t}</span>` +
+    `<span class="tr-k">${escapeHtml(e.kind === 'tool_use' ? e.name || 'tool' : e.kind)}</span>` +
+    `<span class="tr-b">${escapeHtml(String(brief).replace(/\s+/g, ' ').slice(0, 200))}</span>` +
+    `<span class="tr-ms${slow ? ' slow' : ''}">${e.durationMs !== undefined ? '⏱' : '·'}${fmtMs(ms)}</span>`;
+  el.appendChild(sum);
+  const pre = document.createElement('pre');
+  const parts = [];
+  if (e.text) parts.push(e.text);
+  if (e.input !== undefined) parts.push(T('trInput') + '\n' + JSON.stringify(e.input, null, 2));
+  if (e.output) parts.push(T('trOutput') + '\n' + e.output);
+  if (e.usage) parts.push('usage: ' + JSON.stringify(e.usage));
+  if (e.raw !== undefined) parts.push('raw:\n' + JSON.stringify(e.raw, null, 2));
+  pre.textContent = parts.join('\n\n') || T('trNoDetail');
+  el.appendChild(pre);
+  return el;
+}
+
+// ── 快捷前缀标签 ──
+// 分组由用户在「系统设置」里自定义（后端 settings.quickGroups）。
+// 规则：同一组内互斥（单选，再点同一个=取消）；组与组之间独立（可各选一个）。
+// 选择按会话持久化（localStorage）。热键 Ctrl+1..9 按标签的整体先后顺序对应。
+const QUICK_LS_KEY = 'hubQuickTag';
+const Quick = { map: {} }; // sessionId -> { 组名: 标签 }
+
+function quickGroups() {
+  const g = State.settings.quickGroups;
+  return Array.isArray(g) ? g : [];
+}
+// 扁平顺序（用于 Ctrl+数字 热键）：[{group, label}, ...]
+function quickFlat() {
+  const out = [];
+  quickGroups().forEach((g) => (g.tags || []).forEach((t) => out.push({ group: g.name, label: t.label, prompt: t.prompt || '' })));
+  return out;
+}
+function quickLoad() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(QUICK_LS_KEY) || '{}');
+    Quick.map = raw && typeof raw === 'object' ? raw : {};
+  } catch (e) {
+    Quick.map = {};
+  }
+}
+function quickSave() {
+  try {
+    localStorage.setItem(QUICK_LS_KEY, JSON.stringify(Quick.map));
+  } catch (e) {
+    /* 存储不可用时忽略，仅本次会话内生效 */
+  }
+}
+function quickKey() {
+  return State.sessionId || '__none__';
+}
+// 会话 id 发生「草稿 → 真实」置换时（收藏夹草稿绑定根目录后换发真实 sessionId），
+// 把草稿 id 下已选的标签迁移到新 id，否则选中态会静默丢失（按钮仍显示选中，但下次发送已经取不到）。
+function quickCarryKey(oldKey, newKey) {
+  const from = oldKey || '__none__';
+  const to = newKey || '__none__';
+  if (from === to) return;
+  const sel = Quick.map[from];
+  if (!sel) return;
+  delete Quick.map[from];
+  Quick.map[to] = sel;
+  quickSave();
+}
+function quickSel() {
+  const s = Quick.map[quickKey()];
+  return s && typeof s === 'object' ? s : {};
+}
+// 点击/热键：同组内切换。已选中同一个 → 取消
+function setQuick(group, label) {
+  const key = quickKey();
+  const sel = { ...quickSel() };
+  if (sel[group] === label) delete sel[group];
+  else sel[group] = label;
+  if (Object.keys(sel).length) Quick.map[key] = sel;
+  else delete Quick.map[key];
+  quickSave();
+  renderQuick();
+}
+function renderQuick() {
+  const bar = $('quickBar');
+  if (!bar) return;
+  const groups = quickGroups();
+  const sel = quickSel();
+  const flat = quickFlat();
+  bar.innerHTML = '';
+  bar.hidden = groups.length === 0;
+  flat.forEach((f, idx) => {
+    const b = document.createElement('button');
+    b.className = 'quick-tag' + (sel[f.group] === f.label ? ' on' : '');
+    b.textContent = f.label;
+    const hint = (f.prompt || '').trim();
+    const key = idx < 9 ? 'Ctrl+' + (idx + 1) : '';
+    b.title = [key, hint].filter(Boolean).join('　') || f.label;
+    b.addEventListener('click', () => setQuick(f.group, f.label));
+    bar.appendChild(b);
+  });
+}
+// 选中按钮实际插入的一段文字：纯前端字符串拼接，始终是 [按钮文字]，与是否配置了「含义」无关。
+// 含义/提示词只用于写入项目 CLAUDE.md/AGENTS.md（见后端 QuickTagPrompt），不出现在消息正文里。
+function quickTagText(tag) {
+  return '[' + tag.label + ']';
+}
+// 发送前给正文加上前缀（按组顺序拼接每个已选按钮的 [标签]；未选中则原样返回）
+function applyQuickPrefix(text) {
+  const sel = quickSel();
+  const parts = [];
+  quickGroups().forEach((g) => {
+    const tag = (g.tags || []).find((t) => t.label === sel[g.name]);
+    if (tag) parts.push(quickTagText(tag));
+  });
+  return parts.length ? parts.join(' ') + ' ' + text : text;
+}
+
+// ── 任务操作 ──
+// 无当前会话时按当前模式自动创建一个可用会话（新根目录、之前无会话、用户直接在输入框提交 = 自动开新会话）。
+// 成功并有可用 sessionId 返回 true；需要用户先做选择（选目录/选根目录）则给出提示并返回 false。
+async function ensureSession() {
+  if (State.sessionId) {
+    if (!isFavoriteDraftId(State.sessionId)) return State.session?.id === State.sessionId;
+    // 发消息/上传即认可选择器中的目录；显式清空时不能回退到其他目录。
+    const rootId = State.roots.length === 1 ? State.roots[0].id
+      : State.session?.pendingRootId ?? State.session?.preferredRootId ?? '';
+    if (!rootId || !State.roots.some((r) => r.id === rootId)) {
+      requestRootSelection();
+      return false;
+    }
+    const boundId = await bindFavoriteDraftRoot(rootId);
+    return !!boundId && State.sessionId === boundId && State.session?.id === boundId;
+  }
+  // 收藏夹视图：创建一个待绑定根目录的草稿会话（后续仍需绑定根目录才能发任务）。
+  if (State.favoritesOnly) {
+    // 当前操作已表示确认：预选目录后继续绑定，无须再点一次发送/上传。
+    createFavoriteDraftSession(favFilterRootId());
+    return ensureSession();
+  }
+  // 工作台模式：必须先选工作目录，无法静默创建，走原有目录选择流程。
+  if (isWorkspace()) {
+    openWsDir();
+    return false;
+  }
+  // 经典模式：已选根目录即可直接创建真实会话。
+  if (!selectOnlyRoot()) {
+    requestRootSelection();
+    return false;
+  }
+  const selection = sessionSelectionVersion;
+  const s = await api('/api/session/create', {
+    rootId: State.rootId,
+    name: '',
+    engine: State.settings.defaultEngine,
+  });
+  if (selection !== sessionSelectionVersion) return false;
+  await selectSession(s.id);
+  await loadSessions();
+  return State.sessionId === s.id && State.session?.id === s.id;
+}
+// 所有会话一视同仁（都是真实 claude 会话），直接对当前会话发任务即可。
+async function addTask() {
+  const ta = $('taskInput');
+  const files = attachPaths();
+  const text = ta.value.trim();
+  // 附件路径在发送这一刻才拼进正文（输入体验上它只是输入框上方的卡片）
+  const raw = [text, files.join(' ')].filter(Boolean).join(text ? ' ' : '');
+  if (!raw) return;
+  const initialSelection = sessionSelectionVersion;
+  const initialId = State.sessionId;
+  if (!(await ensureSession())) return;
+  if (initialId && !isFavoriteDraftId(initialId) && initialSelection !== sessionSelectionVersion) return;
+  const selection = sessionSelectionVersion;
+  const target = State.sessionId;
+  if (!(await SessionLimitUi.prepare(1)) || selection !== sessionSelectionVersion) return;
+  if (!(await PromptCacheUi.ensure()) || selection !== sessionSelectionVersion) return;
+  const prepared = await CostUi.prepare([applyQuickPrefix(applySlashPrefix(raw))]);
+  if (!prepared || selection !== sessionSelectionVersion || State.sessionId !== target) return;
+  if (prepared.sessionId !== target) {
+    await loadSessions();
+    if (selection !== sessionSelectionVersion) return;
+    await selectSession(prepared.sessionId);
+    if (State.sessionId !== prepared.sessionId || State.session?.id !== prepared.sessionId) return;
+  }
+  if (ta.value.trim() !== text || files.join(' ') !== attachPaths().join(' ')) return;
+  ta.value = '';
+  const keepAttach = Attach.items.slice();
+  Attach.items = [];
+  renderAttachBar();
+  clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
+  try {
+    await api('/api/task/add', prepared);
+    clearSlashPrefix(); // 单次使用：发送成功后自动摘掉标记
+    for (const a of keepAttach) if (a.url) URL.revokeObjectURL(a.url);
+  } catch (e) {
+    if (State.sessionId === prepared.sessionId && !ta.value && !Attach.items.length) {
+      ta.value = text;
+      Attach.items = keepAttach;
+      renderAttachBar();
+    }
+    SessionLimitUi.refresh();
+    if ((e.message || '').includes('session_message_limit_reached')) SessionLimitUi.showFeedback(T('sessionLimitBatch').replace('{remaining}', '0'));
+    else alert(e.message || 'Submit failed');
+  }
+}
+// ── 批量任务弹窗 ──
+function parseTaskLines() {
+  return $('tasksInput').value
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+function updateTasksCount() {
+  const n = parseTaskLines().length;
+  $('tasksCount').textContent = `${n} ${T('tasksCountN')}`;
+  $('tasksSubmit').disabled = n === 0;
+}
+function openTasksModal() {
+  if (!State.sessionId) {
+    alert(T('selectRootFirst'));
+    return;
+  }
+  $('tasksInput').value = '';
+  updateTasksCount();
+  $('tasksOverlay').hidden = false;
+  setTimeout(() => $('tasksInput').focus(), 50);
+}
+function closeTasksModal() {
+  $('tasksOverlay').hidden = true;
+}
+async function submitTasks() {
+  const prompts = parseTaskLines();
+  if (prompts.length === 0 || !State.sessionId) return;
+  const initialSelection = sessionSelectionVersion;
+  const initialId = State.sessionId;
+  if (!(await ensureSession())) return;
+  if (initialId && !isFavoriteDraftId(initialId) && initialSelection !== sessionSelectionVersion) return;
+  const selection = sessionSelectionVersion;
+  const target = State.sessionId;
+  clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
+  if (!(await SessionLimitUi.prepare(prompts.length)) || selection !== sessionSelectionVersion) return;
+  if (!(await PromptCacheUi.ensure()) || selection !== sessionSelectionVersion) return;
+  const prepared = await CostUi.prepare(prompts.map(applyQuickPrefix));
+  if (!prepared || selection !== sessionSelectionVersion || State.sessionId !== target) return;
+  if (prepared.sessionId !== target) {
+    await loadSessions();
+    if (selection !== sessionSelectionVersion) return;
+    await selectSession(prepared.sessionId);
+    if (State.sessionId !== prepared.sessionId || State.session?.id !== prepared.sessionId) return;
+  }
+  await api('/api/task/add', prepared);
+  closeTasksModal();
+}
+
+async function stopTask() {
+  if (!State.sessionId) return;
+  const tasks = State.session?.tasks || [];
+  const paused = !!State.session?.paused;
+  // 后续仍在排队（未暂定）的任务数量
+  const pending = tasks.filter((t) => t.status === 'pending' && !t.held).length;
+  // 已处于暂停态，或没有后续排队任务 → 直接停止当前任务，无需二选一
+  if (paused || pending === 0) {
+    await api('/api/task/stop', { sessionId: State.sessionId });
+    return;
+  }
+  // 有后续排队任务：询问「暂停整个序列」还是「停止当前、开始下一个」
+  openStopChoice();
+}
+function openStopChoice() {
+  $('stopChoiceOverlay').hidden = false;
+}
+function closeStopChoice() {
+  $('stopChoiceOverlay').hidden = true;
+}
+// 暂停整个任务序列：停止当前 + 冻结后续（新消息将作为补充越过暂停执行）
+async function stopChoicePause() {
+  closeStopChoice();
+  if (!State.sessionId) return;
+  await api('/api/flow/pause', { sessionId: State.sessionId });
+}
+// 停止当前任务，继续下一个
+async function stopChoiceNext() {
+  closeStopChoice();
+  if (!State.sessionId) return;
+  await api('/api/task/stop', { sessionId: State.sessionId });
+}
+async function togglePause() {
+  if (!State.session) return;
+  const path = State.session.paused ? '/api/flow/resume' : '/api/flow/pause';
+  await api(path, { sessionId: State.sessionId });
+}
+function refreshPauseBtn() {
+  const paused = State.session?.paused;
+  $('pausedBadge').style.display = paused ? '' : 'none';
+  $('pausedBadge').textContent = T('paused');
+  refreshComposerControls();
+}
+// 输入区控件随运行/暂停态刷新：
+// - 停止按钮：仅有任务运行时显示；
+// - 继续任务流按钮 + 暂停说明：仅暂停整条序列时显示；
+// - 提交按钮/输入框文案：暂停时改为「补充并执行」语义。
+function refreshComposerControls() {
+  const running = isSessionRunning();
+  const paused = !!State.session?.paused;
+  $('stopBtn').style.display = running ? '' : 'none';
+  const pauseBtn = $('pauseBtn');
+  pauseBtn.style.display = paused ? '' : 'none';
+  pauseBtn.textContent = T('resumeFlow');
+  pauseBtn.className = 'primary sm';
+  $('addTaskBtn').textContent = paused ? T('supplementSubmit') : T('addTask');
+  $('taskInput').placeholder = paused ? T('supplementPlaceholder') : T('inputPlaceholder');
+  $('pauseHint').style.display = paused ? '' : 'none';
+}
+
+// ── 引擎安装进度 ──
+// 后端把 npm 输出逐行广播过来（kind='engineInstall'）；谁在装谁订阅（引导页 / 设置页）。
+// 引擎包有几百 MB，没有进度显示会被当成卡死。
+const EngineInstall = {
+  handler: null,
+  emit(line) { if (this.handler) this.handler(line); },
+  watch(fn) { this.handler = fn; },
+  stop() { this.handler = null; },
+};
+
+// 在 el 里显示「提示语 + 已用时 + npm 最近输出」，返回停止函数
+function startEngineInstallProgress(el, headText) {
+  const lines = [T('engInstWaiting')];
+  const t0 = Date.now();
+  const render = () => {
+    const secs = Math.floor((Date.now() - t0) / 1000);
+    el.textContent = `${headText}（${T('engInstElapsed').replace('{s}', secs)}）\n${lines.join('\n')}`;
+    el.scrollTop = el.scrollHeight;
+  };
+  EngineInstall.watch((line) => {
+    if (lines.length === 1 && lines[0] === T('engInstWaiting')) lines.length = 0;
+    lines.push(String(line).slice(0, 500));
+    if (lines.length > 40) lines.splice(0, lines.length - 40);
+    render();
+  });
+  const timer = setInterval(render, 1000);
+  render();
+  return () => { clearInterval(timer); EngineInstall.stop(); };
+}
+
+// ── 软件本身的版本更新（对比本地 git HEAD 与 GitHub 最新 commit）──
+// 后端把 git pull 的输出逐行广播过来（kind='updateApply'），设置面板订阅显示进度。
+const UpdateApplyLog = {
+  handler: null,
+  emit(line) { if (this.handler) this.handler(line); },
+  watch(fn) { this.handler = fn; },
+  stop() { this.handler = null; },
+};
+
+// 每次启动静默检测一次：不打断使用，有更新就在齿轮按钮上点一个红点，
+// 具体信息留给用户自己点进「软件更新」板块查看
+async function checkAppUpdateSilently() {
+  try {
+    State.updateInfo = await api(`/api/update/check?lang=${encodeURIComponent(LANG)}`);
+  } catch {
+    State.updateInfo = null; // 静默失败；手动点「检查更新」时会看到具体错误
+  }
+  renderUpdateDot();
+  UpdateModal.maybeOpen(State.updateInfo);
+}
+
+function renderUpdateDot() {
+  const dot = $('settingsUpdateDot');
+  if (dot) dot.hidden = !(State.updateInfo && State.updateInfo.hasUpdate);
+}
+
+function fillUpdatePane() {
+  $('appUpdNote').textContent = T('paneUpdateDesc');
+  $('appUpdCheckBtn').textContent = T('updateCheckBtn');
+  $('appUpdApplyBtn').textContent = T('updateApplyBtn');
+  $('appUpdApplyBtn').disabled = false;
+  $('appUpdStatus').hidden = true;
+  if (State.updateInfo) renderUpdateInfo(State.updateInfo);
+  else $('appUpdInfo').hidden = true;
+}
+
+function formatUpdateCommit(c) {
+  const d = c.date ? new Date(c.date).toLocaleString() : '';
+  return `${c.short || (c.sha || '').slice(0, 7)}  ${c.message}${d ? `  (${d})` : ''}`;
+}
+
+function renderUpdateInfo(u) {
+  const info = $('appUpdInfo');
+  info.hidden = false;
+  info.className = `sx-note sx-pre${u.hasUpdate || !u.manifestOk ? '' : ' ok'}`;
+  // 结论只看版本号（清单）。commit 只是附注：让用户知道本地代码和远端差了什么，
+  // 但「已是最新版本」时不会因为本地有未推送的提交就冒出「拉取更新并重启」。
+  const lines = [];
+  if (u.manifestOk) {
+    lines.push(
+      `${T('updateCurrentLabel')}: ${u.currentVersion}`,
+      `${T('updateLatestLabel')}: ${u.latestVersion}`,
+      '',
+      u.hasUpdate ? T('updateAvailableHint') : T('updateUpToDateHint'),
+    );
+    if (u.hasUpdate && u.notes) lines.push('', u.notes);
+  } else {
+    lines.push(`${T('updateCurrentLabel')}: ${u.currentVersion}`, '', T('updateManifestUnavailable'));
+  }
+  if (u.commitDiffers) {
+    lines.push('', T('updateCommitNote')
+      .replace('{local}', u.current.short || '')
+      .replace('{remote}', u.latest.short || ''));
+  }
+  info.textContent = lines.join('\n');
+  $('appUpdApplyRow').hidden = !u.hasUpdate;
+}
+
+async function checkAppUpdate() {
+  const info = $('appUpdInfo');
+  info.hidden = false;
+  info.className = 'sx-note sx-pre';
+  info.textContent = T('updateCheckingNow');
+  $('appUpdApplyRow').hidden = true;
+  try {
+    State.updateInfo = await api(`/api/update/check?lang=${encodeURIComponent(LANG)}`);
+    renderUpdateInfo(State.updateInfo);
+    renderUpdateDot();
+    renderSettingsNav(); // 板块列表里的摘要文字（有新版本/已是最新）跟着刷新
+  } catch (e) {
+    info.className = 'sx-note sx-pre err';
+    info.textContent = T('updateCheckFail').replace('{err}', e.message);
+  }
+}
+
+// 拉取 + 重启的实际流程。设置面板和启动弹窗共用一套，只是把日志写进各自的框。
+// onFail 用于失败后解禁发起按钮——两处的按钮不是同一个，交给调用方处理。
+function confirmAppUpdateOverwrite() {
+  const modal = $('updateConflictModal');
+  $('updConflictTitle').textContent = T('updateConflictTitle');
+  $('updConflictNote').textContent = T('updateConflictNote');
+  $('updConflictCancel').textContent = T('updateConflictCancel');
+  $('updConflictForce').textContent = T('updateConflictForce');
+  return new Promise((resolve) => {
+    const finish = (force) => {
+      $('updConflictCancel').removeEventListener('click', cancel);
+      $('updConflictForce').removeEventListener('click', accept);
+      modal.removeEventListener('cancel', escape);
+      modal.removeEventListener('close', closed);
+      modal.close();
+      resolve(force);
+    };
+    const cancel = () => finish(false);
+    const accept = () => finish(true);
+    const escape = (event) => { event.preventDefault(); finish(false); };
+    const closed = () => { if (!modal.open) finish(false); };
+    $('updConflictCancel').addEventListener('click', cancel);
+    $('updConflictForce').addEventListener('click', accept);
+    modal.addEventListener('cancel', escape);
+    modal.addEventListener('close', closed);
+    modal.showModal();
+    $('updConflictCancel').focus();
+  });
+}
+
+async function runAppUpdate(box, onFail) {
+  box.hidden = false;
+  box.className = 'sx-note sx-pre';
+  const lines = [T('updateApplying')];
+  const render = () => { box.textContent = lines.join('\n'); box.scrollTop = box.scrollHeight; };
+  UpdateApplyLog.watch((line) => {
+    lines.push(String(line).slice(0, 500));
+    if (lines.length > 40) lines.splice(0, lines.length - 40);
+    render();
+  });
+  render();
+  try {
+    const before = await api('/api/auth/check');
+    let force = false;
+    for (;;) {
+      const result = await api('/api/update/apply', { force });
+      if (!result.requiresConfirmation) {
+        if (!result.ok) throw new Error(result.output);
+        break;
+      }
+      if (force) throw new Error(result.output);
+      if (!(await confirmAppUpdateOverwrite())) {
+        UpdateApplyLog.stop();
+        lines.push(T('updateCancelled'));
+        render();
+        if (onFail) onFail();
+        if (box.id === 'updModalLog') $('updateModal').hidden = true;
+        return;
+      }
+      force = true;
+    }
+    UpdateApplyLog.stop();
+    box.className = 'sx-note sx-pre ok';
+    lines.push(T('updateApplyDone'));
+    render();
+    waitForAppRestart(box, before.instance, onFail);
+  } catch (e) {
+    UpdateApplyLog.stop();
+    if (onFail) onFail();
+    box.className = 'sx-note sx-pre err';
+    lines.push(T('updateApplyFail').replace('{err}', e.message));
+    render();
+  }
+}
+
+async function applyAppUpdate() {
+  if (!confirm(T('updateConfirm'))) return;
+  $('appUpdApplyBtn').disabled = true;
+  await runAppUpdate($('appUpdStatus'), () => { $('appUpdApplyBtn').disabled = false; });
+}
+
+// ── 启动时的新版本弹窗 ──
+// 强制更新（后端 mandatory=true）：没有 ✕、没有「稍后」，Escape 和点背景都关不掉，只能更新。
+// 可选更新：可以「稍后再说」，同一版本号本机不再打扰；清单里版本号一变会重新弹。
+const UpdateModal = {
+  SKIP_KEY: 'updateSkipVersion',
+  forced: false,
+
+  // hasUpdate 只由 version.json 的版本号得出（清单读不到即为 false），所以到这里
+  // 一定是「清单说有更高版本」，不会再出现「2.1.0 → 2.1.0」这种无意义的弹窗。
+  maybeOpen(u) {
+    if (!u || !u.hasUpdate) return;
+    if (!u.mandatory && localStorage.getItem(this.SKIP_KEY) === String(u.latestVersion)) return;
+    this.open(u);
+  },
+
+  open(u) {
+    this.forced = !!u.mandatory;
+    $('updModalTitle').textContent = this.forced ? T('updateModalTitleForced') : T('updateModalTitle');
+    $('updModalVer').textContent = T('updateModalVersions')
+      .replace('{from}', u.currentVersion || '?')
+      .replace('{to}', u.latestVersion || '?');
+    const notes = $('updModalNotes');
+    notes.hidden = !u.notes;
+    notes.textContent = u.notes || '';
+    $('updModalHint').textContent = this.forced ? T('updateModalForcedHint') : T('updateModalOptionalHint');
+    const link = $('updModalLink');
+    link.href = u.repoUrl || '#';
+    link.textContent = T('updateViewChanges');
+    link.hidden = !u.repoUrl;
+    $('updModalLog').hidden = true;
+    $('updModalNow').textContent = T('updateModalNow');
+    $('updModalNow').disabled = false;
+    $('updModalLater').textContent = T('updateModalLater');
+    $('updModalLater').hidden = this.forced;
+    $('updModalX').hidden = this.forced;
+    $('updateModal').hidden = false;
+  },
+
+  // 「关不掉」的唯一实现点：强制更新时这里直接返回，其余关闭入口都走这个方法
+  close() {
+    if (this.forced) return;
+    $('updateModal').hidden = true;
+  },
+
+  later() {
+    if (this.forced) return;
+    if (State.updateInfo && State.updateInfo.latestVersion) {
+      localStorage.setItem(this.SKIP_KEY, String(State.updateInfo.latestVersion));
+    }
+    this.close();
+  },
+
+  async now() {
+    $('updModalNow').disabled = true;
+    $('updModalLater').hidden = true;
+    await runAppUpdate($('updModalLog'), () => {
+      $('updModalNow').disabled = false;
+      $('updModalLater').hidden = this.forced;
+    });
+  },
+};
+
+// 重启期间服务会短暂下线：每 3 秒探一次登录态，探通即说明新版本已跑起来，刷新页面拿新前端资源
+function waitForAppRestart(box, previousInstance, onFail) {
+  const MAX_TRIES = 200; // Allow dependency installation and compilation up to ten minutes.
+  let secs = 0;
+  let tries = 0;
+  const tick = async () => {
+    secs += 3;
+    tries += 1;
+    try {
+      const status = await api('/api/auth/check');
+      if (!status.instance || status.instance === previousInstance) throw new Error('Waiting for restart');
+      location.reload();
+      return;
+    } catch {
+      let failure = '';
+      try { failure = (await api('/api/update/status')).error || ''; } catch { /* Service is restarting. */ }
+      if (failure || tries >= MAX_TRIES) {
+        box.className = 'sx-note sx-pre err';
+        box.textContent += `\n${T('updateApplyFail').replace('{err}', failure || T('updateRestartTimeout'))}`;
+        if (onFail) onFail();
+        return;
+      }
+      box.textContent += `\n${T('updateReconnecting').replace('{s}', secs)}`;
+      box.scrollTop = box.scrollHeight;
+      if (tries < MAX_TRIES) setTimeout(tick, 3000);
+    }
+  };
+  setTimeout(tick, 3000);
+}
+
+// ── WebSocket 实时事件 ──
+let hubWs = null;
+let wsReconnectTimer = null;
+function connectWs() {
+  clearTimeout(wsReconnectTimer);
+  if (hubWs && hubWs.readyState <= WebSocket.OPEN) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(TOKEN)}`);
+  hubWs = ws;
+  ws.onopen = () => { if (hubWs === ws) resyncVisibleSession(); };
+  ws.onmessage = (ev) => {
+    const e = JSON.parse(ev.data);
+    // 引擎/工具安装进度：没有 sessionId，必须在按会话过滤之前处理
+    if (e.kind === 'engineInstall' || e.kind === 'toolInstall') { EngineInstall.emit(e.line); return; }
+    // 软件本身更新（git pull 输出逐行广播），没有 sessionId，同样要在按会话过滤之前处理
+    if (e.kind === 'updateApply') { UpdateApplyLog.emit(e.line); return; }
+    // Claude 登录进度：同样没有 sessionId，且登录卡片要实时跟着后端状态走
+    if (e.kind === 'claudeLogin') { onClaudeLoginEvent(e); return; }
+    // Codex 登录进度：同上，没有 sessionId
+    if (e.kind === 'codexLogin') { onCodexLoginEvent(e); return; }
+    // 后端级异常：同样没有 sessionId，顶部横幅直接显示，别只写进服务器日志
+    if (e.kind === 'serverError') { showServerError(e.message); return; }
+    if (e.kind === 'session') {
+      // 影响会话列表排序/暂停态
+      if (State.session && e.session.id === State.session.id) {
+        State.session.paused = e.session.paused;
+        State.session.claudeSessionId = e.session.claudeSessionId; // 草稿首跑后拿到真实 uuid
+        if (e.session.engine) State.session.engine = e.session.engine;
+        refreshPauseBtn();
+        refreshEngineControl(); // 拿到会话 id 即已开始 → 引擎锁定为徽章
+      }
+      // 全新会话（如外部推送兜底新建）：当前正看着它所在的根目录时，直接插进列表最前面，
+      // 不需要用户手动刷新页面才能看见——bumpSessionUpdatedAt 只会更新已存在的条目，覆盖不到这种情况。
+      // 全部目录视图：新会话必定已建索引，直接插进列表（不受当前根目录限制）
+      if (State.listMode === 'all' && Array.isArray(State.sessions)
+        && !State.sessions.some((s) => s.id === e.session.id)) {
+        State.favoriteSessions = sortSessionsForList([e.session, ...State.favoriteSessions]);
+        State.sessions = State.favoriteSessions;
+        renderSessions();
+        return;
+      }
+      if (
+        !State.favoritesOnly && !isWorkspace() &&
+        e.session.rootId === State.rootId &&
+        Array.isArray(State.sessions) &&
+        !State.sessions.some((s) => s.id === e.session.id)
+      ) {
+        State.sessions = [e.session, ...State.sessions];
+        renderSessions();
+      }
+      return;
+    }
+    // 任务事件：无论是否当前会话，都据此更新侧栏"执行中"标识
+    if (e.kind === 'task') {
+      updateRunningFromTask(e.sessionId, e.task);
+      if (e.task.status === 'done' || e.task.status === 'error') { Clootee.onTaskEnd(e.task); ApiBill.onTaskEnd(e.sessionId); }
+      if (e.task.status === 'done') dropTaskNotices(e.task.id); // 跑通了就撤掉中途的告警
+      // 外部系统推送来的消息：不管现在正看哪个会话都弹一下，不能让用户全靠手动刷新才发现
+      if (e.task.external && e.task.status === 'pending') showExtMsgToast(e.sessionId, e.task.prompt);
+    }
+    // 运行提示（引擎无响应等）：任务还没结束就要让用户看到
+    if (e.kind === 'notice') {
+      if (e.message === 'cost_send_blocked') e.message = T('costBlockedNotice');
+      if (e.message === 'session_message_limit_reached') { e.message = T('sessionLimitBatch').replace('{remaining}', '0'); SessionLimitUi.refresh(); }
+      pushNotice(e); return;
+    }
+    // Claude Code 把服务商的 402 原样写成一条助手消息（task.error 里反而没有）。额度是全局的，
+    // 不管发生在哪个会话都要提示，所以放在按会话过滤之前
+    if (e.kind === 'message' && e.message && e.message.role === 'assistant' && Clootee.isOutOfCredit(e.message.text)) Clootee.showOutOfCredit();
+    if (e.sessionId !== State.sessionId || State.session?.id !== State.sessionId) return; // 其余（正文/过程）仅更新当前查看的会话
+    if (['message', 'task', 'taskRemoved'].includes(e.kind)) SessionLimitUi.refresh();
+    // 轨迹事件：缓存标脏（下次展开「过程」时重新拉取）；全过程抽屉打开时顺带刷新
+    if (e.kind === 'trace') {
+      Trace.stale = true;
+      if (!$('trOverlay').hidden) scheduleTraceReload();
+      return;
+    }
+    if (e.kind === 'thinking') appendProcess('thinking', e.text);
+    else if (e.kind === 'tool') appendProcess('tool', `${e.name} ${e.detail}`);
+    else if (e.kind === 'output') appendProcess('output', e.text);
+    else if (e.kind === 'message') {
+      const wasEmpty = (State.session.messages || []).length === 0;
+      // 去重：重连/回到前台时会重新拉历史，随后推送的同一条消息不能再追加一次
+      // （历史里的 id 可能与推送的不同，所以再按 角色+正文+时间相近 兜底比对）
+      const nm = e.message;
+      const dup = (State.session.messages || []).slice(-20).some((m) => m.id === nm.id
+        || (m.role === nm.role && m.text === nm.text && Math.abs((m.createdAt || 0) - (nm.createdAt || 0)) < 10000));
+      if (dup) return;
+      State.session.messages.push(nm);
+      removeTypingIndicator();       // 新消息插到底部前先移除动画
+      renderMessages();
+      // 首条消息出现后，标题随之确定：刷新主区标题与会话列表
+      if (wasEmpty) {
+        $('sessionTitle').textContent = sessionTitle(State.session);
+        const inList = State.sessions.find((x) => x.id === State.session.id);
+        if (inList) inList.messages = State.session.messages;
+        renderSessions();
+      }
+    } else if (e.kind === 'task') {
+      upsertTask(e.task);
+      renderNotices();               // 任务失败→右下角小圆圈亮起，点开才看现场（命令/目录/stderr）
+      if (e.task.status === 'error') pulseNoticeFab();
+      syncTypingIndicator();         // running→显示动画，结束→移除
+      renderElapsedNotes();          // 任务结束→显示「耗时：X」
+      refreshEngineControl();        // 有任务入队即已开始 → 引擎锁定
+    } else if (e.kind === 'taskRemoved') removeTaskLocal(e.taskId);
+  };
+  ws.onclose = () => { if (hubWs === ws) wsReconnectTimer = setTimeout(connectWs, 1500); };
+}
+
+// 后台可能漏掉任务结束事件；恢复可见、网络或 WS 后均以服务端快照校准。
+let visResyncAt = 0;
+let visResyncRetry = null;
+let visResyncGeneration = 0;
+async function resyncVisibleSession(refreshList = true) {
+  if (document.hidden || !TOKEN) return;
+  if (Date.now() - visResyncAt < 1000) return;
+  visResyncAt = Date.now();
+  clearTimeout(visResyncRetry);
+  const generation = ++visResyncGeneration;
+  // 先设看门狗：移动端恢复后的请求可能一直悬挂，不能等它失败才重试。
+  visResyncRetry = setTimeout(() => resyncVisibleSession(refreshList), 10000);
+  if (!hubWs || hubWs.readyState > WebSocket.OPEN) connectWs();
+  const id = State.sessionId;
+  // 两份快照独立加载：列表失败或很慢不能阻止当前会话撤掉过期的「处理中」。
+  // selectSession 自身校验请求序号与选择版本，返回时不会抢走新选中的会话。
+  const results = await Promise.allSettled([
+    refreshList ? loadSessions() : Promise.resolve(),
+    id && !isFavoriteDraftId(id) ? selectSession(id) : Promise.resolve(),
+  ]);
+  if (generation !== visResyncGeneration) return;
+  clearTimeout(visResyncRetry);
+  if (document.hidden || !TOKEN) return;
+  if (results.some((r) => r.status === 'rejected')) {
+    visResyncRetry = setTimeout(() => resyncVisibleSession(refreshList), 3000);
+  } else if ((State.session?.tasks || []).some((t) => t.status === 'running' || t.status === 'pending')) {
+    // WS 可能仍显示 OPEN 却不再推送；仅补查当前任务，不定时重拉列表。
+    visResyncRetry = setTimeout(() => resyncVisibleSession(false), 10000);
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    ++visResyncGeneration; // 隐藏前的请求不能重新启动前台重试。
+    visResyncAt = 0; // 快速切出再切回也必须刷新。
+    clearTimeout(visResyncRetry);
+    return;
+  }
+  return resyncVisibleSession();
+});
+window.addEventListener('pageshow', () => resyncVisibleSession());
+window.addEventListener('focus', () => resyncVisibleSession());
+window.addEventListener('online', () => resyncVisibleSession());
+
+// ── 工具 ──
+// 精确到秒的日期时间：YYYY-MM-DD HH:MM:SS
+function fmtDateTime(ms) {
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
+    `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+// 人性化耗时：<60s → X.X秒，否则 X分Y秒
+function fmtElapsed(ms) {
+  const s = Math.max(0, ms) / 1000;
+  if (s < 60) return T('elapsedSec').replace('{s}', s.toFixed(1));
+  const m = Math.floor(s / 60);
+  const r = Math.round(s % 60);
+  return T('elapsedMin').replace('{m}', m).replace('{s}', r);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+// 本地路径通过 data 属性保留，避免 Windows 盘符被当成不安全的 URL 协议移除。
+function markdownLocalPath(href) {
+  let value = String(href || '').trim();
+  if (/^file:\/\//i.test(value)) value = value.replace(/^file:\/\//i, '');
+  try { value = decodeURIComponent(value); } catch { /* 保留含字面百分号的路径 */ }
+  value = value.replace(/^\/([a-z]:[\\/])/i, '$1');
+  if (/^[a-z]:[\\/]/i.test(value)) return value.replace(/\\/g, '/');
+  if (!value || value.startsWith('#') || value.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(value)) return '';
+  return value.replace(/\\/g, '/');
+}
+
+function showMarkdownLink(link) {
+  const path = link.dataset.localPath || '';
+  const href = link.getAttribute('href') || '';
+  const dialog = document.createElement('dialog');
+  dialog.className = 'message-link-dialog';
+  dialog.setAttribute('aria-labelledby', 'messageLinkTitle');
+  const head = document.createElement('div');
+  head.className = 'ml-head';
+  const badge = document.createElement('span');
+  badge.className = 'ml-badge';
+  badge.textContent = path ? (path.split('.').pop() || 'FILE').replace(/:\d+.*$/, '').toUpperCase().slice(0, 6) : 'LINK';
+  const title = document.createElement('h3');
+  title.id = 'messageLinkTitle';
+  title.textContent = path ? path.replace(/\\/g, '/').split('/').pop() : link.textContent || href;
+  const close = document.createElement('button');
+  close.className = 'ml-close'; close.type = 'button'; close.textContent = '×';
+  close.setAttribute('aria-label', T('close')); close.onclick = () => dialog.close();
+  head.append(badge, title, close);
+  const detail = document.createElement('p');
+  detail.className = 'ml-path'; detail.textContent = path || href;
+  const primary = document.createElement('div'); primary.className = 'ml-primary';
+  const secondary = document.createElement('div'); secondary.className = 'ml-secondary';
+  const status = document.createElement('p'); status.className = 'ml-status'; status.hidden = true;
+  status.setAttribute('role', 'status');
+  const button = (parent, label, action, className = '') => {
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'ml-action ' + className; btn.textContent = label;
+    btn.onclick = () => action(btn); parent.appendChild(btn); return btn;
+  };
+  if (path) {
+    const rootId = State.rootId;
+    const root = State.roots.find((r) => r.id === rootId);
+    const base = (root?.path || '').replace(/\\/g, '/').replace(/\/$/, '');
+    let rel = path.replace(/(?::\d+(?::\d+)?)$/, '');
+    const insensitive = /^[a-z]:\//i.test(base);
+    const compare = (v) => insensitive ? v.toLowerCase() : v;
+    if (base && compare(rel).startsWith(compare(base) + '/')) rel = rel.slice(base.length + 1);
+    if (/^(?:[a-z]:\/|\/)/i.test(rel)) {
+      status.textContent = T('messageLinkOutsideRoot'); status.hidden = false;
+    } else {
+      if (State.settings.platform === 'win32') {
+        if (/\.(?:pptx?|ppsx?|docx?|xlsx?|pdf|txt|md|csv|rtf|odt|ods|odp|png|jpe?g|gif|webp|bmp|svg|mp3|wav|mp4|mov)$/i.test(rel)) {
+          button(primary, T('messageLinkOpenFile'), async (btn) => {
+            btn.disabled = true; status.hidden = true;
+            try {
+              await api('/api/fm/open-file', { rootId, rel });
+              status.textContent = T('messageLinkFileOpened'); status.hidden = false;
+            } catch (e) {
+              status.textContent = T('messageLinkFileFailed') + ': ' + e.message; status.hidden = false;
+            } finally { btn.disabled = false; }
+          }, 'ml-open-file');
+        }
+        button(primary, T('messageLinkFolder'), async (btn) => {
+          btn.disabled = true; status.hidden = true;
+          try {
+            await api('/api/fm/open-containing', { rootId, rel });
+            status.textContent = T('messageLinkFolderOpened'); status.hidden = false;
+          } catch (e) {
+            status.textContent = T('messageLinkFolderFailed') + ': ' + e.message; status.hidden = false;
+          } finally { btn.disabled = false; }
+        }, 'ml-folder');
+      }
+      const target = document.createElement('a');
+      target.className = 'ml-action ml-download'; target.textContent = T('download');
+      target.href = fmFileUrl(rel, true); target.setAttribute('download', ''); primary.appendChild(target);
+    }
+    button(secondary, T('messageLinkCopyPath'), (btn) => copyText(path, btn, T('messageLinkCopyPath')));
+  } else {
+    const target = document.createElement('a');
+    target.className = 'ml-action ml-download'; target.textContent = T('messageLinkOpen');
+    target.href = href; target.target = '_blank'; target.rel = 'noopener noreferrer'; primary.appendChild(target);
+  }
+  button(secondary, T('messageLinkCopyText'), (btn) => copyText(link.textContent, btn, T('messageLinkCopyText')));
+  dialog.append(head, detail, primary, secondary, status);
+  dialog.addEventListener('close', () => { dialog.remove(); link.focus(); });
+  dialog.addEventListener('click', (event) => { if (event.target === dialog) {
+    const rect = dialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
+  } });
+  document.body.appendChild(dialog);
+  dialog.showModal();
+}
+
+// 一次性初始化 markdown 渲染（marked + DOMPurify）。
+let _mdReady = false;
+function initMarkdown() {
+  if (_mdReady) return;
+  if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') return;
+  marked.setOptions({ gfm: true, breaks: true });
+  DOMPurify.addHook('beforeSanitizeAttributes', (node) => {
+    if (node.tagName !== 'A') return;
+    const path = markdownLocalPath(node.getAttribute('href'));
+    node.removeAttribute('data-local-path');
+    if (path) {
+      node.setAttribute('data-local-path', path);
+      node.setAttribute('href', '#');
+    }
+  });
+  // 净化后处理：外链 target=_blank + rel 防止 window.opener 利用；本页锚点保持原样
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName === 'A' && node.getAttribute('href')) {
+      node.setAttribute('target', '_blank');
+      node.setAttribute('rel', 'noopener noreferrer');
+    }
+  });
+  _mdReady = true;
+}
+
+// 把 markdown 文本渲染进元素；库不可用或解析失败则回退为纯文本。
+function renderMarkdown(el, text) {
+  initMarkdown();
+  if (!_mdReady) {
+    el.textContent = text;
+    return;
+  }
+  try {
+    const html = DOMPurify.sanitize(marked.parse(String(text || '')), { ADD_ATTR: ['target'] });
+    el.innerHTML = html;
+    el.classList.add('md');
+    el.onclick = (event) => {
+      const link = event.target.closest('a');
+      if (!link || !el.contains(link)) return;
+      const href = link.getAttribute('href') || '';
+      if (!link.dataset.localPath && !/^(https?:|mailto:)/i.test(href)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      showMarkdownLink(link);
+    };
+  } catch {
+    el.textContent = text;
+  }
+}
+
+// ── AI 内联图表：解析 <chart> 数据块并用 ECharts 渲染 ──
+// 约定（提示 AI 在回复里输出）：
+//   <chart type="bar" title="各料欠数" x="料号" y="欠数">
+//   [{"料号":"A","欠数":12},{"料号":"B","欠数":5}]
+//   </chart>
+// type 取 bar/line/pie/table；正文里的 <chart> 块会被移除，单独渲染成图表卡片。
+const CHART_TYPES = ['bar', 'line', 'pie', 'table'];
+
+function _chartAttrs(s) {
+  const out = {};
+  const re = /([a-zA-Z_]+)\s*=\s*"([^"]*)"|([a-zA-Z_]+)\s*=\s*'([^']*)'/g;
+  let m;
+  while ((m = re.exec(s)) !== null) out[(m[1] || m[3]).toLowerCase()] = m[2] != null ? m[2] : (m[4] || '');
+  return out;
+}
+
+// 从 AI 回复正文里抽取所有 <chart> 块，返回去除图表块后的正文 + 图表数组
+function parseCharts(raw) {
+  if (typeof raw !== 'string') return { text: '', charts: [] };
+  const charts = [];
+  let text = raw;
+  // 1) <chart ...>JSON</chart> 标签格式（system prompt 指定）
+  text = text.replace(/<chart\b([^>]*)>([\s\S]*?)<\/chart>/gi, (full, attrs, body) => {
+    const c = _buildChart(body, _chartAttrs(attrs));
+    if (c) { charts.push(c); return ''; }
+    return full;
+  });
+  // 2) ```chart ... ``` 围栏格式（AI 实际常用，JSON 自带 type/title/data）
+  text = text.replace(/```chart\s*([\s\S]*?)```/gi, (full, body) => {
+    const c = _buildChart(body, {});
+    if (c) { charts.push(c); return ''; }
+    return full;
+  });
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  return { text, charts };
+}
+
+// 把一段 JSON（数组或 {type,title,x,y,data/rows:[]}）+ 可选属性，构造成 chart 条目；失败返回 null
+function _buildChart(body, attrs) {
+  let j;
+  try { j = JSON.parse(String(body).trim()); } catch { return null; }
+  let rows = [];
+  let { type, title, x, y } = attrs;
+  if (Array.isArray(j)) {
+    rows = j;
+  } else if (j && typeof j === 'object') {
+    rows = Array.isArray(j.data) ? j.data : Array.isArray(j.rows) ? j.rows : [];
+    type = type || j.type;
+    title = title || j.title;
+    x = x || j.x;
+    y = y || j.y;
+  }
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const t = CHART_TYPES.includes(type) ? type : 'bar';
+  return { type: t, title: title || '', x: x || '', y: y || '', rows };
+}
+
+// 图表卡片：bar/line/pie 用 ECharts；table 渲染数据表。随窗口与主题自适应。
+function chartCardEl(chart) {
+  const card = document.createElement('div');
+  card.className = 'msg-chart';
+  const cols = chart.rows.length ? Object.keys(chart.rows[0]) : [];
+  const isChart = chart.type === 'bar' || chart.type === 'line' || chart.type === 'pie';
+
+  if (!isChart || typeof echarts === 'undefined') {
+    // table（或 echarts 不可用时兜底成表）
+    if (chart.title) {
+      const tt = document.createElement('div');
+      tt.className = 'mc-title';
+      tt.textContent = chart.title;
+      card.appendChild(tt);
+    }
+    const tbl = document.createElement('table');
+    tbl.className = 'mc-table';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    cols.forEach((c) => { const th = document.createElement('th'); th.textContent = c; htr.appendChild(th); });
+    thead.appendChild(htr);
+    tbl.appendChild(thead);
+    const tb = document.createElement('tbody');
+    chart.rows.forEach((r) => {
+      const tr = document.createElement('tr');
+      cols.forEach((c) => { const td = document.createElement('td'); td.textContent = r[c] == null ? '' : String(r[c]); tr.appendChild(td); });
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+    card.appendChild(tbl);
+    return card;
+  }
+
+  const xKey = chart.x && cols.includes(chart.x) ? chart.x : cols[0];
+  const yKey = chart.y && cols.includes(chart.y) ? chart.y : (cols[1] || cols[0]);
+  const el = document.createElement('div');
+  el.className = 'mc-chart';
+  card.appendChild(el);
+  // ECharts 需要容器有尺寸：延后到入文档后初始化
+  setTimeout(() => renderChart(el, chart, xKey, yKey), 0);
+  return card;
+}
+
+const _CHART_PALETTE = ['#2563eb', '#16a34a', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
+function renderChart(el, chart, xKey, yKey) {
+  if (!el.isConnected || typeof echarts === 'undefined') return;
+  const ch = echarts.init(el);
+  const cats = chart.rows.map((r) => String(r[xKey] == null ? '' : r[xKey]));
+  const vals = chart.rows.map((r) => Number(r[yKey]) || 0);
+  // 跟随深/浅主题取轴线、文字、网格线颜色（CSS 变量）
+  const cs = getComputedStyle(document.body);
+  const cText = (cs.getPropertyValue('--text') || '#cbd5e1').trim();
+  const cMuted = (cs.getPropertyValue('--muted') || '#94a3b8').trim();
+  const cBorder = (cs.getPropertyValue('--border') || '#475569').trim();
+  const axis = {
+    nameTextStyle: { color: cMuted }, axisLabel: { color: cText },
+    axisLine: { lineStyle: { color: cBorder } }, splitLine: { lineStyle: { color: cBorder, opacity: 0.4 } },
+  };
+  const common = {
+    backgroundColor: 'transparent', color: _CHART_PALETTE, textStyle: { color: cText },
+    title: { text: chart.title, left: 'center', top: 8, textStyle: { fontSize: 14, color: cText } },
+    tooltip: { trigger: chart.type === 'pie' ? 'item' : 'axis' },
+    grid: { left: 48, right: 24, bottom: 56, top: 48, containLabel: true },
+  };
+  let option;
+  if (chart.type === 'pie') {
+    option = { ...common, legend: { bottom: 0, type: 'scroll', textStyle: { color: cText } },
+      series: [{ type: 'pie', radius: ['36%', '62%'], center: ['50%', '55%'],
+        data: cats.map((name, i) => ({ name, value: vals[i] })),
+        label: { formatter: '{b}: {d}%', color: cText }, itemStyle: { borderWidth: 2 } }] };
+  } else {
+    const maxLen = cats.reduce((mx, c) => Math.max(mx, c.length), 0);
+    const needRotate = cats.length > 6 || maxLen > 6;
+    const rotate = needRotate ? (cats.length > 14 || maxLen > 10 ? 45 : 30) : 0;
+    option = { ...common,
+      grid: { ...common.grid, bottom: needRotate ? 88 : 56 },
+      xAxis: { type: 'category', data: cats, name: xKey, ...axis, axisLabel: { ...axis.axisLabel, interval: 0, rotate, fontSize: 11, width: 92, overflow: 'truncate' } },
+      yAxis: { type: 'value', name: yKey, ...axis },
+      series: [{ type: chart.type, data: vals, name: yKey, smooth: chart.type === 'line',
+        areaStyle: chart.type === 'line' ? { opacity: 0.12 } : undefined,
+        itemStyle: { borderRadius: chart.type === 'bar' ? [4, 4, 0, 0] : 0 }, barMaxWidth: 48 }] };
+  }
+  ch.setOption(option);
+  ch.resize();
+  _trackChart(ch);
+}
+
+// 跟踪已渲染图表，窗口尺寸变化时统一 resize（避免每图各自注册监听）
+const _charts = [];
+let _chartResizeBound = false;
+function _trackChart(ch) {
+  _charts.push(ch);
+  if (!_chartResizeBound) {
+    _chartResizeBound = true;
+    window.addEventListener('resize', () => _charts.forEach((c) => { try { c.resize(); } catch { /* 已 dispose */ } }));
+  }
+}
+
+// ── 会话文件：附件卡片 / 文件面板 / 预览抽屉 ──
+const FILE_ICON = { image: '🖼', video: '🎬', audio: '🎵', pdf: '📕', sheet: '📊', md: '📝', text: '📄', doc: '📃', other: '📎' };
+// 预览归类（与后端 SessionFiles._classify 对应）
+const PREVIEW_GRID = ['xlsx', 'xls', 'csv'];
+const PREVIEW_MD = ['md', 'markdown'];
+const PREVIEW_PDF = ['pdf'];
+const PREVIEW_IMG = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp', 'ico'];
+const PREVIEW_VIDEO = ['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv'];
+const PREVIEW_AUDIO = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'];
+// 从消息文本里抽取候选文件名的正则（不含空格的 token，以已知扩展名结尾）
+const FILE_CAND_RE =
+  /[^\s`"'()<>\[\]，。；：、]+\.(?:xlsx|xls|csv|md|markdown|txt|json|log|ya?ml|xml|html?|css|js|ts|tsx|jsx|py|java|go|rs|c|cpp|h|sh|bat|ini|conf|sql|pdf|png|jpe?g|gif|svg|webp|bmp|ico|mp4|webm|mov|m4v|ogv|mkv|mp3|wav|ogg|m4a|flac|aac|docx?|pptx?)/gi;
+
+// 文件下载/预览直链（带 token，供 <a>/<img>/<iframe>/fetch 使用）
+function fileUrl(name, download) {
+  const q =
+    'id=' + encodeURIComponent(State.sessionId) +
+    '&name=' + encodeURIComponent(name) +
+    '&token=' + encodeURIComponent(TOKEN) +
+    (download ? '&download=1' : '');
+  return '/api/session/file?' + q;
+}
+
+function kindOf(ext) {
+  const e = (ext || '').toLowerCase();
+  if (PREVIEW_GRID.includes(e)) return 'grid';
+  if (PREVIEW_MD.includes(e)) return 'md';
+  if (PREVIEW_PDF.includes(e)) return 'pdf';
+  if (PREVIEW_IMG.includes(e)) return 'img';
+  if (PREVIEW_VIDEO.includes(e)) return 'video';
+  if (PREVIEW_AUDIO.includes(e)) return 'audio';
+  return 'text';
+}
+
+// 给一条 AI 消息追加其引用到的、根目录内真实存在的文件附件卡片
+async function attachFilesToMessage(div, m) {
+  if (!m || m.role === 'user' || !State.sessionId) return;
+  const sid = State.sessionId;
+  const text = m.text || '';
+  const cands = [];
+  const seen = new Set();
+  let match;
+  FILE_CAND_RE.lastIndex = 0;
+  while ((match = FILE_CAND_RE.exec(text)) && cands.length < 40) {
+    const name = match[0].replace(/[.,;:]+$/, '');
+    // 硬性规则：mem.md / struct.md / CLAUDE.md 不作为附件卡片（不预览/下载）
+    const base = name.split(/[\\/]/).pop().toLowerCase();
+    if (base === 'mem.md' || base === 'struct.md' || base === 'claude.md') continue;
+    if (!seen.has(name)) { seen.add(name); cands.push(name); }
+  }
+  if (cands.length === 0) return;
+  let files = [];
+  try {
+    files = await api('/api/session/files-resolve', { id: sid, names: cands });
+  } catch {
+    return;
+  }
+  // 会话可能在异步期间被切换：仅当仍是同一会话且节点在文档中时渲染
+  if (State.sessionId !== sid || !div.isConnected || !files.length) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-files';
+  files.forEach((f) => wrap.appendChild(fileCardEl(f)));
+  div.appendChild(wrap);
+  const box = $('messages');
+  box.scrollTop = box.scrollHeight;
+}
+
+// 聊天内附件卡片：图标 + 文件名 + 大小 + 预览/下载
+function fileCardEl(f) {
+  const row = document.createElement('div');
+  row.className = 'msg-file';
+  const display = f.name.split('/').pop();
+  row.innerHTML =
+    `<span class="mf-ico">${FILE_ICON[f.kind] || '📎'}</span>` +
+    `<span class="mf-name" title="${escapeHtml(f.name)}">${escapeHtml(display)}</span>` +
+    `<span class="mf-size">${f.sizeKb}KB</span>`;
+  if (f.previewable) {
+    const pv = document.createElement('button');
+    pv.className = 'mf-btn';
+    pv.textContent = T('preview');
+    pv.addEventListener('click', () => openFilePreview(f));
+    row.appendChild(pv);
+  }
+  const dl = document.createElement('a');
+  dl.className = 'mf-btn primary';
+  dl.href = fileUrl(f.name, true);
+  dl.textContent = '⬇ ' + T('download');
+  row.appendChild(dl);
+  return row;
+}
+
+// ── 文件管理器（右侧抽屉：按根目录浏览/编辑/搜索/重点文件夹） ──
+const FM = {
+  rel: '', favorites: [], searchOpen: false, searchTimer: null, searching: false,
+  // 多级搜索（递归子目录）：默认开启，用户可勾掉只看当前这一层；选择跨刷新保留
+  recurse: localStorage.getItem('fmSearchRecurse') !== '0',
+};
+
+// 文件管理器下载/预览直链（按 rootId + 相对路径，带 token）
+function fmFileUrl(rel, download) {
+  return '/api/fm/file?rootId=' + encodeURIComponent(State.rootId) +
+    '&rel=' + encodeURIComponent(rel) +
+    '&token=' + encodeURIComponent(TOKEN) +
+    (download ? '&download=1' : '');
+}
+
+async function toggleFilesPanel() {
+  const ov = $('filesOverlay');
+  if (!ov.hidden) { ov.hidden = true; return; }
+  if (!State.rootId) { alert(T('selectRootFirst')); return; }
+  ov.hidden = false;
+  FM.searchOpen = false;
+  $('fmSearch').hidden = true;
+  $('fmSearchInput').value = '';
+  await fmBrowse(FM.rel);
+}
+function closeFilesPanel() { $('filesOverlay').hidden = true; }
+
+// 浏览某相对目录：刷新面包屑 / 重点文件夹 / 列表
+async function fmBrowse(rel) {
+  FM.searching = false;
+  const list = $('filesList');
+  list.innerHTML = `<div class="files-empty">${T('loading')}</div>`;
+  let data;
+  try {
+    data = await api('/api/fm/browse?rootId=' + encodeURIComponent(State.rootId) +
+      '&rel=' + encodeURIComponent(rel || ''));
+  } catch (e) {
+    list.innerHTML = `<div class="files-empty">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  FM.rel = data.cwd;
+  FM.favorites = data.favorites || [];
+  $('filesPanelTitle').textContent = `📁 ${T('fileManager')}`;
+  fmRenderCrumbs(data.breadcrumb);
+  fmRenderFavs(FM.favorites);
+  fmRenderList(data.dirs, data.files);
+}
+
+function fmRenderCrumbs(breadcrumb) {
+  const box = $('fmCrumbs');
+  box.innerHTML = '';
+  (breadcrumb || []).forEach((c, i) => {
+    if (i > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'fm-sep';
+      sep.textContent = '/';
+      box.appendChild(sep);
+    }
+    const b = document.createElement('button');
+    b.className = 'fm-crumb' + (i === breadcrumb.length - 1 ? ' on' : '');
+    b.textContent = c.name;
+    b.title = c.rel;
+    b.addEventListener('click', () => fmBrowse(c.rel));
+    box.appendChild(b);
+  });
+}
+
+function fmRenderFavs(favs) {
+  const box = $('fmFavs');
+  box.innerHTML = '';
+  if (!favs || favs.length === 0) { box.hidden = true; return; }
+  box.hidden = false;
+  const star = document.createElement('span');
+  star.className = 'fm-fav-lbl';
+  star.textContent = '⭐';
+  star.title = T('favorites');
+  box.appendChild(star);
+  favs.forEach((rel) => {
+    const chip = document.createElement('button');
+    chip.className = 'fm-chip';
+    chip.textContent = rel.split('/').pop();
+    chip.title = rel;
+    chip.addEventListener('click', () => fmBrowse(rel));
+    box.appendChild(chip);
+  });
+}
+
+function fmRenderList(dirs, files) {
+  const list = $('filesList');
+  list.innerHTML = '';
+  if ((!dirs || dirs.length === 0) && (!files || files.length === 0)) {
+    list.innerHTML = `<div class="files-empty">${T('noFilesHere')}</div>`;
+    return;
+  }
+  (dirs || []).forEach((d) => list.appendChild(fmDirRowEl(d)));
+  (files || []).forEach((f) => list.appendChild(fmFileRowEl(f)));
+}
+
+function fmDirRowEl(d) {
+  const row = document.createElement('div');
+  row.className = 'file-row dir';
+  const pinned = FM.favorites.includes(d.rel);
+  row.innerHTML =
+    `<span class="fr-ico">📁</span>` +
+    `<span class="fr-name" title="${escapeHtml(d.rel)}">${escapeHtml(d.name)}</span>`;
+  const pin = document.createElement('button');
+  pin.className = 'fr-act fr-pin' + (pinned ? ' on' : '');
+  pin.textContent = pinned ? '★' : '☆';
+  pin.title = pinned ? T('unpin') : T('pin');
+  pin.addEventListener('click', (e) => { e.stopPropagation(); fmTogglePin(d.rel); });
+  row.appendChild(pin);
+  row.addEventListener('click', () => fmBrowse(d.rel));
+  return row;
+}
+
+function fmFileRowEl(f) {
+  const row = document.createElement('div');
+  row.className = 'file-row';
+  const display = f.name.split('/').pop();
+  row.innerHTML =
+    `<span class="fr-ico">${FILE_ICON[f.kind] || '📎'}</span>` +
+    `<span class="fr-name" title="${escapeHtml(f.name)}">${escapeHtml(display)}</span>` +
+    `<span class="fr-size">${f.sizeKb}KB</span>`;
+  if (f.editable) {
+    const ed = document.createElement('button');
+    ed.className = 'fr-act';
+    ed.textContent = T('edit');
+    ed.addEventListener('click', () => openEditor(f));
+    row.appendChild(ed);
+  }
+  if (f.previewable) {
+    const pv = document.createElement('button');
+    pv.className = 'fr-act';
+    pv.textContent = T('preview');
+    pv.addEventListener('click', () => openFilePreview(f, fmFileUrl));
+    row.appendChild(pv);
+  }
+  const dl = document.createElement('a');
+  dl.className = 'fr-act';
+  dl.href = fmFileUrl(f.name, true);
+  dl.title = T('download');
+  dl.textContent = '⬇';
+  row.appendChild(dl);
+  return row;
+}
+
+async function fmTogglePin(rel) {
+  try {
+    const data = await api('/api/fm/favorite', { rootId: State.rootId, rel });
+    FM.favorites = data.favorites || [];
+    fmRenderFavs(FM.favorites);
+    // 重渲染当前列表以更新各目录的星标态（非搜索态才刷新）
+    if (!FM.searching) await fmBrowse(FM.rel);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+// ── 文件管理器：搜索 ──
+function fmToggleSearch() {
+  FM.searchOpen = !FM.searchOpen;
+  $('fmSearch').hidden = !FM.searchOpen;
+  if (FM.searchOpen) {
+    $('fmSearchRecurse').checked = FM.recurse;
+    fmUpdateSearchClear();
+    setTimeout(() => $('fmSearchInput').focus(), 30);
+  } else {
+    $('fmSearchInput').value = '';
+    fmUpdateSearchClear();
+    fmBrowse(FM.rel);
+  }
+}
+function fmUpdateSearchClear() {
+  $('fmSearchClear').hidden = !$('fmSearchInput').value;
+}
+function fmOnSearchInput() {
+  clearTimeout(FM.searchTimer);
+  const q = $('fmSearchInput').value.trim();
+  fmUpdateSearchClear();
+  if (!q) { fmBrowse(FM.rel); return; }
+  FM.searchTimer = setTimeout(() => fmRunSearch(q), 300);
+}
+function fmClearSearch() {
+  $('fmSearchInput').value = '';
+  fmOnSearchInput();
+  $('fmSearchInput').focus();
+}
+async function fmRunSearch(q) {
+  const list = $('filesList');
+  list.innerHTML = `<div class="files-empty">${T('loading')}</div>`;
+  let files = [];
+  const rel = FM.rel;
+  const recursive = FM.recurse;
+  try {
+    files = await api('/api/fm/search?rootId=' + encodeURIComponent(State.rootId) +
+      '&q=' + encodeURIComponent(q) +
+      '&rel=' + encodeURIComponent(rel || '') +
+      '&recursive=' + (recursive ? '1' : '0'));
+  } catch (e) {
+    list.innerHTML = `<div class="files-empty">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  // 异步期间用户可能离开了搜索 / 切换了目录：丢弃过期结果
+  if (!$('fmSearchInput').value.trim() || FM.rel !== rel || FM.recurse !== recursive) return;
+  FM.searching = true;
+  $('fmCrumbs').innerHTML = `<span class="fm-crumb on">🔍 ${T('searchResults')} (${files.length})</span>`;
+  list.innerHTML = '';
+  if (files.length === 0) {
+    list.innerHTML = `<div class="files-empty">${T('noSearchResults')}</div>`;
+    return;
+  }
+  files.forEach((f) => list.appendChild(fmFileRowEl(f)));
+}
+
+// 切换「多级搜索」：记住选择，并按当前关键字立即重搜 / 回到普通浏览
+function fmOnRecurseChange() {
+  FM.recurse = $('fmSearchRecurse').checked;
+  localStorage.setItem('fmSearchRecurse', FM.recurse ? '1' : '0');
+  const q = $('fmSearchInput').value.trim();
+  if (q) fmRunSearch(q);
+}
+
+// ── 文本编辑器（覆盖层） ──
+const Editor = { file: null, original: '', dirty: false, readonly: false, cm: null };
+
+// 扩展名 → CodeMirror 语法模式
+function extToCmMode(ext) {
+  const m = {
+    js: 'text/javascript', mjs: 'text/javascript', cjs: 'text/javascript',
+    jsx: 'text/jsx', ts: 'application/typescript', tsx: 'text/typescript-jsx',
+    json: 'application/json',
+    php: 'application/x-httpd-php', phtml: 'application/x-httpd-php',
+    html: 'htmlmixed', htm: 'htmlmixed', vue: 'htmlmixed',
+    xml: 'application/xml', svg: 'application/xml',
+    css: 'text/css', scss: 'text/x-scss', sass: 'text/x-sass', less: 'text/css',
+    py: 'text/x-python', rb: 'text/x-ruby', go: 'text/x-go', rs: 'text/x-rustsrc',
+    c: 'text/x-csrc', h: 'text/x-csrc', cpp: 'text/x-c++src', cc: 'text/x-c++src',
+    hpp: 'text/x-c++src', cs: 'text/x-csharp', java: 'text/x-java',
+    sh: 'text/x-sh', bash: 'text/x-sh', zsh: 'text/x-sh',
+    sql: 'text/x-sql', yaml: 'text/x-yaml', yml: 'text/x-yaml',
+    md: 'text/x-markdown', markdown: 'text/x-markdown',
+    dart: 'application/dart', swift: 'text/x-swift', kt: 'text/x-kotlin',
+  };
+  return m[ext] || null; // null → 纯文本（无高亮）
+}
+
+function ensureCm() {
+  if (Editor.cm) return Editor.cm;
+  Editor.cm = CodeMirror.fromTextArea($('edArea'), {
+    lineNumbers: true,
+    matchBrackets: true,
+    autoCloseBrackets: true,
+    styleActiveLine: true,
+    indentUnit: 2,
+    tabSize: 2,
+    lineWrapping: false,
+    theme: cmTheme(),
+  });
+  Editor.cm.on('change', edMarkDirty);
+  // Ctrl/Cmd+S 保存
+  Editor.cm.setOption('extraKeys', {
+    'Ctrl-S': () => saveEditor(),
+    'Cmd-S': () => saveEditor(),
+  });
+  return Editor.cm;
+}
+
+async function openEditor(f) {
+  let data;
+  try {
+    data = await api('/api/fm/read?rootId=' + encodeURIComponent(State.rootId) +
+      '&rel=' + encodeURIComponent(f.name));
+  } catch (e) {
+    alert(T('loadFail') + ': ' + e.message);
+    return;
+  }
+  Editor.file = f;
+  Editor.original = data.content;
+  Editor.readonly = !!data.truncated;
+  Editor.dirty = false;
+  const ext = (f.name.split('.').pop() || '').toLowerCase();
+  const cm = ensureCm();
+  cm.setOption('theme', cmTheme());
+  cm.setOption('mode', extToCmMode(ext));
+  cm.setOption('readOnly', Editor.readonly);
+  cm.setValue(data.content);
+  cm.clearHistory();
+  // CodeMirror 会把 \r\n 规范成 \n，以规范化后的值为基准，避免 CRLF 文件一打开就被误判为已修改
+  Editor.original = cm.getValue();
+  Editor.dirty = false;
+  $('edDirty').hidden = true;
+  $('edTitle').textContent = '✎ ' + f.name.split('/').pop();
+  $('edTitle').title = f.name;
+  $('edSave').textContent = T('save');
+  $('edSave').disabled = Editor.readonly;
+  $('edDirty').hidden = true;
+  $('edFoot').textContent = Editor.readonly ? '⚠ ' + T('tooLargeToEdit') : '';
+  $('edFoot').className = 'ed-foot' + (Editor.readonly ? ' warn' : '');
+  $('edOverlay').hidden = false;
+  setTimeout(() => { cm.refresh(); cm.focus(); }, 30);
+}
+
+function edMarkDirty() {
+  const cur = Editor.cm ? Editor.cm.getValue() : $('edArea').value;
+  const d = cur !== Editor.original;
+  Editor.dirty = d;
+  $('edDirty').hidden = !d;
+}
+
+async function saveEditor() {
+  if (!Editor.file || Editor.readonly) return;
+  const content = Editor.cm ? Editor.cm.getValue() : $('edArea').value;
+  const btn = $('edSave');
+  btn.disabled = true;
+  try {
+    await api('/api/fm/write', { rootId: State.rootId, rel: Editor.file.name, content });
+    Editor.original = content;
+    Editor.dirty = false;
+    $('edDirty').hidden = true;
+    $('edFoot').textContent = '✓ ' + T('saved');
+    $('edFoot').className = 'ed-foot ok';
+    // 若文件面板正展示当前目录，刷新（大小/时间变化）
+    if (!$('filesOverlay').hidden && !FM.searching) fmBrowse(FM.rel);
+  } catch (e) {
+    $('edFoot').textContent = '⚠ ' + T('saveFail') + ': ' + e.message;
+    $('edFoot').className = 'ed-foot warn';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closeEditor() {
+  if (Editor.dirty && !confirm(T('confirmDiscard'))) return;
+  $('edOverlay').hidden = true;
+  if (Editor.cm) Editor.cm.setValue('');
+  else $('edArea').value = '';
+  Editor.file = null;
+  Editor.dirty = false;
+}
+
+// ── 文件预览抽屉 ──
+function closeFilePreview() {
+  $('fpOverlay').hidden = true;
+  $('fpBody').innerHTML = '';
+  $('fpTabs').hidden = true;
+  $('fpTabs').innerHTML = '';
+  $('fpCopy').hidden = true;
+}
+
+async function openFilePreview(f, urlFn) {
+  urlFn = urlFn || fileUrl;
+  const name = f.name;
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const kind = kindOf(ext);
+  const url = urlFn(name, false);
+  const icon = kind === 'grid' ? '📊' : kind === 'img' ? '🖼' : kind === 'video' ? '🎬' : kind === 'audio' ? '🎵' : kind === 'pdf' ? '📕' : kind === 'md' ? '📝' : '📄';
+  $('fpTitle').textContent = `${icon} ${name.split('/').pop()}`;
+  $('fpTitle').title = name;
+  $('fpDownload').href = urlFn(name, true);
+  $('fpDownload').textContent = '⬇ ' + T('download');
+  $('fpTabs').hidden = true;
+  $('fpTabs').innerHTML = '';
+  // 文本类（MD/代码/纯文本）可一键复制全文；拿到正文后才显示
+  const copyBtn = $('fpCopy');
+  copyBtn.hidden = true;
+  const showCopy = (raw) => {
+    copyBtn.hidden = false;
+    copyBtn.textContent = '📋 ' + T('copyAll');
+    copyBtn.onclick = () => copyText(raw, copyBtn, '📋 ' + T('copyAll'));
+  };
+  const body = $('fpBody');
+  $('fpOverlay').hidden = false;
+
+  if (kind === 'pdf') {
+    body.innerHTML = `<iframe class="fp-frame" src="${url}" title="pdf"></iframe>`;
+    return;
+  }
+  if (kind === 'img') {
+    body.innerHTML = `<div class="fp-imgwrap"><img class="fp-img" src="${url}" alt="" /></div>`;
+    return;
+  }
+  if (kind === 'video') {
+    body.innerHTML = `<div class="fp-imgwrap"><video class="fp-video" src="${url}" controls autoplay playsinline></video></div>`;
+    return;
+  }
+  if (kind === 'audio') {
+    body.innerHTML = `<div class="fp-audiowrap"><audio class="fp-audio" src="${url}" controls autoplay></audio></div>`;
+    return;
+  }
+  body.innerHTML = `<div class="fp-msg">${T('loading')}</div>`;
+  try {
+    if (kind === 'grid') {
+      const buf = await (await fetch(url)).arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const sheets = wb.SheetNames.map((sn) => ({ name: sn, html: XLSX.utils.sheet_to_html(wb.Sheets[sn], { editable: false }) }));
+      renderSheets(sheets);
+    } else if (kind === 'md') {
+      const raw = await (await fetch(url)).text();
+      showCopy(raw);
+      const el = document.createElement('div');
+      el.className = 'msg-body fp-md'; // 复用 .msg-body.md 排版（renderMarkdown 会补 .md）
+      renderMarkdown(el, raw);
+      body.innerHTML = '';
+      body.appendChild(el);
+    } else {
+      const raw = await (await fetch(url)).text();
+      showCopy(raw);
+      const mode = extToCmMode(ext);
+      body.innerHTML = '';
+      if (mode && window.CodeMirror) {
+        // 代码文件：只读 CodeMirror 高亮预览
+        const host = document.createElement('div');
+        host.className = 'fp-code';
+        body.appendChild(host);
+        CodeMirror(host, {
+          value: raw,
+          mode,
+          lineNumbers: true,
+          readOnly: true,
+          lineWrapping: false,
+          theme: cmTheme(),
+        });
+      } else {
+        const pre = document.createElement('pre');
+        pre.className = 'fp-text';
+        pre.textContent = raw;
+        body.appendChild(pre);
+      }
+    }
+  } catch (e) {
+    body.innerHTML = `<div class="fp-msg err">⚠ ${T('previewFail')}：${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// 表格多工作表：标签页切换
+function renderSheets(sheets) {
+  const body = $('fpBody');
+  const tabs = $('fpTabs');
+  let active = 0;
+  const draw = () => {
+    body.innerHTML = `<div class="fp-sheet">${sheets[active] ? sheets[active].html : ''}</div>`;
+  };
+  if (sheets.length > 1) {
+    tabs.hidden = false;
+    tabs.innerHTML = '';
+    sheets.forEach((s, i) => {
+      const b = document.createElement('button');
+      b.className = 'fp-tab' + (i === active ? ' on' : '');
+      b.textContent = s.name;
+      b.addEventListener('click', () => {
+        active = i;
+        Array.from(tabs.children).forEach((c, j) => c.classList.toggle('on', j === active));
+        draw();
+      });
+      tabs.appendChild(b);
+    });
+  }
+  draw();
+}
+
+// ── 绑定 ──
+function bind() {
+  $('langBtn').addEventListener('click', toggleLang);
+  $('guideBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleGuideMenu(); });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#guideMenu') && e.target.id !== 'guideBtn') closeGuideMenu();
+  });
+  $('gmQuick').addEventListener('click', () => { closeGuideMenu(); openGuide(); });
+  $('gmLearn').addEventListener('click', openLearnCourse);
+  $('guideClose').addEventListener('click', closeGuide);
+  $('guideGotIt').addEventListener('click', closeGuide);
+  $('guideOverlay').addEventListener('click', (e) => { if (e.target.id === 'guideOverlay') closeGuide(); });
+  // 会话工具命令菜单 + 结果弹窗
+  $('cmdMenuBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleCmdMenu(); });
+  document.addEventListener('click', (e) => {
+    // 用 composedPath()（事件派发时就固定好的祖先链）而不是 e.target.closest()：
+    // 点击 /skill 这类 'group' 项会在同一次点击里同步 renderCmdMenu() 重建 DOM，
+    // 把被点击的按钮从树上摘掉；此时 e.target.parentElement 已是 null，closest() 永远找不到
+    // .cmd-wrap，会被误判成"点了菜单外面"从而把刚展开的二级列表又关掉。
+    const wrap = $('cmdMenu') && $('cmdMenu').closest('.cmd-wrap');
+    if (CmdMenu.open && wrap && !e.composedPath().includes(wrap)) closeCmdMenu();
+  });
+  $('slashPrefixClear').addEventListener('click', clearSlashPrefix);
+  $('cmdClose').addEventListener('click', closeCmdResult);
+  $('cmdGotIt').addEventListener('click', closeCmdResult);
+  $('cmdOverlay').addEventListener('click', (e) => { if (e.target.id === 'cmdOverlay') closeCmdResult(); });
+  $('themeBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleThemePanel(); });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#themePanel') && e.target.id !== 'themeBtn') closeThemePanel();
+  });
+  $('logoutBtn').addEventListener('click', logout);
+  $('aiCollapseBtn').addEventListener('click', toggleAiCollapse);
+  $('loginForm').addEventListener('submit', doLogin);
+  $('rootSelect').addEventListener('change', (e) => applyRootSelection(e.target.value));
+  $('addRootBtn').addEventListener('click', addRoot);
+  $('removeRootBtn').addEventListener('click', removeRoot);
+  $('gitPushBtn').addEventListener('click', gitPush);
+  // 根目录批量管理弹窗
+  $('manageRootsBtn').addEventListener('click', openRootManage);
+  $('rootManageClose').addEventListener('click', closeRootManage);
+  $('rootManageOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'rootManageOverlay') closeRootManage();
+  });
+  $('rmAllChk').addEventListener('change', (e) => toggleRootManageAll(e.target.checked));
+  $('rootManageDelete').addEventListener('click', deleteSelectedRoots);
+  // 会话批量选择
+  $('batchToggleBtn').addEventListener('click', () => toggleBatchMode());
+  $('batchAllChk').addEventListener('change', (e) => toggleBatchAll(e.target.checked));
+  $('batchDeleteBtn').addEventListener('click', deleteSelectedSessions);
+  $('batchCostDetails').addEventListener('click', () => ApiBill.showSelection());
+  $('batchCostClose').addEventListener('click', () => $('batchCostModal').close());
+  $('batchActBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleBatchMenu(); });
+  $('batchMarkCompleted').addEventListener('click', () => markSelectedSessions('completed'));
+  $('batchMarkTesting').addEventListener('click', () => markSelectedSessions('testing'));
+  $('batchMarkActive').addEventListener('click', () => markSelectedSessions('active'));
+  document.addEventListener('click', (e) => {
+    if (!$('batchMenu').hidden && !e.target.closest('.batch-actions')) closeBatchMenu();
+  });
+  $('batchCancelBtn').addEventListener('click', () => { closeBatchMenu(); toggleBatchMode(false); });
+  $('openFolderBtn').addEventListener('click', openFolder);
+  $('gitPushToastClose').addEventListener('click', hideGitPushToast);
+  // 编辑根目录备注 + 链接（入口为 rootMeta 内的 ✎ / 添加按钮）
+  $('rootEditClose').addEventListener('click', closeRootEdit);
+  $('addLinkBtn').addEventListener('click', () => addLinkRow('', ''));
+  $('rootEditSave').addEventListener('click', saveRootEdit);
+  $('rootEditOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'rootEditOverlay') closeRootEdit();
+  });
+  // 目录选择器
+  $('pickerClose').addEventListener('click', closePicker);
+  $('pickerHome').addEventListener('click', () => navigatePicker(''));
+  $('pickerUp').addEventListener('click', () => navigatePicker(parentPath(Picker.path)));
+  $('pickerGo').addEventListener('click', () => navigatePicker($('pickerPath').value.trim()));
+  $('pickerNewDir').addEventListener('click', createDirInPicker);
+  $('pickerPath').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') navigatePicker($('pickerPath').value.trim());
+  });
+  $('pickerSearch').addEventListener('input', onPickerSearch);
+  $('pickerSelect').addEventListener('click', confirmPickDir);
+  $('pickerOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'pickerOverlay') closePicker();
+  });
+  $('newSessionBtn').addEventListener('click', newSession);
+  // 工作台：新建会话选目录弹窗
+  $('wsDirClose').addEventListener('click', closeWsDir);
+  $('wsDirBrowse').addEventListener('click', wsBrowseDir);
+  $('wsDirUse').addEventListener('click', wsUseTypedDir);
+  $('wsDirPath').addEventListener('keydown', (e) => { if (e.key === 'Enter') wsUseTypedDir(); });
+  $('wsDirOverlay').addEventListener('click', (e) => { if (e.target.id === 'wsDirOverlay') closeWsDir(); });
+  PromptCacheUi.bind();
+  CostUi.bind();
+  $('engineSelect').addEventListener('change', onEngineChange);
+  // 设置：首页只有板块列表（renderSettingsNav），点某个板块进 #settingsPaneOverlay
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('settingsClose').addEventListener('click', closeSettings);
+  $('settingsPaneBack').addEventListener('click', backToSettingsNav);
+  $('settingsPaneClose').addEventListener('click', closeSettingsPane);
+  $('settingsPaneSave').addEventListener('click', saveSettings);
+  $('quickAddGroup').addEventListener('click', () => {
+    QuickEdit.push({ name: '', prompt: '', tags: [{ label: '', prompt: '' }] });
+    renderQuickEditor();
+  });
+  $('allowLanChk').addEventListener('change', renderLanGuide);
+  $('autoCompactModeSelect').addEventListener('change', syncAutoCompactMode);
+  $('lanForgotLink').addEventListener('click', toggleLanPwReset);
+  $('lanPwResetBtn').addEventListener('click', resetLanPassword);
+  // 添加工作目录引导 / 选择模板：点击遮罩关闭（新建项目表单不设遮罩关闭，避免误丢输入）
+  $('addRootGuideOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'addRootGuideOverlay') closeAddRootGuide();
+  });
+  $('templatePickOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'templatePickOverlay') closeTemplatePicker();
+  });
+  // 首次设定密码
+  $('setupForm').addEventListener('submit', doSetup);
+  // 新手引导（onboard.js）
+  $('onboardBack').addEventListener('click', onboardBack);
+  $('onboardNext').addEventListener('click', onboardNext);
+  // 引擎板块（pane-engine）内：两个引擎折叠块 + 各自的「高级选项」折叠
+  $('engAccClaudeHead').addEventListener('click', () => toggleAcc('claude'));
+  $('engAccCodexHead').addEventListener('click', () => toggleAcc('codex'));
+  $('claudeAdvHead').addEventListener('click', () => toggleAdv('claude'));
+  $('codexAdvHead').addEventListener('click', () => toggleAdv('codex'));
+  // 服务商 → 模型联动：换服务商即清空并自动检测选中推荐模型；Key 填完（失焦/回车）也自动补
+  $('claudeProviderSelect').addEventListener('change', onClaudeProviderChange);
+  $('claudeApiKey').addEventListener('change', () => onApiKeySettled('claude'));
+  $('claudeApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('claude'); });
+  $('claudeModelsBtn').addEventListener('click', fetchClaudeModels);
+  $('codexProviderSelect').addEventListener('change', () => onEngineProviderChange('codex'));
+  $('codexApiKey').addEventListener('change', () => onApiKeySettled('codex'));
+  $('codexApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('codex'); });
+  $('codexModelsBtn').addEventListener('click', () => fetchEngineModels('codex'));
+  // 引擎块没有自己的保存按钮了（全板块只有一个，在 footer），靠脏标记告诉用户「这块动了还没存」。
+  // 「脏」只由用户操作产生：换服务商在 onEngineProviderChange 里标，Key/地址/手填模型在这里标；
+  // 思考强度与原版订阅的模型下拉是即时落盘的，不算脏，故不在监听之列。
+  for (const eng of ['claude', 'codex']) {
+    for (const id of [`${eng}ApiKey`, `${eng}BaseUrl`, `${eng}ModelsUrl`, `${eng}ModelInput`]) {
+      $(id).addEventListener('input', () => markEngineDirty(eng));
+    }
+  }
+  // 手改上下文窗口同样算「未保存的改动」，否则只改这一项时保存按钮不会把它落盘
+  $('claudeCtxWindow').addEventListener('input', () => markEngineDirty('claude'));
+  // 上下文窗口快捷预设：点一下直接填数（保存仍由板块底部按钮完成）
+  for (const b of document.querySelectorAll('#claudeCtxWindowPresets [data-ctx-window]')) {
+    b.addEventListener('click', () => {
+      $('claudeCtxWindow').value = b.dataset.ctxWindow;
+      markEngineDirty('claude');
+    });
+  }
+  // 自定义压缩窗口的快捷预设
+  for (const b of document.querySelectorAll('#autoCompactPresets [data-auto-compact]')) {
+    b.addEventListener('click', () => { $('autoCompactTokensInput').value = b.dataset.autoCompact; });
+  }
+  // 更新引擎 + 修改密码
+  $('tcRefreshBtn').addEventListener('click', renderToolchain);
+  $('runAsUserSaveBtn').addEventListener('click', saveRunAsUser);
+  $('tcAllBundledBtn').addEventListener('click', () => setToolPreset('bundled'));
+  $('tcAutoBtn').addEventListener('click', () => setToolPreset('auto'));
+  // 软件本身的版本更新
+  $('appUpdCheckBtn').addEventListener('click', checkAppUpdate);
+  $('appUpdApplyBtn').addEventListener('click', applyAppUpdate);
+  // 新版本弹窗：强制更新时 close()/later() 内部直接返回，所以这三个入口天然失效
+  $('updModalNow').addEventListener('click', () => UpdateModal.now());
+  $('updModalLater').addEventListener('click', () => UpdateModal.later());
+  $('updModalX').addEventListener('click', () => UpdateModal.close());
+  $('updateModal').addEventListener('click', (e) => {
+    if (e.target.id === 'updateModal') UpdateModal.close();
+  });
+  // 模型选择：选定 + 两种检测（当前实际模型 / 可用模型），claude 与 codex 各一套；
+  // 同一个下拉（claudeModelSelect/codexModelSelect）与「服务商」区共用，服务商变了会被清空重选
+  $('claudeModelSelect').addEventListener('change', () => onModelSelect('claude'));
+  $('codexModelSelect').addEventListener('change', () => onModelSelect('codex'));
+  // 自定义服务商用的手填输入框：失焦/回车即落盘，和下拉行为一致
+  $('claudeModelInput').addEventListener('change', () => onModelSelect('claude'));
+  $('codexModelInput').addEventListener('change', () => onModelSelect('codex'));
+  $('claudeModelInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') onModelSelect('claude'); });
+  $('codexModelInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') onModelSelect('codex'); });
+  // 思考强度：两个引擎各一个下拉，''=自动
+  $('claudeEffortSelect').addEventListener('change', () => onEffortSelect('claude'));
+  $('codexEffortSelect').addEventListener('change', () => onEffortSelect('codex'));
+  $('mdlClaudeDetectBtn').addEventListener('click', () => detectCurrentModel('claude'));
+  $('mdlCodexDetectBtn').addEventListener('click', () => detectCurrentModel('codex'));
+  $('mdlClaudeListBtn').addEventListener('click', () => detectAvailableModels('claude'));
+  $('mdlCodexListBtn').addEventListener('click', () => detectAvailableModels('codex'));
+  $('pwChangeBtn').addEventListener('click', changePassword);
+  $('searchToggleBtn').addEventListener('click', toggleSearch);
+  $('favoritesToggleBtn').addEventListener('click', toggleListModeMenu);
+  document.querySelectorAll('.lmm-item').forEach((b) =>
+    b.addEventListener('click', () => switchListMode(b.dataset.listmode)));
+  $('sessionList').addEventListener('scroll', onSessionListScroll);
+  $('sessionSearch').addEventListener('input', onSearchInput);
+  $('sessionSearchClear').addEventListener('click', clearSessionSearch);
+  $('advSearch').addEventListener('change', onAdvToggle);
+  document.querySelectorAll('.s-tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+  document.querySelectorAll('.r-tab').forEach((b) => b.addEventListener('click', () => toggleRunFilter(b.dataset.runtab)));
+  document.querySelectorAll('.ctx-status').forEach((b) => b.addEventListener('click', () => ctxSetStatus(b.dataset.status)));
+  $('ctxRenameTitle').addEventListener('click', ctxRenameTitle);
+  $('ctxToggleFavorite').addEventListener('click', ctxToggleFavorite);
+  $('ctxTogglePinned').addEventListener('click', ctxTogglePinned);
+  $('ctxTraceStats').addEventListener('click', ctxOpenStats);
+  $('ctxOpenWorkdir').addEventListener('click', ctxOpenWorkdir);
+  $('favDirMoreBtn').addEventListener('click', toggleFavDirExpanded);
+  $('dirCtxCopy').addEventListener('click', dirCtxCopyPath);
+  $('dirCtxOpen').addEventListener('click', dirCtxOpenFolder);
+  $('dirCtxLock').addEventListener('click', () => {
+    const rid = dirCtxOpt && dirCtxOpt.rootId;
+    closeDirCtxMenu();
+    if (rid) manageRootLock(rid);
+  });
+  $('lockRootBtn').addEventListener('click', () => { if (State.rootId) manageRootLock(State.rootId); });
+  $('statsClose').addEventListener('click', closeSessionStats);
+  $('statsRefreshBtn').addEventListener('click', loadSessionStats);
+  document.addEventListener('click', (e) => {
+    if (!$('sessionCtxMenu').hidden && !$('sessionCtxMenu').contains(e.target)) closeSessionCtxMenu();
+    if (!$('dirCtxMenu').hidden && !$('dirCtxMenu').contains(e.target)) closeDirCtxMenu();
+  });
+  document.addEventListener('scroll', closeSessionCtxMenu, true);
+  document.addEventListener('scroll', closeDirCtxMenu, true);
+  // 侧栏宽度变化会改变标签换行位置，3 行的裁切点要跟着重算
+  window.addEventListener('resize', applyFavDirCollapse);
+  $('addTaskBtn').addEventListener('click', addTask);
+  $('stopBtn').addEventListener('click', stopTask);
+  $('pauseBtn').addEventListener('click', togglePause);
+  // 停止二选一弹窗
+  $('stopChoiceClose').addEventListener('click', closeStopChoice);
+  $('stopChoicePauseBtn').addEventListener('click', stopChoicePause);
+  $('stopChoiceNextBtn').addEventListener('click', stopChoiceNext);
+  $('stopChoiceOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'stopChoiceOverlay') closeStopChoice();
+  });
+  $('queueToggle').addEventListener('click', toggleQueue);
+  // 批量任务弹窗
+  $('addTasksBtn').addEventListener('click', openTasksModal);
+  $('tasksClose').addEventListener('click', closeTasksModal);
+  $('tasksInput').addEventListener('input', updateTasksCount);
+  $('tasksSubmit').addEventListener('click', submitTasks);
+  $('tasksOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'tasksOverlay') closeTasksModal();
+  });
+  // 任务管理弹窗
+  $('qmClose').addEventListener('click', closeQueueModal);
+  $('qmSelectAll').addEventListener('change', toggleSelectAll);
+  $('qmBatchDelete').addEventListener('click', batchDeleteTasks);
+  // 任务弹窗刻意不做「点背景关闭」：里面有勾选/编辑态，误点空白关掉很烦，只允许 ✕ 或 Esc
+  $('clearProcessBtn').addEventListener('click', () => ($('processLog').innerHTML = ''));
+  // 文件管理器 + 预览抽屉 + 编辑器
+  $('filesBtn').addEventListener('click', toggleFilesPanel);
+  $('filesClose').addEventListener('click', closeFilesPanel);
+  $('filesOverlay').addEventListener('click', (e) => { if (e.target.id === 'filesOverlay') closeFilesPanel(); });
+  $('fmSearchBtn').addEventListener('click', fmToggleSearch);
+  $('fmRefreshBtn').addEventListener('click', () => fmBrowse(FM.rel));
+  $('fmSearchInput').addEventListener('input', fmOnSearchInput);
+  $('fmSearchClear').addEventListener('click', fmClearSearch);
+  $('fmSearchRecurse').addEventListener('change', fmOnRecurseChange);
+  $('fpClose').addEventListener('click', closeFilePreview);
+  $('fpOverlay').addEventListener('click', (e) => { if (e.target.id === 'fpOverlay') closeFilePreview(); });
+  $('edClose').addEventListener('click', closeEditor);
+  $('edSave').addEventListener('click', saveEditor);
+  $('edArea').addEventListener('input', edMarkDirty);
+  $('edArea').addEventListener('keydown', (e) => {
+    // Ctrl/Cmd+S 保存；Tab 插入两个空格（不跳出编辑框）
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      saveEditor();
+    } else if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+      const ta = e.target;
+      const s = ta.selectionStart, en = ta.selectionEnd;
+      ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
+      ta.selectionStart = ta.selectionEnd = s + 2;
+      edMarkDirty();
+    }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if ($('costGuardModal').open || $('updateConflictModal').open) return;
+    if ($('promptCacheModal').open) { e.preventDefault(); $('promptCacheModal').close(); return; }
+    if ($('batchCostModal').open) { e.preventDefault(); $('batchCostModal').close(); return; }
+    if (!$('updateModal').hidden) { UpdateModal.close(); return; } // 强制更新时 close() 是空操作，关不掉
+    if (!$('queueModal').hidden) closeQueueModal();
+    else if (!$('shotTextOverlay').hidden) closeShotText();
+    else if (!$('shotOverlay').hidden) closeShot();
+    else if (!$('trOverlay').hidden) closeTrace();
+    else if (!$('edOverlay').hidden) closeEditor();
+    else if (!$('fpOverlay').hidden) closeFilePreview();
+    else if (!$('filesOverlay').hidden) closeFilesPanel();
+  });
+  // 移动端抽屉 + 过程面板切换
+  $('drawerBtn').addEventListener('click', toggleDrawer);
+  $('scrim').addEventListener('click', closeDrawer);
+  // 全过程视图
+  $('traceBtn').addEventListener('click', openTrace);
+  $('trClose').addEventListener('click', closeTrace);
+  $('trRefreshBtn').addEventListener('click', loadTrace);
+  $('trRawBtn').addEventListener('click', () => {
+    Trace.raw = !Trace.raw;
+    $('trRawBtn').style.color = Trace.raw ? 'var(--accent)' : '';
+    loadTrace();
+  });
+  $('trOverlay').addEventListener('click', (e) => {
+    if (e.target === $('trOverlay')) closeTrace();
+  });
+  $('procBtn').addEventListener('click', () => document.body.classList.toggle('show-process'));
+  $('extApiBtn').addEventListener('click', openExternalApi);
+  $('extApiClose').addEventListener('click', closeExternalApi);
+  $('extApiDone').addEventListener('click', closeExternalApi);
+  $('extApiOpenChk').addEventListener('change', toggleExternalApiOpen);
+  $('extApiResetToken').addEventListener('click', resetExternalApiToken);
+  $('extApiCopyToken').addEventListener('click', copyExternalApiToken);
+  $('extApiSaveBaseUrl').addEventListener('click', saveExternalApiBaseUrl);
+  $('extMsgToastClose').addEventListener('click', () => { $('extMsgToast').hidden = true; });
+  $('closeProcessBtn').addEventListener('click', () => document.body.classList.remove('show-process'));
+  // 右下角错误小圆圈：点开/收起；点浮层外面或按 Esc 收起（点圆圈本身交给它自己 toggle）
+  $('noticeFab').addEventListener('click', (e) => { e.stopPropagation(); toggleNoticePop(); });
+  document.addEventListener('click', (e) => {
+    if (!State.noticeOpen) return;
+    if ($('noticeDock')?.contains(e.target)) return;
+    toggleNoticePop(false);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && State.noticeOpen) toggleNoticePop(false);
+  });
+  // 快捷前缀标签：初始渲染 + Ctrl+1..9 热键（按标签整体顺序；重复按同一个=取消）
+  quickLoad();
+  renderQuick();
+  document.addEventListener('keydown', (e) => {
+    if (!e.ctrlKey || e.altKey || e.shiftKey || e.metaKey) return;
+    const idx = '123456789'.indexOf(e.key);
+    if (idx < 0) return;
+    const flat = quickFlat();
+    if (idx >= flat.length) return;
+    e.preventDefault();
+    setQuick(flat[idx].group, flat[idx].label);
+  });
+  $('taskInput').addEventListener('input', updateSlashMenu);
+  $('taskInput').addEventListener('blur', () => setTimeout(closeSlashMenu, 120));
+  $('taskInput').addEventListener('keydown', (e) => {
+    // 斜杠候选菜单打开时：上下选择、回车/Tab 选中、Esc 关闭
+    if (Slash.open) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); moveSlash(1); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); moveSlash(-1); return; }
+      if (e.key === 'Escape') { e.preventDefault(); closeSlashMenu(); return; }
+      if ((e.key === 'Enter' || e.key === 'Tab') && !e.isComposing) {
+        e.preventDefault();
+        pickSlash();
+        return;
+      }
+    }
+    // 回车 = 加入任务；Shift+回车 = 换行
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      addTask();
+    }
+  });
+  // 上传文件
+  $('uploadBtn').addEventListener('click', () => $('fileInput').click());
+  $('fileInput').addEventListener('change', async (e) => {
+    await uploadFiles(e.target.files);
+    e.target.value = ''; // 允许重复选择同一文件
+  });
+  // 拖拽 / 粘贴 / 截屏
+  initDragUpload();
+  $('taskInput').addEventListener('paste', onPasteImage);
+  $('upCancelBtn').addEventListener('click', cancelUpload);
+  $('attachPvClose').addEventListener('click', closeAttachPreview);
+  $('attachOverlay').addEventListener('click', (e) => { if (e.target === $('attachOverlay')) closeAttachPreview(); });
+  $('shotBtn').addEventListener('click', captureScreenshot);
+  $('shotCancel').addEventListener('click', closeShot);
+  $('shotConfirm').addEventListener('click', confirmShot);
+  $('shotUndo').addEventListener('click', undoShot);
+  $('shotClear').addEventListener('click', clearShot);
+  $('shotCropBtn').addEventListener('click', applyCrop);
+  $('shotEditBtn').addEventListener('click', editSelected);
+  $('shotDelBtn').addEventListener('click', () => deleteSelected());
+  $('shotTextCancel').addEventListener('click', closeShotText);
+  $('shotTextOk').addEventListener('click', confirmShotText);
+  $('shotTextOverlay').addEventListener('click', (e) => { if (e.target.id === 'shotTextOverlay') closeShotText(); });
+  $('shotTextArea').addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); confirmShotText(); }
+  });
+  window.addEventListener('resize', () => { if (!$('shotOverlay').hidden) { fitShotImage(); paintAnn(); } });
+  window.addEventListener('orientationchange', () => { setTimeout(() => { if (!$('shotOverlay').hidden) { fitShotImage(); paintAnn(); } }, 250); });
+  const stage = $('shotStage');
+  stage.addEventListener('pointerdown', shotDown);
+  stage.addEventListener('pointermove', shotMove);
+  stage.addEventListener('pointerup', shotUp);
+  stage.addEventListener('pointercancel', shotUp);
+}
+
+// 已登录后才连接 WS / 加载数据
+async function startApp() {
+  connectWs();
+  Clootee.refresh();
+  await loadSettings();
+  await loadRoots();
+  await markSetupDone();
+  checkAppUpdateSilently(); // 不 await：每次启动静默检测一次，有更新才在齿轮按钮上提示，不打断使用
+}
+
+// 老用户（已有密码即视为老用户）：一律不再弹引导，顺手把 setupDone 补成 true
+async function markSetupDone() {
+  try {
+    const s = await api('/api/settings');
+    if (s && !s.setupDone) await api('/api/settings', { setupDone: true, onboarded: true });
+  } catch { /* 非关键路径，静默跳过 */ }
+}
+
+// ── 设置：默认引擎 ──
+async function loadSettings() {
+  try {
+    const s = await api('/api/settings');
+    if (s && (s.defaultEngine === 'claude' || s.defaultEngine === 'codex')) {
+      State.settings.defaultEngine = s.defaultEngine;
+    }
+    if (s && s.platform) State.settings.platform = s.platform;
+    if (s && s.engineAvail) State.settings.engineAvail = s.engineAvail;
+    if (s) {
+      State.settings.allowLan = !!s.allowLan;
+      State.settings.preferBundled = !!s.preferBundled;
+      State.settings.outEndReady = !!s.outEndReady;
+      State.settings.lanUrls = Array.isArray(s.lanUrls) ? s.lanUrls : [];
+      State.settings.port = Number(s.port) || 0;
+      State.settings.systemPrompt = typeof s.systemPrompt === 'string' ? s.systemPrompt : '';
+      State.settings.templateCollectionPath = typeof s.templateCollectionPath === 'string' ? s.templateCollectionPath : '';
+      State.settings.quickGroups = Array.isArray(s.quickGroups) ? s.quickGroups : [];
+      if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
+      State.settings.claudePromptCache = s.claudePromptCache || '1h';
+      State.settings.askClaudePromptCache = !!s.askClaudePromptCache;
+      State.settings.costOptimization = s.costOptimization || CostUi.defaults;
+      if (typeof s.version === 'string' && s.version) State.settings.version = s.version;
+      State.settings.runAsUserEnabled = !!s.runAsUserEnabled;
+      State.settings.runAsUserName = typeof s.runAsUserName === 'string' ? s.runAsUserName : 'claudeuser';
+      renderQuick();
+    }
+  } catch { /* 忽略：用默认值 */ }
+  // 仅 Windows 显示「前往」按钮（点击在本机文件管理器中打开根目录）
+  const btn = $('openFolderBtn');
+  if (btn) btn.hidden = State.settings.platform !== 'win32';
+  // 顶部版本徽章：跟着后端实际跑的 package.json 版本走，不再是写死的字符串
+  const verEl = $('appVersion');
+  if (verEl) verEl.textContent = `V ${State.settings.version}`;
+}
+async function openFolder() {
+  const root = currentRoot();
+  if (!root) {
+    alert(T('selectRootFirst'));
+    return;
+  }
+  try {
+    await api('/api/root/open', { rootId: root.id });
+  } catch (e) {
+    alert(e.message);
+  }
+}
+// 局域网访问教程：随「允许局域网访问」勾选状态展开/收起，列出本机局域网地址（带复制按钮）。
+function renderLanGuide() {
+  const guide = $('lanGuide');
+  const list = $('lanAddrList');
+  const hint = $('lanGuideHint');
+  if (!guide || !list) return;
+  const on = $('allowLanChk').checked;
+  guide.hidden = !on;
+  // 每次重渲染都收起「忘记密码」重置框，避免残留状态
+  const pwBox = $('lanPwReset');
+  if (pwBox) pwBox.hidden = true;
+  if (!on) return;
+  const urls = Array.isArray(State.settings.lanUrls) ? State.settings.lanUrls : [];
+  list.innerHTML = '';
+  if (!urls.length) {
+    const empty = document.createElement('div');
+    empty.className = 'lan-addr-empty';
+    empty.textContent = '未检测到局域网地址（本机可能未连接 WiFi / 有线网络）。连上网络后重开本面板即可看到地址。';
+    list.appendChild(empty);
+  } else {
+    urls.forEach((url, i) => {
+      // 每个地址一个 item：行(row) + 可展开的二维码面板(qrPanel)
+      const item = document.createElement('div');
+      item.className = 'lan-addr-item';
+      const row = document.createElement('div');
+      row.className = 'lan-addr-row';
+      if (i === 0) {
+        // 后端已按「越像真实局域网网卡」排序，第一个最可能是手机能访问的地址
+        const rec = document.createElement('span');
+        rec.className = 'lan-addr-rec';
+        rec.textContent = '推荐';
+        row.appendChild(rec);
+        row.classList.add('recommended');
+      }
+      const a = document.createElement('span');
+      a.className = 'lan-addr-url';
+      a.textContent = url;
+      // 二维码展开按钮
+      const qrBtn = document.createElement('button');
+      qrBtn.type = 'button';
+      qrBtn.className = 'lan-qr-btn';
+      qrBtn.textContent = '📱';
+      qrBtn.title = T('lanQrToggle');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'lan-copy-btn';
+      btn.textContent = '📋';
+      btn.title = T('copy');
+      btn.addEventListener('click', () => copyText(url, btn, '📋'));
+      row.appendChild(a);
+      row.appendChild(qrBtn);
+      row.appendChild(btn);
+      item.appendChild(row);
+      // 二维码面板（点开才渲染，避免一次性生成多张）
+      const panel = document.createElement('div');
+      panel.className = 'lan-qr-panel';
+      panel.hidden = true;
+      item.appendChild(panel);
+      qrBtn.addEventListener('click', () => toggleLanQr(url, qrBtn, panel));
+      list.appendChild(item);
+    });
+  }
+  // 未保存/未重启时提示：更改需重启后局域网才真正可访问
+  const needRestart = !State.settings.allowLan;
+  const multi = urls.length > 1 ? '优先用「推荐」那条；其余多为虚拟网卡/VPN 地址（如 172.*），其他设备一般连不上，可忽略。' : '';
+  const base = needRestart
+    ? '⚠️ 开启后需保存并重启服务，局域网访问才会生效。生效后在上面地址首次访问需输入本工作台的访问密码。'
+    : '首次访问需输入本工作台的访问密码；打开后可像本机一样使用。';
+  hint.textContent = base + (multi ? ' ' + multi : '');
+}
+
+// 展开/收起某个局域网地址的二维码。首次展开时才用本地 qrcode 库生成（离线可用，无需联网）。
+function toggleLanQr(url, btn, panel) {
+  const open = panel.hidden; // 当前隐藏 → 本次要展开
+  panel.hidden = !open;
+  btn.classList.toggle('on', open);
+  if (!open || panel.dataset.rendered === '1') return;
+  panel.dataset.rendered = '1';
+  const box = document.createElement('div');
+  box.className = 'lan-qr-img';
+  try {
+    if (typeof qrcode !== 'function') throw new Error('qr lib missing');
+    const qr = qrcode(0, 'M'); // typeNumber=0 自动，纠错级别 M
+    qr.addData(url);
+    qr.make();
+    box.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true });
+  } catch (e) {
+    box.textContent = url; // 兜底：库缺失时至少显示地址
+  }
+  const tip = document.createElement('div');
+  tip.className = 'lan-qr-tip';
+  tip.textContent = T('lanQrTip');
+  panel.appendChild(box);
+  panel.appendChild(tip);
+}
+
+// ══ 设置：板块化导航 ══
+// 设置首页只有一个板块列表，任何具体设置都要「点进去」进入对应 pane（#settingsPaneOverlay）。
+// 每个板块自带 fill（进入时填表单）、save（离开/点保存时写 /api/settings 的局部 patch）与
+// summary（列表里一眼看到当前状态，不必点进去）。
+// saveKeys 为空数组＝该板块没有 /api/settings 字段（如引擎板块的服务商由自己的保存按钮写 engine/config）。
+const SETTINGS_PANES = [
+  {
+    id: 'runtime',
+    icon: '🔧',
+    title: () => T('paneRuntime'),
+    desc: () => T('paneRuntimeDesc'),
+    summary: () => {
+      const list = State.toolchain || [];
+      if (!list.length) return T('paneRuntimeDesc');
+      const miss = list.filter((t) => t.active === 'none').map((t) => t.label);
+      return miss.length ? `缺少：${miss.join('、')}` : `全部就绪（${list.length} 项）`;
+    },
+    fill: fillRuntimePane,
+    save: null, // 来源偏好改一个存一个（见 setToolPref），不走 pane 的统一保存
+  },
+  {
+    id: 'engine',
+    icon: '🤖',
+    title: () => T('paneEngine'),
+    desc: () => T('paneEngineDesc'),
+    summary: () => {
+      const e = State.settings.defaultEngine === 'codex' ? T('engineCodex') : T('engineClaude');
+      return `${T('defaultEngine')}：${e}`;
+    },
+    fill: fillEnginePane,
+    save: saveEnginePane,
+  },
+  {
+    id: 'network',
+    icon: '🌐',
+    title: () => T('paneNetwork'),
+    desc: () => T('paneNetworkDesc'),
+    summary: () => (State.settings.allowLan ? T('paneNetworkOn') : T('paneNetworkOff')),
+    fill: fillNetworkPane,
+    save: saveNetworkPane,
+  },
+  {
+    id: 'prompt',
+    icon: '📝',
+    title: () => T('panePrompt'),
+    desc: () => T('panePromptDesc'),
+    summary: () => {
+      const n = quickGroups().length;
+      const p = (State.settings.systemPrompt || '').trim();
+      return [p ? T('panePromptSet') : T('panePromptEmpty'), T('paneQuickN').replace('{n}', n)].join(' · ');
+    },
+    fill: fillPromptPane,
+    save: savePromptPane,
+  },
+  {
+    id: 'cost', icon: '$', title: () => T('paneCost'), desc: () => T('paneCostDesc'),
+    summary: () => T({ auto: 'costAuto', manual: 'costManual', off: 'costOff' }[CostUi.policy().mode]),
+    fill: () => CostUi.fill(), save: () => CostUi.save(),
+  },
+  {
+    id: 'template',
+    icon: '📁',
+    title: () => T('paneTemplate'),
+    desc: () => T('paneTemplateDesc'),
+    summary: () => State.settings.templateCollectionPath || T('paneTemplateEmpty'),
+    fill: fillTemplatePane,
+    save: saveTemplatePane,
+  },
+  {
+    id: 'appupdate',
+    icon: '⬆️',
+    title: () => T('paneUpdate'),
+    desc: () => T('paneUpdateDesc'),
+    summary: () => {
+      const u = State.updateInfo;
+      if (!u) return T('paneUpdateUnknown');
+      return u.hasUpdate ? `🆕 ${T('paneUpdateAvailable')}` : T('paneUpdateUpToDate');
+    },
+    fill: fillUpdatePane,
+    save: null, // 拉取更新是即时动作（点按钮触发），不走统一保存
+  },
+];
+function paneById(id) {
+  return SETTINGS_PANES.find((p) => p.id === id) || null;
+}
+
+function openSettings() {
+  closeDrawer(); // 移动端：打开设置前先收起左侧抽屉，避免遮挡
+  renderSettingsNav();
+  $('settingsOverlay').hidden = false;
+}
+function closeSettings() {
+  $('settingsOverlay').hidden = true;
+}
+
+// 板块列表：图标 + 标题 + 说明 + 当前状态摘要 + ›
+function renderSettingsNav() {
+  const box = $('settingsNav');
+  box.innerHTML = '';
+  for (const p of SETTINGS_PANES) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'sx-navi';
+    const ic = document.createElement('span');
+    ic.className = 'sx-navi-ic';
+    ic.textContent = p.icon;
+    const tx = document.createElement('span');
+    tx.className = 'sx-navi-tx';
+    const b = document.createElement('b');
+    b.textContent = p.title();
+    const em = document.createElement('em');
+    em.textContent = p.desc();
+    const sum = document.createElement('span');
+    sum.className = 'sx-navi-sum';
+    sum.textContent = p.summary();
+    tx.append(b, em, sum);
+    const arr = document.createElement('span');
+    arr.className = 'sx-navi-arrow';
+    arr.textContent = '›';
+    row.append(ic, tx, arr);
+    row.addEventListener('click', () => openSettingsPane(p.id));
+    box.appendChild(row);
+  }
+}
+
+// 当前打开的板块 id（null=没开）；保存/返回都以它为准
+let CurrentPane = null;
+
+// ── footer 状态条：紧挨着「保存」按钮的唯一反馈面 ──
+// 以前保存结果写在板块内容里（比如 claudeProviderStatus），用户点了底部保存根本看不到；
+// 现在保存中/已保存/未保存改动/失败原因一律出现在按钮左边。
+// 存的是 key 而非成句文字，切语言时能重新翻译。
+let PaneNotice = null;      // { key, params, kind } —— 瞬时结果（保存中 / 已保存 / 失败）
+let PaneNoticeTimer = null;
+
+function setPaneNotice(key, params, kind, ms) {
+  if (PaneNoticeTimer) { clearTimeout(PaneNoticeTimer); PaneNoticeTimer = null; }
+  PaneNotice = key ? { key, params: params || {}, kind: kind || '' } : null;
+  if (key && ms) {
+    PaneNoticeTimer = setTimeout(() => { PaneNoticeTimer = null; PaneNotice = null; renderPaneStatus(); }, ms);
+  }
+  renderPaneStatus();
+}
+// 没有瞬时结果时，回落显示当前板块的「有未保存的改动」
+function renderPaneStatus() {
+  const el = $('settingsPaneStatus');
+  if (!el) return;
+  const show = (text, kind) => {
+    el.className = 'sx-foot-status' + (kind ? ' ' + kind : '');
+    el.textContent = text;
+    el.title = kind === 'err' ? '' : text; // 失败原因允许换行，不靠 title 兜底
+  };
+  if (PaneNotice) {
+    let s = T(PaneNotice.key);
+    for (const [k, v] of Object.entries(PaneNotice.params)) s = s.replace(`{${k}}`, v);
+    show(s, PaneNotice.kind);
+    return;
+  }
+  if (CurrentPane === 'engine' && (EngineDirty.claude || EngineDirty.codex || PromptCacheUi.dirty)) return show(T('engDirty'), 'warn');
+  show('', '');
+}
+
+function openSettingsPane(id) {
+  const p = paneById(id);
+  if (!p) return;
+  CurrentPane = id;
+  PaneLeaveBlocked = false;
+  for (const q of SETTINGS_PANES) $(`pane-${q.id}`).hidden = q.id !== id;
+  $('settingsPaneTitle').textContent = `${p.icon} ${p.title()}`;
+  $('settingsPaneSave').textContent = T('save');
+  $('settingsPaneOverlay').hidden = false;
+  $('settingsPaneOverlay').querySelector('.sx-body').scrollTop = 0;
+  setPaneNotice(null); // 进入板块先清掉上一个板块残留的「已保存」
+  if (p.fill) p.fill();
+}
+// 离开板块：先落盘。保存没过就**不关**（footer 已把原因写在按钮旁边），
+// 再点一次才问「仍要离开吗」，避免把人困在保存不成功的板块里。
+let PaneLeaveBlocked = false;
+async function leavePane(close) {
+  const ok = await saveCurrentPane();
+  if (!ok) {
+    if (!PaneLeaveBlocked) { PaneLeaveBlocked = true; return; }
+    if (!confirm(T('engLeaveUnsaved'))) return;
+  }
+  PaneLeaveBlocked = false;
+  CurrentPane = null;
+  $('settingsPaneOverlay').hidden = true;
+  close();
+}
+// 返回板块列表（回到列表前刷新摘要，让「引擎：Claude」这类当前状态是最新的）
+function backToSettingsNav() {
+  return leavePane(renderSettingsNav);
+}
+// 直接关掉整个设置（也先保存，避免改了没生效）
+function closeSettingsPane() {
+  return leavePane(closeSettings);
+}
+// 提交当前板块负责的 /api/settings 字段（局部 patch，后端 SettingsStruct.update 只认传入的键）
+// 返回 false＝这次没存成功（板块自定义 save 判定），调用方据此决定要不要真的离开
+async function saveCurrentPane() {
+  const p = paneById(CurrentPane);
+  if (!p) return true;
+  if (p.save) return (await p.save()) !== false;
+  if (!p.saveKeys || !p.saveKeys.length) return true;
+  await patchSettings(collectPaneKeys(p.saveKeys));
+  return true;
+}
+// 按字段名从 DOM 收集值（供 saveKeys 声明式保存）
+function collectPaneKeys(keys) {
+  const patch = {};
+  for (const k of keys) {
+    if (k === 'allowLan') patch.allowLan = $('allowLanChk').checked;
+  }
+  return patch;
+}
+// 统一的 /api/settings 局部提交 + 同步 State（失败不打断 UI，仅在控制台留痕）
+async function patchSettings(patch) {
+  if (!patch || !Object.keys(patch).length) return null;
+  try {
+    const s = await api('/api/settings', patch);
+    State.settings.defaultEngine = s.defaultEngine;
+    if (s.engineAvail) State.settings.engineAvail = s.engineAvail;
+    State.settings.allowLan = !!s.allowLan;
+    State.settings.preferBundled = !!s.preferBundled;
+    State.settings.systemPrompt = typeof s.systemPrompt === 'string' ? s.systemPrompt : '';
+    State.settings.templateCollectionPath =
+      typeof s.templateCollectionPath === 'string' ? s.templateCollectionPath : '';
+    State.settings.quickGroups = Array.isArray(s.quickGroups) ? s.quickGroups : [];
+    if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
+      State.settings.claudePromptCache = s.claudePromptCache || '1h';
+      State.settings.askClaudePromptCache = !!s.askClaudePromptCache;
+      State.settings.costOptimization = s.costOptimization || CostUi.defaults;
+    renderQuick();
+    return s;
+  } catch (e) {
+    console.warn('保存设置失败：', e.message);
+    return null;
+  }
+}
+
+// ── 各板块的 fill / save ──
+// 引擎板块：默认引擎 + 两个引擎的服务商/模型折叠块（进入时才拉取，避免主设置一开就打一堆请求）
+// 引擎板块的静态文案：标签、服务商下拉选项、按钮、占位符。
+// 首屏与「切语言」都经 applyText 走这里，保证界面只出现当前语言。
+function applyEnginePaneText() {
+  PromptCacheUi.applyText();
+  CostUi.applyText();
+  for (const engine of ['claude', 'codex']) {
+    const cap = engine === 'claude' ? 'Claude' : 'Codex';
+    const u = providerUi(engine);
+    $(`${engine}ProviderLbl`).textContent = T('engProviderLabel');
+    // 服务商下拉的选项由 HTML 定义（顺序/值），这里只按 value 改文案
+    for (const o of u.select.options) o.textContent = providerOptionText(engine, o.value);
+    $(`${engine}BaseUrlLbl`).textContent = T(engine === 'claude' ? 'engBaseUrlClaude' : 'engBaseUrlCodex');
+    u.base.placeholder = T(engine === 'claude' ? 'engBaseUrlPhClaude' : 'engBaseUrlPhCodex');
+    $(`${engine}ModelsUrlLbl`).textContent = T('engModelsUrlLabel');
+    u.modelsUrl.placeholder = T('engModelsUrlPh');
+    $(`${engine}ApiKeyLbl`).textContent = T('engApiKeyLabel');
+    u.key.placeholder = T('engApiKeyPh');
+    $(`${engine}ModelLbl`).textContent = T('engModelLabel');
+    u.modelInput.placeholder = T('engModelPh');
+    u.modelHint.textContent = T('engModelHintCustom');
+    $(`${engine}EffortLbl`).textContent = T('engEffortLabel');
+    $(`${engine}EffortNote`).textContent = T(engine === 'claude' ? 'engEffortNoteClaude' : 'engEffortNoteCodex');
+    if (u.ctxWin) {
+      $('claudeCtxWindowLbl').textContent = T('engCtxWindowLabel');
+      u.ctxWin.placeholder = T('engCtxWindowPh');
+      const def = providerDefaultContextWindow(u.select.value);
+      $('claudeCtxWindowNote').textContent = def
+        ? `${T('engCtxWindowNote')} ${T('engCtxWindowDefault').replace('{n}', formatCtxWindow(def))}`
+        : T('engCtxWindowNote');
+    }
+    $(`${engine}AdvLabel`).textContent = T('advOptions');
+    $(`${engine}ModelsBtn`).textContent = T('engRefetchModels');
+    // 引擎块没有自己的保存按钮了，统一用板块底部那个（见 saveEnginePane）
+    $(`mdl${cap}DetectBtn`).textContent = T('engDetectCurrent');
+    $(`mdl${cap}ListBtn`).textContent = T('engDetectAvailable');
+    syncModelProviderTag(engine);
+  }
+  // 「逐个真实验证」只有 claude 有（原版订阅没有模型列表接口，只能挨个试）
+  $('mdlClaudeVerifyTitle').textContent = T('engVerifyTitle');
+  $('mdlClaudeVerifyDesc').textContent = T('engVerifyDesc');
+  // 登录卡整块都是拼出来的文案，切语言要重画（走缓存，不再拉一次 auth status）
+  // （Health.loginBox 也可能指向引导页那个框，那时别拿引擎板块的可见性去判断）
+  const login = providerUi('claude').login;
+  if (login && !login.hidden && Health.loginBox === login) paintClaudeLogin();
+}
+// 服务商下拉的选项文字：原版按引擎分两种说法，MiniMax 在 claude 侧带「推荐」后缀
+function providerOptionText(engine, id) {
+  if (id === 'official') return T(engine === 'claude' ? 'pvOfficialClaude' : 'pvOfficialCodex');
+  // 「官方 API」与「原版订阅」是同一家的两条路：下拉里必须一眼看出这条要填 Key、按量付费
+  if (id === 'anthropic' && engine === 'claude') return T('pvAnthropic') + T('pvApiTag');
+  if (id === 'openai' && engine === 'codex') return T('pvOpenai') + T('pvApiTag');
+  if (id === 'minimax' && engine === 'claude') return T('pvMinimax') + T('pvMinimaxTag');
+  return providerLabel(id);
+}
+
+// ── 引擎块的「未保存」状态 ──
+// 引擎块里的服务商/Key/模型不是即时落盘的（要显式保存），而保存按钮只有一个、在板块底部，
+// 所以必须把「哪一块动过还没存」显式画出来：折叠块标题上一个圆点 + footer 按钮旁边一句话。
+// 脏标记只由**用户操作**产生（换服务商、改 Key/地址/手填模型），程序回填表单不算——
+// 否则 loadEngineProvider / autoPickModel 自动填一次就会把它标脏。
+const EngineDirty = { claude: false, codex: false };
+// 配置有没有成功读到过：没读到就全是空表单，这时保存会把已存的 Key 覆盖成空，必须跳过
+const EngineLoaded = { claude: false, codex: false };
+
+function engineBlockLabel(engine) { return engine === 'claude' ? 'Claude Code' : 'Codex'; }
+
+function markEngineDirty(engine) {
+  if (EngineDirty[engine]) { PaneNotice = null; renderPaneStatus(); return; }
+  EngineDirty[engine] = true;
+  PaneNotice = null; // 用户又动了 → 之前的「已保存」不再成立
+  if (PaneNoticeTimer) { clearTimeout(PaneNoticeTimer); PaneNoticeTimer = null; }
+  renderEngineDirty();
+  renderPaneStatus();
+}
+function clearEngineDirty(engine) {
+  EngineDirty[engine] = false;
+  renderEngineDirty();
+}
+function renderEngineDirty() {
+  for (const engine of ['claude', 'codex']) {
+    const head = $(engine === 'claude' ? 'engAccClaudeHead' : 'engAccCodexHead');
+    head.classList.toggle('eng-dirty', EngineDirty[engine]);
+  }
+}
+
+function fillEnginePane() {
+  EngineDirty.claude = false;
+  EngineDirty.codex = false;
+  EngineLoaded.claude = false;
+  EngineLoaded.codex = false;
+  setPaneNotice(null);
+  renderEngineDirty();
+  $('defaultEngineSelect').value = State.settings.defaultEngine;
+  $('defaultEngineNote').textContent = defaultEngineNoteText();
+  setAdvOpen('claude', false);
+  setAdvOpen('codex', false);
+  // 默认展开当前默认引擎那一块，另一块收起
+  const claudeFirst = State.settings.defaultEngine !== 'codex';
+  setAccOpen('claude', claudeFirst);
+  setAccOpen('codex', !claudeFirst);
+  loadClaudeProvider();
+  loadEngineProvider('codex');
+  loadModelState();
+}
+// 「默认引擎」下面那行说明：只装了一个引擎时，额外说清默认引擎已自动跟着它走
+function defaultEngineNoteText() {
+  const av = State.settings.engineAvail;
+  let note = T('defaultEngineNote');
+  if (av && av.claude !== av.codex) {
+    const only = av.codex ? T('engineCodex') : T('engineClaude');
+    note += ' ' + T('defaultEngineOnlyInstalled').replace(/\{engine\}/g, only);
+  }
+  return note;
+}
+// 板块「保存」＝把这个板块里的东西全部落盘：默认引擎 + 每个**有改动**的引擎块。
+// 逐块独立提交：某一块存不上（比如第三方服务商还没选到模型、Key 填错了拉不到模型）
+// 不连累另一块，也不连累默认引擎；失败的那块展开并滚动到可视区，原因同时写到 footer。
+// 返回 false ＝ 有块没存上，调用方（leavePane）据此决定先别关弹窗。
+async function saveEnginePane() {
+  const eng = $('defaultEngineSelect').value === 'codex' ? 'codex' : 'claude';
+  const targets = ['claude', 'codex'].filter((e) => EngineDirty[e]);
+  if (targets.length) setPaneNotice('engSaving', null, '', 0);
+  const fails = [];
+  for (const e of targets) {
+    const label = engineBlockLabel(e);
+    // 表单没读到过（loadEngineProvider 失败）＝里面是空的，存下去会把已配好的 Key 抹掉
+    if (!EngineLoaded[e]) { fails.push({ engine: e, label, msg: T('engBlockNotLoaded') }); continue; }
+    const err = await saveEngineProvider(e);
+    if (err) fails.push({ engine: e, label, msg: err.msg });
+  }
+  const savedDefault = await patchSettings({ defaultEngine: eng });
+  if (fails.length) {
+    const f = fails[0];
+    setPaneNotice('engBlockSaveFail', { block: f.label, msg: f.msg }, 'err', 0);
+    setAccOpen(f.engine, true); // 展开出错的那块，想看细节不用自己找
+    return false;
+  }
+  if (!savedDefault) { setPaneNotice('engSaveFailShort', null, 'err', 0); return false; }
+  setPaneNotice('engSavedToast', null, 'ok', 2500);
+  return true;
+}
+
+function fillNetworkPane() {
+  $('allowLanChk').checked = !!State.settings.allowLan;
+  renderLanGuide();
+  $('pwStatus').textContent = '';
+  $('pwOld').value = '';
+  $('pwNew').value = '';
+}
+async function saveNetworkPane() {
+  const allowLan = $('allowLanChk').checked;
+  const wasLan = State.settings.allowLan;
+  await patchSettings({ allowLan });
+  if (wasLan !== State.settings.allowLan) alert(T('lanNeedRestart'));
+}
+
+function fillPromptPane() {
+  $('systemPromptInput').value = State.settings.systemPrompt || '';
+  quickEditLoad();
+}
+async function savePromptPane() {
+  await patchSettings({
+    systemPrompt: $('systemPromptInput').value,
+    quickGroups: quickEditCollect(),
+  });
+}
+
+// ── 快捷按钮 GUI 编辑器 ──
+// QuickEdit 是进入面板时对 quickGroups 的可编辑副本；文字输入实时写回副本（不重渲染，避免丢焦点），
+// 增删分组/按钮才重渲染。保存时经 quickEditCollect 清洗后写入 settings.quickGroups。
+let QuickEdit = [];
+function quickEditLoad() {
+  QuickEdit = quickGroups().map((g) => ({
+    name: g.name || '',
+    prompt: g.prompt || '',
+    tags: (g.tags || []).map((t) => ({ label: t.label || '', prompt: t.prompt || '' })),
+  }));
+  renderQuickEditor();
+}
+// 收集为后端结构：丢掉空按钮/空组，含义/组提示词留空则不带该字段
+function quickEditCollect() {
+  const out = [];
+  for (const g of QuickEdit) {
+    const tags = [];
+    for (const t of g.tags) {
+      const label = (t.label || '').trim();
+      if (!label) continue;
+      const prompt = (t.prompt || '').trim();
+      tags.push(prompt ? { label, prompt } : { label });
+    }
+    if (!tags.length) continue;
+    const name = (g.name || '').trim() || `组${out.length + 1}`;
+    const prompt = (g.prompt || '').trim();
+    out.push(prompt ? { name, prompt, tags } : { name, tags });
+  }
+  return out;
+}
+function renderQuickEditor() {
+  const box = $('quickEditor');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!QuickEdit.length) {
+    const empty = document.createElement('div');
+    empty.className = 'qedit-empty';
+    empty.textContent = '还没有快捷按钮。点下方「＋ 添加分组」创建第一个。';
+    box.appendChild(empty);
+  }
+  QuickEdit.forEach((g, gi) => box.appendChild(quickEditGroupCard(g, gi)));
+}
+// 一个分组卡片：组名 + 组提示词 + 按钮列表 + 增/删
+function quickEditGroupCard(g, gi) {
+  const card = document.createElement('div');
+  card.className = 'qedit-group';
+
+  const head = document.createElement('div');
+  head.className = 'qedit-ghead';
+  const nameIn = document.createElement('input');
+  nameIn.className = 'sx-input qedit-gname';
+  nameIn.placeholder = '分组名称（如：深度）';
+  nameIn.value = g.name;
+  nameIn.addEventListener('input', () => (g.name = nameIn.value));
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'qedit-del-group';
+  del.textContent = '删除分组';
+  del.addEventListener('click', () => {
+    QuickEdit.splice(gi, 1);
+    renderQuickEditor();
+  });
+  head.append(nameIn, del);
+
+  const gp = document.createElement('input');
+  gp.className = 'sx-input qedit-gprompt';
+  gp.placeholder = '组说明（可选，写入 CLAUDE.md/AGENTS.md，不影响消息正文）';
+  gp.value = g.prompt;
+  gp.addEventListener('input', () => (g.prompt = gp.value));
+
+  const tagsBox = document.createElement('div');
+  tagsBox.className = 'qedit-tags';
+  g.tags.forEach((t, ti) => tagsBox.appendChild(quickEditTagRow(g, gi, t, ti)));
+
+  const addTag = document.createElement('button');
+  addTag.type = 'button';
+  addTag.className = 'qedit-add-tag';
+  addTag.textContent = '＋ 添加按钮';
+  addTag.addEventListener('click', () => {
+    g.tags.push({ label: '', prompt: '' });
+    renderQuickEditor();
+  });
+
+  card.append(head, gp, tagsBox, addTag);
+  return card;
+}
+// 一行按钮：按钮文字 + 含义/提示词 + 删除
+function quickEditTagRow(g, gi, t, ti) {
+  const row = document.createElement('div');
+  row.className = 'qedit-tag';
+  const labelIn = document.createElement('input');
+  labelIn.className = 'sx-input qedit-tlabel';
+  labelIn.placeholder = '按钮文字';
+  labelIn.value = t.label;
+  labelIn.addEventListener('input', () => (t.label = labelIn.value));
+  const promptIn = document.createElement('input');
+  promptIn.className = 'sx-input qedit-tprompt';
+  promptIn.placeholder = '含义说明（可选，写入 CLAUDE.md/AGENTS.md 供 AI 理解；消息里始终只插入 [按钮文字]）';
+  promptIn.value = t.prompt;
+  promptIn.addEventListener('input', () => (t.prompt = promptIn.value));
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'qedit-del-tag';
+  del.title = '删除该按钮';
+  del.textContent = '×';
+  del.addEventListener('click', () => {
+    g.tags.splice(ti, 1);
+    renderQuickEditor();
+  });
+  row.append(labelIn, promptIn, del);
+  return row;
+}
+
+// ── 上下文自动压缩板块 ──
+// 只作用于 Claude Code（Codex 由其自身机制处理，故面板里直接说明，不给它开关）。
+const AUTO_COMPACT_MIN = 100000;
+const AUTO_COMPACT_MAX = 1000000;
+// 自定义压缩窗口的默认值：给到 CLI 允许的最大值，避免一选「自定义」就被默认的 20 万
+// 立刻压回「动不动就压缩」的老问题。用户仍可用旁边的 200K/500K/1M 预设改小。
+const AUTO_COMPACT_DEFAULT = 1000000;
+
+// 20 万 → 「20 万」/「200k」：摘要里给人看的写法，不参与任何计算
+function formatTokens(n) {
+  const v = Number(n) || 0;
+  if (LANG === 'zh') return `${Math.round(v / 10000)} 万`;
+  return `${Math.round(v / 1000)}k`;
+}
+
+function fillContextPane() {
+  const ac = State.settings.autoCompact || {};
+  $('autoCompactModeSelect').value = ac.mode === 'custom' ? 'custom' : 'auto';
+  // 只有 custom 模式下的 tokens 才是用户显式选的；auto 模式下展示新的高默认值，
+  // 免得用户一切到「自定义窗口」就看到旧版遗留的 20 万，又回到频繁压缩。
+  $('autoCompactTokensInput').value = ac.mode === 'custom' ? (ac.tokens || AUTO_COMPACT_DEFAULT) : AUTO_COMPACT_DEFAULT;
+  syncAutoCompactMode();
+}
+// 切换模式：自定义才显示数字输入；备注行说明当前引擎设置对谁生效
+function syncAutoCompactMode() {
+  const custom = $('autoCompactModeSelect').value === 'custom';
+  $('autoCompactCustomBox').hidden = !custom;
+  const eng = State.settings.defaultEngine === 'codex' ? T('engineCodex') : T('engineClaude');
+  $('autoCompactNote').textContent = T('paneContextScope').replace('{engine}', eng);
+}
+async function saveContextPane() {
+  const mode = $('autoCompactModeSelect').value === 'custom' ? 'custom' : 'auto';
+  const raw = Math.round(Number($('autoCompactTokensInput').value));
+  const tokens = Number.isFinite(raw) && raw > 0
+    ? Math.min(AUTO_COMPACT_MAX, Math.max(AUTO_COMPACT_MIN, raw))
+    : AUTO_COMPACT_DEFAULT;
+  await patchSettings({ autoCompact: { mode, tokens } });
+}
+
+function fillTemplatePane() {
+  $('templateCollectionPathInput').value = State.settings.templateCollectionPath || '';
+}
+async function saveTemplatePane() {
+  await patchSettings({ templateCollectionPath: $('templateCollectionPathInput').value });
+}
+
+// ── 运行环境面板：node / git / claude / codex 各自「本机 or 内置」──
+// 内置版随软件自带、不需要安装；默认「自动」＝本机有就先用本机的。
+const TC_PREFS = [
+  { v: 'auto', label: '自动（本机优先）' },
+  { v: 'system', label: '使用本机安装的' },
+  { v: 'bundled', label: '使用内置的' },
+];
+
+function fillRuntimePane() {
+  $('tcStatus').textContent = '';
+  renderToolchain();
+  // 网络体检排在工具链前面（决定「能不能连上」）。
+  // Claude 账号登录已移到「AI 引擎」板块的原版服务商下——只有原版才需要登录
+  runNetCheck($('hcBox'), {});
+  renderRunAsUserBox();
+}
+
+// 「以系统用户身份运行」折叠块：只在 Linux/macOS 显示（Windows 没有对应机制）。
+// 折叠默认收起——大多数人（本来就是普通用户在跑）根本不需要碰这个开关。
+function renderRunAsUserBox() {
+  const box = $('runAsUserBox');
+  if (State.settings.platform === 'win32') {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  $('runAsUserChk').checked = !!State.settings.runAsUserEnabled;
+  $('runAsUserName').value = State.settings.runAsUserName || 'claudeuser';
+  $('runAsUserStatus').textContent = '';
+}
+
+async function saveRunAsUser() {
+  const enabled = $('runAsUserChk').checked;
+  const name = $('runAsUserName').value.trim();
+  const statusEl = $('runAsUserStatus');
+  if (enabled && !name) {
+    statusEl.textContent = '用户名不能为空';
+    statusEl.className = 'sx-note sx-pre err';
+    return;
+  }
+  statusEl.textContent = '保存中…';
+  statusEl.className = 'sx-note sx-pre';
+  const s = await patchSettings({ runAsUserEnabled: enabled, runAsUserName: name || 'claudeuser' });
+  if (!s) {
+    statusEl.textContent = '保存失败，请重试';
+    statusEl.className = 'sx-note sx-pre err';
+    return;
+  }
+  State.settings.runAsUserEnabled = !!s.runAsUserEnabled;
+  State.settings.runAsUserName = s.runAsUserName || 'claudeuser';
+  statusEl.textContent = '已保存';
+  statusEl.className = 'sx-note sx-pre';
+}
+
+async function renderToolchain() {
+  const box = $('tcList');
+  box.innerHTML = '<div class="sx-note">检测中…</div>';
+  let list;
+  try {
+    list = await api('/api/toolchain/status');
+  } catch (e) {
+    box.innerHTML = `<div class="sx-note err">检测失败：${e.message}</div>`;
+    return;
+  }
+  State.toolchain = list;
+  box.innerHTML = list.map(tcRow).join('');
+  renderTcPreset(list);
+  box.querySelectorAll('[data-tc-pref]').forEach((sel) => {
+    sel.onchange = () => setToolPref(sel.dataset.tcPref, sel.value);
+  });
+  box.querySelectorAll('[data-tc-install]').forEach((btn) => {
+    btn.onclick = () => installTool(btn.dataset.tcInstall, btn.dataset.tcTarget, btn);
+  });
+}
+
+// 单个工具一行：状态徽章 + 本机/内置两处的版本 + 来源下拉 + 安装按钮
+function tcRow(t) {
+  const badge =
+    t.active === 'none'
+      ? `<span class="tc-badge bad">未安装</span>`
+      : `<span class="tc-badge ok">正在使用：${t.active === 'system' ? '本机' : '内置'}</span>`;
+  // 文件在但跑不起来（被杀软拦截/装坏）时，把原因直接摊在这一行下面——
+  // 否则界面只显示「已安装」，用户根本查不出为什么发消息没反应
+  const copy = (c, name, extra) =>
+    `<div class="tc-copy${c.found ? '' : ' off'}${c.found && c.error ? ' broken' : ''}">` +
+    `<b>${name}</b>` +
+    (c.found
+      ? `<em title="${escapeHtml(c.path)}">${escapeHtml(c.version || (c.error ? '跑不起来' : '已安装'))}</em>`
+      : `<em>${extra || '未安装'}</em>`) +
+    (c.found && c.error ? `<span class="tc-err">${escapeHtml(c.error)}</span>` : '') +
+    '</div>';
+  const opts = TC_PREFS.map(
+    (p) => `<option value="${p.v}"${t.pref === p.v ? ' selected' : ''}>${p.label}</option>`,
+  ).join('');
+  const btns = [];
+  if (t.globalInstallable)
+    btns.push(
+      `<button class="sx-btn" data-tc-install="${t.id}" data-tc-target="global">${t.system.found ? '更新本机版' : '安装到本机（全局）'}</button>`,
+    );
+  if (t.bundlable)
+    btns.push(
+      `<button class="sx-btn" data-tc-install="${t.id}" data-tc-target="bundled">${t.bundled.found ? '更新内置版' : '下载内置版'}</button>`,
+    );
+  return (
+    `<div class="tc-item">` +
+    `<div class="tc-head"><b>${t.label}</b>${t.optional ? '<span class="tc-opt">可选</span>' : ''}${badge}</div>` +
+    `<div class="tc-purpose">${t.purpose}</div>` +
+    `<div class="tc-copies">${copy(t.system, '本机')}${copy(t.bundled, '内置', t.bundlable ? '未下载' : '不提供内置版')}</div>` +
+    `<div class="tc-actions"><select class="sx-input tc-sel" data-tc-pref="${t.id}">${opts}</select>${btns.join('')}</div>` +
+    `<div class="sx-note sx-pre tc-install-status" data-tc-status="${t.id}" hidden></div>` +
+    `</div>`
+  );
+}
+
+// 一键模式覆盖的运行环境：node、git（claude / codex 不内置，一律 npm 全局安装，不参与）
+const TC_SELF_CONTAINED = ['node', 'git'];
+
+// 顶部「一键设置」区：显示当前是不是完全自包含，并提示还缺哪些内置件
+function renderTcPreset(list) {
+  const items = list.filter((t) => TC_SELF_CONTAINED.includes(t.id));
+  const allBundled = items.every((t) => t.pref === 'bundled');
+  $('tcPresetNow').textContent = allBundled ? '当前：全部使用内置' : '当前：自动 / 自定义';
+  $('tcAllBundledBtn').disabled = allBundled;
+  const missing = items.filter((t) => !t.bundled.found).map((t) => t.label);
+  const warn = $('tcPresetWarn');
+  if (allBundled && missing.length) {
+    warn.hidden = false;
+    warn.textContent = `注意：${missing.join('、')} 还没有内置版，这几项会临时回退到本机版本。请在下方点「下载内置版」补齐。`;
+  } else {
+    warn.hidden = true;
+  }
+}
+
+async function setToolPreset(mode) {
+  const box = $('tcStatus');
+  try {
+    await api('/api/toolchain/preset', { mode });
+    box.className = 'sx-note sx-pre ok';
+    box.textContent = mode === 'bundled' ? '已切换为：全部使用内置。' : '已切换为：自动（本机优先）。';
+    await renderToolchain();
+  } catch (e) {
+    box.className = 'sx-note sx-pre err';
+    box.textContent = `切换失败：${e.message}`;
+  }
+}
+
+async function setToolPref(tool, pref) {
+  const box = $('tcStatus');
+  try {
+    await api('/api/toolchain/prefer', { tool, pref });
+    box.className = 'sx-note sx-pre ok';
+    box.textContent = `已保存：${tool} → ${(TC_PREFS.find((p) => p.v === pref) || {}).label || pref}`;
+    await renderToolchain();
+  } catch (e) {
+    box.className = 'sx-note sx-pre err';
+    box.textContent = `保存失败：${e.message}`;
+  }
+}
+
+async function installTool(tool, target, btn) {
+  let box = btn?.closest('.tc-item')?.querySelector('[data-tc-status]');
+  if (!box) box = document.querySelector(`[data-tc-status="${tool}"]`) || $('tcStatus');
+  box.hidden = false;
+  box.className = 'sx-note sx-pre';
+  const label = target === 'global' ? '安装到本机' : '下载内置版';
+  const stop = startEngineInstallProgress(box, `${tool}：${label}中，请勿关闭页面`);
+  if (btn) btn.disabled = true;
+  try {
+    await api('/api/toolchain/install', { tool, target });
+    stop();
+    await renderToolchain();
+    box = document.querySelector(`[data-tc-status="${tool}"]`) || box;
+    box.hidden = false;
+    box.className = 'sx-note sx-pre ok';
+    box.textContent = `${tool} ${label}完成。`;
+  } catch (e) {
+    stop();
+    box.className = 'sx-note sx-pre err';
+    box.textContent = `${tool} ${label}失败：${e.message}`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ── 引擎折叠块内的「高级选项」（检测按钮/逐个验证），默认收起 ──
+function advUi(engine) {
+  const cap = engine === 'claude' ? 'Claude' : 'Codex';
+  return { arrow: $(`${engine}AdvArrow`), body: $(`${engine}AdvBody`), cap };
+}
+function setAdvOpen(engine, open) {
+  const u = advUi(engine);
+  u.body.hidden = !open;
+  u.arrow.textContent = open ? '▾' : '▸';
+}
+function toggleAdv(engine) {
+  setAdvOpen(engine, advUi(engine).body.hidden);
+}
+function accUi(engine) {
+  const cap = engine === 'claude' ? 'Claude' : 'Codex';
+  return { arrow: $(`engAcc${cap}Arrow`), body: $(`engAcc${cap}Body`), sum: $(`engAcc${cap}Sum`) };
+}
+function setAccOpen(engine, open) {
+  const u = accUi(engine);
+  u.body.hidden = !open;
+  u.arrow.textContent = open ? '▾' : '▸';
+}
+function toggleAcc(engine) {
+  setAccOpen(engine, accUi(engine).body.hidden);
+}
+// 折叠时在标题行右侧显示一眼可见的当前状态：服务商 · 模型
+function renderAccSummary(engine) {
+  const u = providerUi(engine);
+  // 摘要要短：括号里的补充说明（如「按量计费」）去掉，只留服务商名
+  const pv = providerLabel(u.select.value).split(/[（(]/)[0].trim();
+  const modelLabel = modelValue(engine) || T('effAutoShort');
+  // 强度非自动时才进摘要（避免每个引擎都挂一个「自动」显得啰嗦）
+  const effort = u.effort ? u.effort.value : '';
+  accUi(engine).sum.textContent = `${pv} · ${modelLabel}${effort ? ' · ' + effort : ''}`;
+}
+
+// ── 服务商 / 模型 / 强度的展示名（唯一来源：trans.js，后端只下发 id）──
+// 后端新增了前端还没加文案的 id 时，一律回落到 id 本身，绝不显示空白。
+const PROVIDER_LABEL_KEY = {
+  official: 'pvOfficial', anthropic: 'pvAnthropic', openai: 'pvOpenai', openrouter: 'pvOpenrouter',
+  minimax: 'pvMinimax', xiaomi: 'pvXiaomi', deepseek: 'pvDeepseek',
+  kimi: 'pvKimi', kimicode: 'pvKimicode', custom: 'pvCustom',
+};
+const PROVIDER_NOTE_KEY = {
+  official: 'pvNoteOfficial', custom: 'pvNoteCustom',
+  anthropic: 'pvNoteAnthropic', openai: 'pvNoteOpenai', openrouter: 'pvNoteOpenrouter',
+  minimax: 'pvNoteMinimax', xiaomi: 'pvNoteXiaomi', deepseek: 'pvNoteDeepseek',
+  kimi: 'pvNoteKimi', kimicode: 'pvNoteKimicode',
+};
+const EFFORT_LABEL_KEY = {
+  low: 'effLow', medium: 'effMedium', high: 'effHigh', xhigh: 'effXhigh', max: 'effMax',
+};
+const MODEL_ALIAS_KEY = {
+  opus: 'mdlAliasOpus', sonnet: 'mdlAliasSonnet', haiku: 'mdlAliasHaiku', fable: 'mdlAliasFable',
+};
+// 「检测当前模型」的来源/失败原因：后端下发稳定编码，认不出的原样展示（多为引擎或网络的原始报错）
+const DETECT_SRC_KEY = {
+  'claude-init': 'srcClaudeInit', 'codex-toml': 'srcCodexToml',
+  'codex-catalog': 'srcCodexCatalog', codex: 'srcCodex',
+};
+const DETECT_ERR_KEY = {
+  'init-no-model': 'errInitNoModel',
+  'codex-catalog-empty': 'errCodexCatalogEmpty',
+  'probe-timeout': 'errProbeTimeout',
+};
+
+function providerLabel(id, fallback) {
+  if (id === 'clootee') return T('clooteeProviderDefault');
+  return PROVIDER_LABEL_KEY[id] ? T(PROVIDER_LABEL_KEY[id]) : (fallback || EngineProviderCatalog.find((p) => p.id === id)?.label || id);
+}
+function providerNote(id, fallback) {
+  return PROVIDER_NOTE_KEY[id] ? T(PROVIDER_NOTE_KEY[id]) : (fallback || '');
+}
+function effortLabel(id, fallback) {
+  return EFFORT_LABEL_KEY[id] ? T(EFFORT_LABEL_KEY[id]) : (fallback || id);
+}
+function detectSourceLabel(src) {
+  return DETECT_SRC_KEY[src] ? T(DETECT_SRC_KEY[src]) : (src || '');
+}
+function detectErrorLabel(err) {
+  if (!err) return T('mdlUnknownReason');
+  return DETECT_ERR_KEY[err] ? T(DETECT_ERR_KEY[err]) : err;
+}
+// 一条模型候选的展示文本：展示名 + 验证结果 + 备注
+function modelOptionText(o) {
+  const base = o.source === 'detected'
+    ? `${o.id}${T('mdlSuffixDetected')}`
+    : MODEL_ALIAS_KEY[o.id] ? T(MODEL_ALIAS_KEY[o.id]) : (o.label || o.id);
+  const mark = o.verified === true ? ' ✓' : o.verified === false ? ' ✕' : '';
+  // 备注多为验证失败原因：固定原因有编码可翻译，其余（引擎原始报错）原样带出
+  return `${base}${mark}${o.note ? ` · ${detectErrorLabel(o.note)}` : ''}`;
+}
+
+// ── 模型这一栏：预设服务商用下拉；自定义服务商可直接手填 ──
+// 自定义端点的模型列表未必拉得到（很多兼容网关没有 /models），所以那种情况必须允许自己写模型 id；
+// 拉到的候选转成 datalist，输入时作为提示出现，两种方式共用同一个「当前模型」值。
+function modelIsFree(engine) {
+  return providerUi(engine).select.value !== 'official';
+}
+function modelValue(engine) {
+  const u = providerUi(engine);
+  return modelIsFree(engine) ? u.modelInput.value.trim() : u.model.value;
+}
+function setModelValue(engine, model) {
+  const u = providerUi(engine);
+  u.model.value = model || '';
+  u.modelInput.value = model || '';
+}
+function clearModelChoices(engine) {
+  const u = providerUi(engine);
+  u.model.innerHTML = '';
+  u.modelList.innerHTML = '';
+}
+// opts 为 [{id,label,source,verified,note}]；withAuto=true 时首项是「自动」（值为空）
+function fillModelChoices(engine, opts, withAuto) {
+  const u = providerUi(engine);
+  clearModelChoices(engine);
+  if (withAuto) u.model.appendChild(new Option(T('effAuto'), ''));
+  for (const o of opts) {
+    const text = modelOptionText(o);
+    u.model.appendChild(new Option(text, o.id));
+    u.modelList.appendChild(new Option(text, o.id));
+  }
+}
+
+// ── 模型选择（claude / codex 各自一套；''=自动）──
+// 后端 /api/model/* 提供：state(读) / select(选定) / detect(检测当前实际模型) / available(检测可用)
+async function loadModelState() {
+  try {
+    const st = await api('/api/model/state');
+    renderModelSection('claude', st && st.claude);
+    renderModelSection('codex', st && st.codex);
+  } catch (e) {
+    // 后端未重启时该端点会 404，降级为不可用提示，不影响其他设置
+    const msg = T('mdlStateFail').replace('{err}', e.message);
+    setModelStatus('claude', msg, false);
+    setModelStatus('codex', msg, false);
+  }
+}
+
+// 渲染一个引擎的下拉 + 服务商标签 + 上次检测结果
+// 注意：这个下拉（claudeModelSelect/codexModelSelect）与「服务商」区共用同一个 DOM 元素，
+// 换服务商时（onEngineProviderChange）会先被清空，这里再按当前服务商的候选重新填充。
+function renderModelSection(engine, s) {
+  if (!s) return;
+  const cap = engine === 'claude' ? 'Claude' : 'Codex';
+  const sel = providerUi(engine).model;
+  $(`mdl${cap}Provider`).textContent = providerLabel(s.provider);
+  const opts = Array.isArray(s.options) ? s.options : [];
+  // 标注来源与验证结果，让用户知道这条候选有多可信
+  fillModelChoices(engine, opts, true);
+  // 选定值不在候选里（例如刚换服务商）时补一条，避免显示错位
+  if (s.selected && !opts.some((o) => o.id === s.selected)) {
+    sel.appendChild(new Option(`${s.selected}${T('mdlSuffixSelected')}`, s.selected));
+  }
+  setModelValue(engine, s.selected || '');
+  renderEffortSelect(engine, s);
+  const d = s.detected;
+  if (d) {
+    setModelStatus(
+      engine,
+      d.ok
+        ? T('mdlLastDetect').replace('{model}', d.model).replace('{src}', detectSourceLabel(d.source))
+        : T('mdlLastDetectFail').replace('{err}', detectErrorLabel(d.error)),
+      d.ok,
+    );
+  } else {
+    setModelStatus(engine, '', null);
+  }
+  renderAccSummary(engine);
+}
+
+function setModelStatus(engine, text, ok) {
+  const el = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  el.className = 'sx-note' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+  el.textContent = text;
+}
+
+// 选定模型（含「自动」）；立即落盘，下一个任务生效
+// 自定义服务商是手填的输入框，change（失焦/回车）时同样走这里
+async function onModelSelect(engine) {
+  const model = modelValue(engine);
+  if (modelIsFree(engine)) {
+    // Save the provider, key and model together; a draft must not alter the old slot.
+    setModelStatus(engine, T('engProviderDraft'), null);
+    markEngineDirty(engine); // 手填模型只是草稿，等板块底部的「保存」一起落盘
+    renderAccSummary(engine);
+    return;
+  }
+  try {
+    await api('/api/model/select', { engine, model });
+    setModelStatus(
+      engine,
+      model ? T('mdlSelected').replace('{model}', model) : T('mdlSelectedAuto'),
+      true,
+    );
+    renderAccSummary(engine);
+  } catch (e) {
+    setModelStatus(engine, T('engSaveFail').replace('{err}', e.message), false);
+  }
+}
+
+// 检测当前实际生效的模型（真实探测引擎）
+async function detectCurrentModel(engine) {
+  setModelStatus(engine, T('mdlDetecting'), null);
+  try {
+    const d = await api('/api/model/detect', { engine });
+    setModelStatus(
+      engine,
+      d && d.ok
+        ? T('mdlDetected').replace('{model}', d.model).replace('{src}', detectSourceLabel(d.source))
+        : T('mdlDetectFail').replace('{err}', detectErrorLabel(d && d.error)),
+      !!(d && d.ok),
+    );
+    await loadModelState();
+  } catch (e) {
+    setModelStatus(engine, T('mdlDetectFail').replace('{err}', e.message), false);
+  }
+}
+
+// 检测可用模型；结果写回候选下拉
+async function detectAvailableModels(engine) {
+  const verify = engine === 'claude' && $('mdlClaudeVerifyChk').checked;
+  setModelStatus(engine, verify ? T('mdlVerifying') : T('mdlListing'), null);
+  try {
+    const r = await api('/api/model/available', { engine, verify });
+    const n = (r && r.models ? r.models.length : 0);
+    await loadModelState();
+    setModelStatus(engine, T(verify ? 'mdlGotNVerified' : 'mdlGotN').replace('{n}', n), n > 0);
+  } catch (e) {
+    setModelStatus(engine, T('mdlGetFail').replace('{err}', e.message), false);
+  }
+}
+
+// ── Claude Code / Codex 服务商（预设 + 自定义）──
+let EngineProviderCatalog = [];
+async function loadProviderCatalog(engine) {
+  const r = await api('/api/engine/providers');
+  EngineProviderCatalog = [...(r.providers || [])].sort((a, b) => Number(b.id === 'clootee') - Number(a.id === 'clootee'));
+  const select = providerUi(engine).select;
+  const previous = select.value;
+  select.innerHTML = '';
+  for (const p of EngineProviderCatalog) {
+    if (!p.engines || p.engines.includes(engine))
+      select.appendChild(new Option(providerOptionText(engine, p.id), p.id));
+  }
+  select.value = previous;
+}
+
+// 服务商出厂声明的上下文窗口（后端 /api/engine/providers 下发）。
+// 0/undefined = 没有出厂默认，留空就交给引擎按 200K 猜。
+function providerDefaultContextWindow(provider) {
+  const p = (EngineProviderCatalog || []).find((x) => x.id === provider);
+  const n = p ? Number(p.defaultContextWindow) : 0;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// 128000 → "128K"、1000000 → "1M"：给预设/默认值提示用，不参与计算
+function formatCtxWindow(n) {
+  const v = Number(n) || 0;
+  if (v >= 1000000 && v % 100000 === 0) return `${v / 1000000}M`;
+  if (v >= 1000 && v % 1000 === 0) return `${Math.round(v / 1000)}K`;
+  return String(v);
+}
+
+function providerUi(engine) {
+  const p = engine === 'claude' ? 'claude' : 'codex';
+  return {
+    select: $(`${p}ProviderSelect`), cfg: $(`${p}ProviderCfg`), custom: $(`${p}CustomCfg`),
+    key: $(`${p}ApiKey`), base: $(`${p}BaseUrl`), modelsUrl: $(`${p}ModelsUrl`),
+    model: $(`${p}ModelSelect`), modelInput: $(`${p}ModelInput`), modelList: $(`${p}ModelList`),
+    modelHint: $(`${p}ModelHint`), modelBox: $(`${p}ModelBox`), status: $(`${p}ProviderStatus`),
+    effort: $(`${p}EffortSelect`),
+    // 上下文窗口：只有 Claude Code 侧有这一项（写 CLAUDE_CODE_MAX_CONTEXT_TOKENS）
+    ctxWin: $(`${p}CtxWindow`), ctxWinBox: $(`${p}CtxWindowBox`),
+    // 账号登录卡片：claude 侧是 Claude 登录，codex 侧是 Codex 登录（原版才是订阅登录）
+    login: engine === 'claude' ? $('clBox') : $('cxBox'),
+  };
+}
+
+// 选了原版时，在服务商下拉底下渲染「Claude 账号登录」整卡（当前账号 + 登录/重登/重新检测）。
+// renderClaudeLogin 自己会拉一次 auth status，所以每次调用拿到的都是最新登录态；
+// 只在「打开板块」和「切到原版」这两个时机调，别到处调——每拉一次都要起一个 claude 子进程。
+async function renderClooteeAccount(engine) {
+  const u = providerUi(engine);
+  const box = u.login;
+  box.textContent = T('loading');
+  try {
+    const status = await api('/api/console/status');
+    if (u.select.value !== 'clootee') return;
+    const signedIn = status.registered;
+    box.innerHTML = `<p>${escapeHtml(T('clooteeAccountHint'))}</p><p>${escapeHtml(status.email || T(signedIn ? 'clooteeAccountConnected' : 'clooteeAccountSignedOut'))}${status.balanceMicro == null ? '' : ' ? ' + escapeHtml(Clootee.usd(status.balanceMicro))}</p><p data-error></p><button type="button" data-account>${escapeHtml(T(signedIn ? 'clooteeAccountLogout' : 'clooteeLoginTitle'))}</button> <a data-details target="_blank" rel="noopener noreferrer">${escapeHtml(T('clooteeAccountDetails'))} ?</a>`;
+    box.querySelector('[data-details]').href = Clootee.billingUrl();
+    box.querySelector('[data-error]').textContent = status.error || '';
+    box.querySelector('[data-account]').onclick = async (event) => {
+      event.target.disabled = true;
+      try {
+        if (signedIn) await api('/api/console/logout', {});
+        else await Clootee.signIn();
+        await Clootee.refresh();
+        for (const eng of ['claude', 'codex']) {
+          if (providerUi(eng).select.value === 'clootee') renderClooteeAccount(eng);
+        }
+        if (!signedIn && u.select.value === 'clootee') await autoPickModel(engine);
+      } catch (e) {
+        ErrorHandler.handle(e, 'renderClooteeAccount');
+        if (box.querySelector('[data-error]')) box.querySelector('[data-error]').textContent = e.message;
+      } finally { event.target.disabled = false; }
+    };
+  } catch (e) {
+    ErrorHandler.handle(e, 'renderClooteeAccount');
+    if (u.select.value === 'clootee') box.textContent = e.message;
+  }
+}
+
+function renderClaudeLoginBox(engine) {
+  const box = providerUi(engine).login;
+  if (!box) return;
+  // forceOfficial：用户可能刚把下拉切到原版还没点保存，后端记的仍是第三方，
+  // 不加这个标记登录卡会显示成「不需要登录」，正好把要登录的人挡在门外
+  renderClaudeLogin(box, { forceOfficial: true });
+}
+
+// 同上，但用于 Codex（原版 ChatGPT 走订阅登录 / API Key，见 renderCodexLogin）
+function renderCodexLoginBox(engine) {
+  const box = providerUi(engine).login;
+  if (!box) return;
+  renderCodexLogin(box, { forceOfficial: true });
+}
+
+// 思考强度档位的 id 顺序由后端 /api/model/state 下发（避免前端写死一份），
+// 展示文案一律走翻译层。兜底顺序只在后端尚未重启（旧版无 efforts 字段）时使用。
+const EFFORT_FALLBACK = [{ id: 'low' }, { id: 'medium' }, { id: 'high' }, { id: 'xhigh' }, { id: 'max' }];
+
+// 渲染某引擎的思考强度下拉。所有服务商（含原版）都可选。
+function renderEffortSelect(engine, s) {
+  const sel = providerUi(engine).effort;
+  if (!sel) return;
+  const levels = (s && Array.isArray(s.efforts) && s.efforts.length) ? s.efforts : EFFORT_FALLBACK;
+  const cur = (s && s.effort) || '';
+  sel.innerHTML = '';
+  sel.appendChild(new Option(T('effAuto'), ''));
+  for (const e of levels) sel.appendChild(new Option(effortLabel(e.id, e.label), e.id));
+  sel.value = cur;
+}
+
+// 选定思考强度；立即落盘，下一个任务生效
+async function onEffortSelect(engine) {
+  const sel = providerUi(engine).effort;
+  const effort = sel.value || '';
+  try {
+    await api('/api/model/effort', { engine, effort });
+    setModelStatus(
+      engine,
+      effort ? T('effortSet').replace('{label}', effortLabel(effort)) : T('effortSetAuto'),
+      true,
+    );
+    renderAccSummary(engine);
+  } catch (e) {
+    setModelStatus(engine, T('engSaveFail').replace('{err}', e.message), false);
+  }
+}
+// 只管显示/隐藏，不动模型选择——供「读取已保存配置后同步一次界面」调用，不清空当前模型
+// 原版订阅也可以选择模型（如 opus/sonnet/haiku/fable），所以模型选择框始终显示
+function syncProviderVisibility(engine) {
+  const u = providerUi(engine);
+  const provider = u.select.value;
+  u.cfg.hidden = provider === 'official' || provider === 'clootee';
+  if (provider === 'clootee') u.key.value = '';
+  u.custom.hidden = provider !== 'custom';
+  // 原版模型自带正确窗口，不需要（也不该）手填；第三方 / 自定义才显示
+  if (u.ctxWinBox) u.ctxWinBox.hidden = provider === 'official';
+  if (engine === 'claude' && u.ctxWin) {
+    const def = providerDefaultContextWindow(provider);
+    // 自定义服务商的模型名 Claude Code 全不认识；留空会被按 200K 压缩。
+    // 切到自定义且用户没填过 → 直接预填 1M，保存后即生效。
+    if (provider === 'custom' && !String(u.ctxWin.value || '').trim() && def)
+      u.ctxWin.value = String(def);
+    const note = $('claudeCtxWindowNote');
+    if (note) {
+      note.textContent = def
+        ? `${T('engCtxWindowNote')} ${T('engCtxWindowDefault').replace('{n}', formatCtxWindow(def))}`
+        : T('engCtxWindowNote');
+    }
+  }
+
+  // 模型选择框始终显示，允许原版订阅也选择模型；
+  // 自定义服务商换成可手填的输入框（拉不到模型列表时也能用）
+  const free = modelIsFree(engine);
+  u.model.hidden = free;
+  u.modelInput.hidden = !free;
+  u.modelHint.hidden = !free;
+  // 只有原版才是订阅登录，第三方走 API Key，没有账号可言 —— 整块登录卡都不出现
+  if (u.login) {
+    u.login.hidden = provider !== 'official' && provider !== 'clootee';
+    if (provider === 'clootee') {
+      renderClooteeAccount(engine);
+    } else if (provider === 'official') {
+      if (engine === 'claude') renderClaudeLoginBox(engine);
+      else renderCodexLoginBox(engine);
+    } else {
+      u.login.innerHTML = '';
+    }
+  }
+}
+// 用户在下拉里手动切换服务商 → 联动：**彻底隔离**。
+// 每个服务商在后端各有一槽（apiKey/model/effort/候选缓存），切过去就回显它自己上次的设置；
+// 该服务商从没配过就清空并自动定档。这是「选原版却看到 MiniMax 模型」那个 bug 的前端一半。
+async function onEngineProviderChange(engine) {
+  syncProviderVisibility(engine);
+  markEngineDirty(engine); // 换服务商＝动过表单，一律标脏（切回原来那个也照标，宁多勿漏）
+  const u = providerUi(engine);
+  const provider = u.select.value;
+  // 先清干净，绝不让上一个服务商的值留在表单里
+  clearModelChoices(engine);
+  setModelValue(engine, '');
+  u.key.value = '';
+  u.base.value = '';
+  u.modelsUrl.value = '';
+  if (u.ctxWin) u.ctxWin.value = '';
+  // clootee：Key 由本机自动领取，留空即可；占位文字直接说清楚，免得用户去找 Key
+  if (!u.key.dataset.ph) u.key.dataset.ph = u.key.placeholder || '';
+  u.key.placeholder = provider === 'clootee' ? T('clooteeKeyAuto') : u.key.dataset.ph;
+  if (u.effort) u.effort.value = '';
+  setModelStatus(engine, '', null);
+  syncModelProviderTag(engine);
+  renderAccSummary(engine);
+  // 回显该服务商自己保存过的那一槽
+  let slot = null;
+  try {
+    const r = await api(`/api/engine/slots?engine=${engine}`);
+    slot = (r && r.slots && r.slots[provider]) || null;
+  } catch (e) {
+    // 后端未重启时该端点 404 → 降级为「当作没配过」，不阻断
+  }
+  if (u.select.value !== provider) return;
+  if (slot) {
+    u.key.value = slot.apiKey || '';
+    u.base.value = slot.baseUrl || '';
+    u.modelsUrl.value = slot.modelsUrl || '';
+    if (u.ctxWin) u.ctxWin.value = slot.contextWindow || '';
+    const opts = Array.isArray(slot.models) ? slot.models : [];
+    if (opts.length || slot.model) {
+      fillModelChoices(engine, opts, true);
+      if (slot.model && !opts.some((o) => o.id === slot.model))
+        u.model.appendChild(new Option(`${slot.model}${T('mdlSuffixSelected')}`, slot.model));
+      setModelValue(engine, slot.model || '');
+    }
+    if (u.effort) u.effort.value = slot.effort || '';
+    renderAccSummary(engine);
+  }
+  // 自定义服务商从没存过窗口 → 回显出厂默认 1M（上面清空表单时把预填值也清掉了）
+  if (provider === 'custom' && u.ctxWin && !String(u.ctxWin.value || '').trim()) {
+    const def = providerDefaultContextWindow(provider);
+    if (def) u.ctxWin.value = String(def);
+  }
+  // 没有选定模型才自动定档（不覆盖用户上次的选择）
+  if (!modelValue(engine)) autoPickModel(engine);
+}
+// 「模型」标签旁的服务商小标要跟着表单里选中的服务商走
+// （否则会一直显示上次已保存的那个，和下面的模型对不上）
+function syncModelProviderTag(engine) {
+  const cap = engine === 'claude' ? 'Claude' : 'Codex';
+  $(`mdl${cap}Provider`).textContent = providerLabel(providerUi(engine).select.value);
+}
+function onClaudeProviderChange() { onEngineProviderChange('claude'); }
+
+// 模型跟随服务商自动定档：没有选定模型时自动拉取候选并选中服务商推荐的那个。
+// 只改表单里的下拉，不落盘——落盘仍由「保存」按钮完成（否则会把新模型配到旧的已保存服务商上）。
+async function autoPickModel(engine) {
+  const u = providerUi(engine);
+  const provider = u.select.value;
+  if (provider === 'official') {
+    // 原版订阅也可以选择模型：如果没有选定模型，自动填充内置候选列表
+    if (modelValue(engine)) return; // 已有模型就不动
+    // 从后端获取可用模型列表（对于 official，返回内置候选）
+    try {
+      const r = await api('/api/model/available', { engine, verify: false });
+      const models = r && r.models ? r.models : [];
+      if (models.length > 0) {
+        fillModelChoices(engine, models, true);
+        // 默认选中 opus（如果有）
+        const defaultModel = models.find(m => m.id === 'opus') || models[0];
+        if (defaultModel) {
+          setModelValue(engine, defaultModel.id);
+          setModelStatus(engine, T('mdlAutoPickedOne').replace('{model}', modelOptionText(defaultModel)), true);
+        }
+      }
+    } catch (e) {
+      setModelStatus(engine, T('mdlListFail').replace('{err}', e.message), false);
+    }
+    return;
+  }
+  if (modelValue(engine)) return; // 已有模型就不动，避免覆盖用户的选择
+  // clootee 的 Key 由本机自动领取（后端补），不要求用户填
+  if (!u.key.value.trim() && provider !== 'clootee') {
+    setModelStatus(engine, T('modelNeedKey'), null);
+    return;
+  }
+  if (provider === 'custom' && !u.base.value.trim()) {
+    setModelStatus(engine, T('modelNeedBase'), null);
+    return;
+  }
+  await fetchEngineModels(engine, true);
+}
+// API Key 填完（失焦/回车）时：若还没有模型就自动检测一次
+function onApiKeySettled(engine) {
+  if (modelValue(engine)) return;
+  autoPickModel(engine);
+}
+
+async function loadEngineProvider(engine) {
+  const u = providerUi(engine);
+  try {
+    await loadProviderCatalog(engine);
+    const cfg = await api('/api/engine/config');
+    const c = (cfg && cfg[engine]) || { provider: 'official', apiKey: '', model: '' };
+    u.select.value = c.provider || 'official';
+    u.key.value = c.apiKey || '';
+    u.base.value = c.baseUrl || '';
+    u.modelsUrl.value = c.modelsUrl || '';
+    if (u.ctxWin) u.ctxWin.value = c.contextWindow || '';
+    clearModelChoices(engine);
+    if (c.model) {
+      u.model.appendChild(new Option(c.model, c.model));
+      u.modelList.appendChild(new Option(c.model, c.model));
+    }
+    setModelValue(engine, c.model || '');
+    if (u.effort) u.effort.value = c.effort || '';
+    syncProviderVisibility(engine);
+    syncModelProviderTag(engine);
+    EngineLoaded[engine] = true; // 读到过才算可靠：没读到就不允许拿这份空表单去覆盖已存的配置
+    u.status.className = 'sx-note';
+    // 说明的是「已保存」的状态（表单里可能已改成别的服务商但还没点保存），文案要写明白
+    u.status.textContent = c.provider === 'official'
+      ? T(engine === 'claude' ? 'engSavedOfficialClaude' : 'engSavedOfficialCodex')
+      : T(c.model ? 'engSavedProviderModel' : 'engSavedProvider')
+        .replace('{provider}', providerLabel(c.provider))
+        .replace('{model}', c.model || '');
+    renderAccSummary(engine);
+    // 原版订阅也可以选择模型：如果没有选定模型，自动填充内置候选列表
+    if (c.provider === 'official' && !c.model) {
+      autoPickModel(engine);
+    }
+    // 已存了第三方服务商与 Key、却没有模型（历史配置/上次没选完）→ 进面板就自动补一个
+    if (c.provider !== 'official' && c.apiKey && !c.model) autoPickModel(engine);
+  } catch (e) {
+    EngineLoaded[engine] = false;
+    u.status.className = 'sx-note err';
+    u.status.textContent = T('engLoadFail').replace('{engine}', engine).replace('{err}', e.message);
+  }
+}
+function loadClaudeProvider() { return loadEngineProvider('claude'); }
+
+// 拉取某服务商的真实模型列表填进下拉。
+// auto=true（由 autoPickModel 触发）时额外选中后端给的 recommended，并把提示写在模型区而非服务商区。
+async function fetchEngineModels(engine, auto = false) {
+  const u = providerUi(engine);
+  const provider = u.select.value;
+  const apiKey = u.key.value.trim();
+  // 提示落点：自动流程写模型状态行（紧贴下拉），手动点按钮写服务商状态行
+  const say = (text, ok) => {
+    if (auto) { setModelStatus(engine, text, ok); return; }
+    u.status.className = 'sx-note' + (ok === true ? ' ok' : ok === false ? ' err' : '');
+    u.status.textContent = text;
+  };
+  // 原版订阅：走 /api/model/available 获取内置候选列表
+  if (provider === 'official') {
+    const prev = modelValue(engine);
+    clearModelChoices(engine);
+    say(auto ? T('modelAutoDetecting') : T('modelFetching'), null);
+    try {
+      const r = await api('/api/model/available', { engine, verify: false });
+      const models = r && r.models ? r.models : [];
+      if (!models.length) throw new Error(T('modelEmptyList'));
+      fillModelChoices(engine, models, true);
+      // 优先保留用户原本的选择；否则选中第一个
+      const pick = (prev && models.some(m => m.id === prev) && prev) || models[0]?.id || '';
+      setModelValue(engine, pick);
+      say(
+        auto
+          ? T('modelAutoPicked').replace('{model}', pick || T('effAutoShort')).replace('{n}', models.length)
+          : T('modelFetched').replace('{n}', models.length),
+        true,
+      );
+      renderAccSummary(engine);
+    } catch (e) {
+      clearModelChoices(engine);
+      say(T('modelFetchFail').replace('{err}', e.message), false);
+    }
+    return;
+  }
+  if (!apiKey && provider !== 'clootee') { say(T('modelNeedKey'), false); return; }
+  if (provider === 'custom' && !u.base.value.trim()) { say(T('modelNeedBase'), false); return; }
+  const prev = modelValue(engine);
+  clearModelChoices(engine);
+  say(auto ? T('modelAutoDetecting') : T('modelFetching'), null);
+  try {
+    const q = new URLSearchParams({ provider, apiKey });
+    if (provider === 'custom') {
+      q.set('baseUrl', u.base.value.trim());
+      q.set('modelsUrl', u.modelsUrl.value.trim());
+    }
+    const r = await api(`/api/engine/models?${q.toString()}`);
+    if (u.select.value !== provider || u.key.value.trim() !== apiKey) return;
+    // 服务商 API 只返回 id 字符串，统一成候选对象再进下拉/提示列表
+    const models = (r && r.models) || [];
+    if (!models.length) throw new Error(T('modelEmptyList'));
+    fillModelChoices(engine, models.map((id) => ({ id, source: 'api' })), false);
+    // 优先保留用户原本的选择；否则用后端在真实返回列表里挑的推荐模型；再否则第一个
+    const pick = (prev && models.includes(prev) && prev)
+      || (r.recommended && models.includes(r.recommended) && r.recommended)
+      || models[0];
+    setModelValue(engine, pick);
+    say(
+      auto
+        ? T('modelAutoPicked').replace('{model}', pick).replace('{n}', models.length)
+        : T('modelFetched').replace('{n}', models.length),
+      true,
+    );
+    renderAccSummary(engine);
+  } catch (e) {
+    // 自定义服务商拉不到列表是常事（很多网关没有 /models）：清空候选但保留已填的模型 id
+    if (u.select.value !== provider || u.key.value.trim() !== apiKey) return;
+    const kept = modelIsFree(engine) ? prev : '';
+    clearModelChoices(engine);
+    setModelValue(engine, kept);
+    say(T('modelFetchFail').replace('{err}', e.message), false);
+  }
+}
+function fetchClaudeModels() { return fetchEngineModels('claude'); }
+
+// 保存一个引擎块的服务商配置。返回 null＝成功；返回 {msg}＝失败（原因同时写进块内与 footer）。
+// 由板块保存（saveEnginePane）调用，没有自己的按钮。
+async function saveEngineProvider(engine) {
+  const u = providerUi(engine);
+  const provider = u.select.value;
+  if (provider === 'clootee') {
+    try {
+      const status = await api('/api/console/status');
+      if (!status.registered || status.error) await Clootee.signIn();
+      await Clootee.refresh();
+      renderClooteeAccount(engine);
+    } catch (e) {
+      setModelStatus(engine, e.message, false);
+      return { msg: e.message };
+    }
+  }
+
+  // 第三方缺模型时先自动补一次（多数情况用户根本不用管模型），补不上才报错
+  if (provider !== 'official' && !modelValue(engine)) await autoPickModel(engine);
+  const model = modelValue(engine);
+  if (provider !== 'official' && !model) {
+    u.status.className = 'sx-note err';
+    u.status.textContent = T('modelPickFirst');
+    return { msg: T('modelPickFirst') };
+  }
+  try {
+    await api('/api/engine/config', {
+      engine, provider, apiKey: provider === 'clootee' ? '' : u.key.value.trim(), model,
+      effort: u.effort ? u.effort.value : '',
+      baseUrl: provider === 'custom' ? u.base.value.trim() : '',
+      modelsUrl: provider === 'custom' ? u.modelsUrl.value.trim() : '',
+      // 留空 → 0 → 后端清洗成 undefined（不声明窗口，跟随服务商默认）
+      contextWindow: u.ctxWin ? (Number(u.ctxWin.value) || 0) : undefined,
+    });
+    u.status.className = 'sx-note ok';
+    u.status.textContent = T('engSavedOk');
+    clearEngineDirty(engine);
+    await loadModelState();
+    renderAccSummary(engine);
+    return null;
+  } catch (e) {
+    u.status.className = 'sx-note err';
+    u.status.textContent = T('engSaveFail').replace('{err}', e.message);
+    return { msg: e.message };
+  }
+}
+
+// ── 手动安装/更新引擎（npm 全局安装，源自动选官方或国内镜像中更快的那个）──
+async function updateEngine(engine) {
+  const box = $('updateStatus');
+  box.className = 'sx-note sx-pre';
+  // 引擎包 400-500MB，用实时进度代替一句「请稍候」，否则看起来像卡死
+  const stop = startEngineInstallProgress(box, `正在安装/更新 ${engine}，请勿关闭页面`);
+  try {
+    const r = await api('/api/engine/update', { engine });
+    stop();
+    box.className = 'sx-note sx-pre ok';
+    box.textContent = `${engine} 更新完成：${(r && r.pkg) || ''}\n源：${(r && r.registry) || ''}\n${(r && r.log) || ''}`;
+  } catch (e) {
+    stop();
+    box.className = 'sx-note sx-pre err';
+    box.textContent = `${engine} 更新失败：${e.message}\n可自己在终端执行：npm install -g ${engine === 'codex' ? '@openai/codex' : '@anthropic-ai/claude-code'}`;
+  }
+}
+
+// ── 修改访问密码 ──
+async function changePassword() {
+  const oldPassword = $('pwOld').value;
+  const newPassword = $('pwNew').value;
+  if (!oldPassword || !newPassword) { $('pwStatus').className = 'sx-note err'; $('pwStatus').textContent = '请填写当前密码与新密码'; return; }
+  try {
+    const data = await api('/api/auth/change', { oldPassword, newPassword });
+    TOKEN = data.token;
+    localStorage.setItem('token', TOKEN);
+    $('pwOld').value = ''; $('pwNew').value = '';
+    $('pwStatus').className = 'sx-note ok';
+    $('pwStatus').textContent = '密码已修改。';
+  } catch (e) {
+    $('pwStatus').className = 'sx-note err';
+    $('pwStatus').textContent = '修改失败：' + e.message;
+  }
+}
+
+// 「忘记密码？」→ 展开/收起内联重置框
+function toggleLanPwReset(e) {
+  if (e) e.preventDefault();
+  const box = $('lanPwReset');
+  if (!box) return;
+  box.hidden = !box.hidden;
+  if (!box.hidden) {
+    $('lanPwResetStatus').textContent = '';
+    $('lanPwNew').value = '';
+    $('lanPwNew2').value = '';
+    $('lanPwNew').focus();
+  }
+}
+// 重置密码（无需旧密码；已在设置面板内即持有有效 token）
+async function resetLanPassword() {
+  const st = $('lanPwResetStatus');
+  const p1 = $('lanPwNew').value;
+  const p2 = $('lanPwNew2').value;
+  if (!p1 || p1.length < 4) { st.className = 'sx-note err'; st.textContent = '新密码至少 4 位。'; return; }
+  if (p1 !== p2) { st.className = 'sx-note err'; st.textContent = '两次输入的新密码不一致。'; return; }
+  try {
+    const data = await api('/api/auth/reset', { newPassword: p1 });
+    TOKEN = data.token;
+    localStorage.setItem('token', TOKEN);
+    $('lanPwNew').value = ''; $('lanPwNew2').value = '';
+    st.className = 'sx-note ok';
+    st.textContent = '✓ 密码已重置。请把新密码告诉需要访问的人。';
+  } catch (e) {
+    st.className = 'sx-note err';
+    st.textContent = '重置失败：' + e.message;
+  }
+}
+
+// ── Codex 档位（原版 ChatGPT ↔ Kimi K3）──
+function renderCodexProfile(s) {
+  const box = $('codexProfileStatus');
+  if (!s) { box.textContent = ''; return; }
+  $('codexProfileSelect').value = s.profile === 'kimi' ? 'kimi' : 'chatgpt';
+  const lines = [];
+  lines.push(`当前档位：${s.profile === 'kimi' ? 'Kimi K3' : '原版 ChatGPT'}`);
+  lines.push(`配置文件：${s.configPath}${s.configExists ? '' : '（尚不存在；原版 ChatGPT 可不需要该文件）'}`);
+  lines.push(`Kimi 密钥：${s.hasKimiKey ? '已配置 ' + (s.kimiKeyMasked || '') : '未配置'}`);
+  if (s.profile === 'kimi') lines.push('Kimi 路由：本地代理 http://127.0.0.1:8972/v1 → Moonshot');
+  else lines.push('原版路由：Codex 默认 ChatGPT 配置');
+  if (!s.ok && s.error) lines.push(`⚠ 读取配置失败：${s.error}`);
+  box.style.color = s.ok ? 'var(--muted)' : '#e57373';
+  box.textContent = lines.join('\n');
+  if (s.kimiKeyMasked && !$('codexKimiKey').value) $('codexKimiKey').placeholder = s.kimiKeyMasked;
+}
+async function loadCodexProfile() {
+  try {
+    renderCodexProfile(await api('/api/codex/profile'));
+  } catch (e) {
+    $('codexProfileStatus').style.color = '#e57373';
+    $('codexProfileStatus').textContent = `⚠ 无法读取 Codex 配置：${e.message}`;
+  }
+}
+async function switchCodexProfile() {
+  const profile = $('codexProfileSelect').value === 'kimi' ? 'kimi' : 'chatgpt';
+  try {
+    renderCodexProfile(await api('/api/codex/profile', { profile }));
+  } catch (e) {
+    // 如实展现失败原因，并回滚下拉到实际状态
+    $('codexProfileStatus').style.color = '#e57373';
+    $('codexProfileStatus').textContent = `⚠ 切换失败：${e.message}`;
+    loadCodexProfile();
+  }
+}
+async function saveCodexKey() {
+  const key = $('codexKimiKey').value.trim();
+  if (!key) return;
+  try {
+    renderCodexProfile(await api('/api/codex/key', { key }));
+    $('codexKimiKey').value = '';
+  } catch (e) {
+    $('codexProfileStatus').style.color = '#e57373';
+    $('codexProfileStatus').textContent = `⚠ 保存密钥失败：${e.message}`;
+  }
+}
+// 「保存」按钮：提交当前板块的字段后回到板块列表（每个板块只管自己的字段，见 SETTINGS_PANES）
+async function saveSettings() {
+  await backToSettingsNav();
+}
+
+// 主区标题旁的引擎控件：草稿(未开始)显示可选下拉，已开始显示锁定徽章，无会话则都隐藏
+function refreshEngineControl() {
+  PromptCacheUi.render();
+  const sel = $('engineSelect');
+  const badge = $('engineBadge');
+  const s = State.session;
+  if (!s) {
+    sel.style.display = 'none';
+    badge.style.display = 'none';
+    return;
+  }
+  // 会话顶部不再显示 CC/CD 引擎徽章；草稿仍可用下拉选择引擎
+  badge.style.display = 'none';
+  if (isDraftSession(s)) {
+    sel.style.display = '';
+    sel.value = s.engine || State.settings.defaultEngine;
+    sel.title = T('engine');
+  } else {
+    sel.style.display = 'none';
+  }
+}
+
+// 用户在草稿上切换引擎 → 通知后端更新草稿引擎
+async function onEngineChange() {
+  const s = State.session;
+  if (!s || !isDraftSession(s)) return;
+  const eng = $('engineSelect').value === 'codex' ? 'codex' : 'claude';
+  // 收藏夹草稿只在前端存在，后端没有这个会话；直接改本地，等绑定目录时带过去
+  if (isFavoriteDraftId(s.id)) {
+    s.engine = eng;
+    const inDraftList = State.sessions.find((x) => x.id === s.id);
+    if (inDraftList) inDraftList.engine = eng;
+    renderSessions();
+    return;
+  }
+  try {
+    const updated = await api('/api/session/engine', { id: s.id, engine: eng });
+    s.engine = updated.engine;
+    const inList = State.sessions.find((x) => x.id === s.id);
+    if (inList) inList.engine = updated.engine;
+    renderSessions();
+  } catch (e) {
+    // 已开始等：回退显示
+    refreshEngineControl();
+  }
+}
+
+async function main() {
+  applyTheme();
+  applyText();
+  bind();
+  // 新用户（尚未设定密码）：必须先走完新手引导（语言/主题/引擎/服务商/模型，不可跳过），
+  // 最后一步才设定访问密码。已完成引导但没设密码（中途刷新）则直接到设密码。
+  try {
+    const st = await api('/api/auth/status');
+    if (st && st.needsSetup) {
+      NEEDS_SETUP = true;
+      let done = false;
+      try { const s = await api('/api/settings'); done = !!(s && s.setupDone); } catch { /* 视为未完成 */ }
+      if (done) showSetup();
+      else await showOnboard();
+      return;
+    }
+  } catch { /* 状态接口异常时按普通登录流程处理 */ }
+  // 用持久 token 探测登录态；无效则弹登录框
+  if (!TOKEN) {
+    showLogin();
+    return;
+  }
+  try {
+    await api('/api/auth/check');
+    await startApp();
+  } catch {
+    showLogin();
+  }
+}
+main();

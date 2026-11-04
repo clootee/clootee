@@ -1,0 +1,678 @@
+// 引擎服务商配置（调度骨架）：claude / codex 各自选择「原版 / minimax / kimi」，
+// 第三方需填 apiKey 并选 model（模型列表实时从服务商拉取）。
+// - claude：第三方走 Anthropic 兼容端点，托管环境变量（MANAGED_ENV_KEYS）同时注入本进程
+//   和 ~/.claude/settings.json 的 env 段，两处始终一致。
+// - 模型列表：走服务商 OpenAI 兼容 /v1/models（实时），**无内置兜底**，失败即报错让用户改 Key。
+// 具体 IO（读写 data/engines.json、HTTP 拉取、写 ~/.claude/settings.json）由 Realize 实现。
+import {
+  EffortLevel,
+  EngineFileEntry,
+  EnginesConfig,
+  EnginesFile,
+  EngineProvider,
+  EngineProviderConfig,
+  ModelDetect,
+  ModelOption,
+  ProviderSlot,
+} from '../models/Types';
+import { EnvHelper } from '../helper/EnvHelper';
+import { CATALOG_PROVIDERS, resolveProvider } from '../config/ProviderCatalog';
+
+// 思考强度候选。claude 原生支持全部 5 档（`--effort`）；
+// codex 的 model_reasoning_effort 只认 low/medium/high，故 xhigh/max 在 codex 侧降级到 high。
+export const EFFORT_LEVELS: Array<{ id: Exclude<EffortLevel, ''>; label: string; codex: string }> = [
+  { id: 'low', label: '低（最快、最省）', codex: 'low' },
+  { id: 'medium', label: '中（均衡）', codex: 'medium' },
+  { id: 'high', label: '高（更仔细）', codex: 'high' },
+  { id: 'xhigh', label: '极高（复杂任务）', codex: 'high' },
+  { id: 'max', label: '最高（最强推理，最慢）', codex: 'high' },
+];
+
+// 某字符串是否为合法 effort（''=自动，合法）
+export function isEffort(v: unknown): v is EffortLevel {
+  return v === '' || v === undefined || v === null
+    ? true
+    : typeof v === 'string' && EFFORT_LEVELS.some((e) => e.id === v);
+}
+
+// 各服务商元信息（域内配置，非通用 helper）
+export interface ProviderMeta {
+  anthropicBase: string; // 供 claude 第三方使用的 Anthropic 兼容 base_url
+  chatBase: string;      // OpenAI Chat Completions 兼容 base_url（供 Codex 内置转换代理）
+  modelsUrl: string;     // OpenAI 兼容模型列表端点
+  // ── 以下供前端「新手引导」展示：名称、开通/购买入口、使用指南、一句话说明 ──
+  label: string;
+  signupUrl: string;  // 注册并创建 API Key 的页面
+  docsUrl: string;    // 官方文档
+  note: string;       // 一句话卖点/提示（新手看这句就够）
+  vision?: boolean;   // 是否支持图片识别（前端会标出「支持图片识别」）
+  recommended?: boolean; // 是否首推（前端「推荐」角标；国产模型里目前首推 MiniMax）
+  extraEnv?: Record<string, string>; // 该服务商官方要求的额外环境变量（键必须在 MANAGED_ENV_KEYS 内）
+  // 自动选默认模型时的偏好顺序（不区分大小写的子串匹配）。
+  // ⚠ 这不是兜底模型列表：只用于在服务商 API **真实返回**的 id 里排序挑一个，
+  //   API 返回空仍然照旧报错（见 listModels），绝不拿写死的名字去请求。
+  preferModels?: string[];
+  // 「订阅制 Key」走独立域名、与按量计费 Key 互不通用的服务商填这里。
+  // Key 前缀命中时，上面三个 base 全部换成这里的（见 _bases）。
+  subscription?: { keyPrefix: string; anthropicBase: string; chatBase: string; modelsUrl: string };
+}
+
+// 由本工具托管的 claude 环境变量：既注入 process.env，也写进 ~/.claude/settings.json 的 env 段。
+// 切回原版订阅时这些键会被一并清除（不碰用户自己加的其他键）。
+export const MANAGED_ENV_KEYS = [
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_MODEL',
+  // claude 会按 sonnet/opus/haiku 别名请求模型，第三方端点不认这些别名 → 三个都指向选定模型
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'ANTHROPIC_DEFAULT_FABLE_MODEL',
+  'CLAUDE_CODE_SUBAGENT_MODEL',
+  'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
+  'CLAUDE_CODE_EFFORT_LEVEL',
+  // Claude Code 不认识的模型名默认按 200K 上下文处理；1M 上下文的模型要显式告诉它
+  'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
+];
+
+// Clootee 默认服务商的地址。它只是一个普通的 Anthropic / OpenAI 兼容服务商（松耦合），
+// 这里只有一个 URL：没有上游密钥、没有价格、没有商户信息——那些全在 console.clootee.com 自己那边。
+// 自建/测试时用环境变量 CLOOTEE_CONSOLE_BASE 指到别处。
+export const CLOOTEE_CONSOLE_BASE = String(process.env.CLOOTEE_CONSOLE_BASE || 'https://console.clootee.com').replace(/\/+$/, '');
+
+// 「上下文窗口」这一项用户能填的范围（tokens）。
+// 下限 1000：再小没有任何实际意义，只会把会话立即压死。
+// 上限 10M：CLI 自己的 AUTO_COMPACT_WINDOW 只认 100k–1M（见 AUTO_COMPACT_WINDOW_*），
+// 这里给足余量，真正写进 env 时再按 CLI 的区间夹一次。
+export const CONTEXT_WINDOW_MIN = 1000;
+export const CONTEXT_WINDOW_MAX = 10_000_000;
+// claude CLI 对 `--autocompact` / CLAUDE_CODE_AUTO_COMPACT_WINDOW 的硬性区间（二进制里写死的）。
+export const AUTO_COMPACT_WINDOW_MIN = 100_000;
+export const AUTO_COMPACT_WINDOW_MAX = 1_000_000;
+// 自定义服务商的出厂默认窗口。Claude Code 对不认识的模型名一律按 200K 处理，
+// 于是约 16.7 万 token 就被强制压缩；自定义网关的模型名几乎都不认识，
+// 所以默认给到 CLI 允许的最大值（1M），用户仍可在设置里按真实模型改大/改小。
+export const CUSTOM_DEFAULT_CONTEXT_WINDOW = 1_000_000;
+
+// 顺序即前端展示顺序：首推的服务商放最前
+export const PROVIDERS: Record<string, ProviderMeta> = {
+  // 默认服务商：Key 由本机首次使用时自动领取（设备令牌），用户不用注册、不用填 Key
+  clootee: {
+    anthropicBase: CLOOTEE_CONSOLE_BASE,
+    chatBase: `${CLOOTEE_CONSOLE_BASE}/v1`,
+    modelsUrl: `${CLOOTEE_CONSOLE_BASE}/v1/models`,
+    label: 'Clootee',
+    signupUrl: CLOOTEE_CONSOLE_BASE,
+    docsUrl: CLOOTEE_CONSOLE_BASE,
+    note: '邮箱登录后领取$0.50 体验额度；DeepSeek Flash 按官方原价计费',
+    recommended: true,
+    // 三个模型都是 1M 上下文（实测 Claude Code 不认识这些模型名时会按 200K 截断并告警）
+    extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000', CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000' },
+    preferModels: ['deepseek-flash'],
+  },
+  // DeepSeek 官方直连：Anthropic 兼容端点在 /anthropic（OpenAI 兼容端点在根路径）。
+  // 它的模型名（deepseek-flash / deepseek-v4-pro）Claude Code 一个都不认识 → 会被按 200K 处理，
+  // 于是上下文刚到 16.7 万 token 就被强制压缩（200K − 33K 的缓冲，实测吻合）。
+  // 官方文档：deepseek-flash（DeepSeek-V4.1-Flash）上下文 1M、最大输出 384K，所以照实声明。
+  deepseek: {
+    anthropicBase: 'https://api.deepseek.com/anthropic',
+    chatBase: 'https://api.deepseek.com/v1',
+    // 官方文档的模型列表端点在根路径（OpenAI SDK 的 base 可以带 /v1，列表接口不带）
+    modelsUrl: 'https://api.deepseek.com/models',
+    label: 'DeepSeek',
+    signupUrl: 'https://platform.deepseek.com/api_keys',
+    docsUrl: 'https://api-docs.deepseek.com/',
+    note: 'DeepSeek 官方直连；deepseek-flash / deepseek-v4-pro 为 1M 上下文，已按实声明，避免被误按 200K 压缩',
+    recommended: true,
+    extraEnv: { CLAUDE_CODE_MAX_CONTEXT_TOKENS: '1000000', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000' },
+    preferModels: ['deepseek-flash', 'deepseek-v4-pro'],
+  },
+  // Claude 官方 API（按量计费）：不存在订阅登录，把 Console 的 API Key 粘进来就能用。
+  // 端点就是官方的 api.anthropic.com —— 它同时接受 `Authorization: Bearer <key>`（Claude Code 发的就是这个）
+  // 与 x-api-key，所以走和其它第三方服务商一模一样的托管环境变量路径，不需要任何特例。
+  // chatBase 留空：官方只有 Anthropic 协议，没有 OpenAI 兼容端点 → 它只出现在 Claude Code 的服务商列表里。
+  anthropic: {
+    anthropicBase: 'https://api.anthropic.com',
+    chatBase: '',
+    modelsUrl: 'https://api.anthropic.com/v1/models',
+    label: 'Claude 官方 API',
+    signupUrl: 'https://platform.claude.com/settings/keys',
+    docsUrl: 'https://platform.claude.com/docs/en/api/overview',
+    note: '用 Anthropic Console 的 API Key（sk-ant-…）按量付费，不需要 Claude 订阅；Key 在 Console 的 API Keys 页创建',
+    preferModels: ['sonnet'],
+  },
+  // OpenAI 官方 API（按量计费）：对应 Codex 侧「不用 ChatGPT 订阅、直接填 Key」那条路。
+  // anthropicBase 留空 → 只出现在 Codex 的服务商列表里（它没有 Anthropic 接口）。
+  openai: {
+    anthropicBase: '',
+    chatBase: 'https://api.openai.com/v1',
+    modelsUrl: 'https://api.openai.com/v1/models',
+    label: 'OpenAI 官方 API',
+    signupUrl: 'https://platform.openai.com/api-keys',
+    docsUrl: 'https://platform.openai.com/docs/api-reference',
+    note: '用 OpenAI 平台的 API Key 按量付费，不需要 ChatGPT 订阅；Key 在 platform.openai.com 的 API Keys 页创建',
+    preferModels: ['gpt-5'],
+  },
+  minimax: {
+    anthropicBase: 'https://api.minimaxi.com/anthropic',
+    chatBase: 'https://api.minimaxi.com/v1',
+    modelsUrl: 'https://api.minimaxi.com/v1/models',
+    label: 'MiniMax',
+    signupUrl: 'https://platform.minimaxi.com/user-center/basic-information/interface-key',
+    docsUrl: 'https://platform.minimaxi.com/docs/token-plan/claude-code',
+    note: 'MiniMax 最新模型（列表实时拉取），代码能力强且支持图片识别，国产模型首推',
+    vision: true,
+    recommended: true,
+    // 官方 Claude Code 接入文档要求：把自动压缩窗口对齐到 1M 上下文
+    extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1000000' },
+    // 官方文档推荐 M3（M2.x 只有 text+tools，图片识别要 M3）
+    preferModels: ['MiniMax-M3', 'MiniMax-M2'],
+  },
+  xiaomi: {
+    // 按量计费 Key（sk-）走 api 域名
+    anthropicBase: 'https://api.xiaomimimo.com/anthropic',
+    chatBase: 'https://api.xiaomimimo.com/v1',
+    modelsUrl: 'https://api.xiaomimimo.com/v1/models',
+    // 订阅制 Token Plan 的 Key（tp-）是**另一套域名**，两者互不通用：
+    // 拿 tp- Key 打 api.xiaomimimo.com 会直接鉴权失败。国内集群用 -cn
+    // （官方还有 -sgp / -ams 两个海外集群，要用的人走「自定义服务商」填）。
+    subscription: {
+      keyPrefix: 'tp-',
+      anthropicBase: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+      chatBase: 'https://token-plan-cn.xiaomimimo.com/v1',
+      modelsUrl: 'https://token-plan-cn.xiaomimimo.com/v1/models',
+    },
+    label: '小米 MiMo',
+    signupUrl: 'https://platform.xiaomimimo.com',
+    docsUrl: 'https://platform.xiaomimimo.com/docs',
+    note: '小米自研模型，国内直连；按量计费 Key（sk-）与订阅 Token Plan Key（tp-）都支持，粘进来自动识别',
+  },
+  kimi: {
+    anthropicBase: 'https://api.moonshot.cn/anthropic',
+    chatBase: 'https://api.moonshot.cn/v1',
+    modelsUrl: 'https://api.moonshot.cn/v1/models',
+    label: 'Kimi 开放平台（按量计费）',
+    // platform.moonshot.cn 已 301 到 platform.kimi.com，直接写新地址免得多跳一次
+    signupUrl: 'https://platform.kimi.com/console/api-keys',
+    docsUrl: 'https://platform.kimi.com/docs',
+    note: '国内直连，长上下文见长，按量计费需先充值；Key 在开放平台控制台创建',
+    extraEnv: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '1048576', CLAUDE_CODE_EFFORT_LEVEL: 'max' },
+  },
+  // Kimi Code 是月之暗面的**包月订阅**产品，和上面的开放平台按量计费是两套东西：
+  // 端点不同（api.kimi.com/coding）、Key 不同（kimi.com/code 控制台单独创建）、模型名也不同
+  // （kimi-for-coding / k3 …）。官方明确两者 Key 不通用，混用报 401 invalid_authentication_error。
+  // ⚠ 不能像小米那样按 Key 前缀自动区分——两边都是 sk- 开头，所以只能单列一个服务商让用户自己选。
+  kimicode: {
+    anthropicBase: 'https://api.kimi.com/coding',
+    chatBase: 'https://api.kimi.com/coding/v1',
+    modelsUrl: 'https://api.kimi.com/coding/v1/models',
+    label: 'Kimi Code（包月订阅）',
+    signupUrl: 'https://www.kimi.com/code/console',
+    docsUrl: 'https://www.kimi.com/code/docs/',
+    note: '已买 Kimi Code 月卡的选这个；Key 要在 kimi.com/code 控制台单独建，和开放平台的 Key 不通用（都是 sk- 开头，别拿错）',
+  },
+};
+// Preserve legacy IDs and endpoint overrides; add compatible models.dev providers.
+for (const [id, meta] of Object.entries(CATALOG_PROVIDERS)) {
+  if (!Object.prototype.hasOwnProperty.call(PROVIDERS, id)) PROVIDERS[id] = meta;
+}
+
+// 第三方服务商 id 列表（唯一来源：PROVIDERS 的键，新增服务商只需改 PROVIDERS）
+export const THIRD_PARTY_PROVIDERS = Object.keys(PROVIDERS) as Exclude<EngineProvider, 'official' | 'custom'>[];
+
+// 某字符串是否为合法服务商 id
+export function isProvider(v: unknown): v is EngineProvider {
+  return v === 'official' || v === 'custom' || (typeof v === 'string' && Object.prototype.hasOwnProperty.call(PROVIDERS, v));
+}
+
+const DEFAULT: EnginesConfig = {
+  claude: { provider: 'official', apiKey: '', model: '', effort: '' },
+  codex: { provider: 'official', apiKey: '', model: '', effort: '' },
+};
+
+// 空槽（每个服务商的出厂设置）
+function emptySlot(): ProviderSlot {
+  return { apiKey: '', model: '', effort: '' };
+}
+
+export class EngineConfigStruct {
+  // 读取配置：把「当前选中服务商」那一槽投影成扁平视图。
+  // 所有下游（ClaudeRunner / CodexRunner / ModelManager / 前端）都读这个投影，
+  // 因此换服务商后绝不可能看到别的服务商的 Key / 模型 / 候选列表。
+  static get(): EnginesConfig {
+    const file = this._readFile();
+    return {
+      claude: this._project(file.claude),
+      codex: this._project(file.codex),
+    };
+  }
+
+  // 读取全部服务商的槽（供前端「换服务商即回显该服务商自己上次的设置」）
+  static disconnectClootee(): void {
+    const file = this._readFile();
+    for (const engine of ['claude', 'codex'] as const) {
+      const slot = file[engine].slots.clootee;
+      if (slot) file[engine].slots.clootee = { ...slot, apiKey: '' };
+    }
+    this._writeFile(file);
+    this.applyEnv();
+  }
+
+  static slots(engine: keyof EnginesConfig): Partial<Record<EngineProvider, ProviderSlot>> {
+    this._assertEngine('slots', engine);
+    return this._readFile()[engine].slots;
+  }
+
+  // 把「当前选中服务商」的槽投影成扁平视图
+  private static _project(entry: EngineFileEntry): EngineProviderConfig {
+    const provider = entry.provider;
+    const slot = entry.slots[provider] || emptySlot();
+    return {
+      provider,
+      // official 没有 API Key 的概念——投影时强制清空，
+      // 免得任何下游（含 claudeEnv/codexUpstream）误把第三方 Key 用在原版上。
+      apiKey: provider === 'official' ? '' : slot.apiKey || '',
+      model: slot.model || '',
+      effort: isEffort(slot.effort) ? (slot.effort as EffortLevel) || '' : '',
+      baseUrl: provider === 'custom' ? slot.baseUrl || '' : '',
+      modelsUrl: provider === 'custom' ? slot.modelsUrl || '' : '',
+      contextWindow: this._cleanContextWindow(slot.contextWindow),
+      models: Array.isArray(slot.models) ? slot.models : undefined,
+      detected: slot.detected,
+    };
+  }
+
+  private static _assertEngine(who: string, engine: unknown): void {
+    if (engine !== 'claude' && engine !== 'codex')
+      throw new Error(`${who}: invalid engine=${engine}`);
+  }
+
+  // 更新某引擎的服务商配置；只写「该服务商自己那一槽」，其余服务商的设置原样保留。
+  // 写盘后应用 claude 环境变量到本进程。
+  static setProvider(engine: keyof EnginesConfig, cfg: EngineProviderConfig): EnginesConfig {
+    this._assertEngine('setProvider', engine);
+    const provider = cfg?.provider;
+    if (!isProvider(provider))
+      throw new Error(`setProvider: invalid provider=${provider}（可选 official/${THIRD_PARTY_PROVIDERS.join('/')}）`);
+    if (provider !== 'official' && (!cfg.apiKey || !cfg.apiKey.trim()))
+      throw new Error(`setProvider: ${provider} 需要填写 API Key`);
+    if (provider === 'custom') this._assertUrl(cfg.baseUrl, 'Base URL');
+    const resolved = this._bases(provider, cfg.apiKey || '');
+    if (engine === 'claude' && resolved && !resolved.anthropicBase)
+      throw new Error('此服务商未配置 Anthropic 接口，请使用 Codex / This provider supports Codex; no native Anthropic endpoint is configured.');
+    if (engine === 'codex' && resolved && !resolved.chatBase)
+      throw new Error('此服务商未配置 OpenAI 兼容接口，请使用 Claude Code / This provider has no OpenAI-compatible endpoint; use it with Claude Code.');
+    // Third-party models may be fetched or manually supplied from provider documentation.
+    if (engine === 'claude' && provider !== 'official' && !(cfg.model || '').trim())
+      throw new Error(`setProvider: ${provider} 需要选择或填写模型 / Select or enter a model ID`);
+    if (!isEffort(cfg.effort))
+      throw new Error(`setProvider: invalid effort=${cfg.effort}`);
+
+    const file = this._readFile();
+    const entry = file[engine];
+    const prevSlot = entry.slots[provider] || emptySlot();
+    // 候选列表随「Key / Base URL」变化而失效（换了账号 → 可用模型可能不同），
+    // 同一服务商同一 Key 则保留缓存，免得每次保存都要重新拉一遍。
+    const apiKey = provider === 'official' ? '' : (cfg.apiKey || '').trim();
+    const baseUrl = provider === 'custom' ? this._cleanUrl(cfg.baseUrl || '') : '';
+    const keyChanged = prevSlot.apiKey !== apiKey || (prevSlot.baseUrl || '') !== baseUrl;
+
+    entry.provider = provider;
+    entry.slots[provider] = {
+      apiKey,
+      model: (cfg.model || '').trim(),
+      effort: (cfg.effort || '') as EffortLevel,
+      baseUrl: provider === 'custom' ? baseUrl : undefined,
+      modelsUrl: provider === 'custom' && cfg.modelsUrl ? this._cleanUrl(cfg.modelsUrl) : undefined,
+      // 上下文窗口与 Key 无关（换 Key 不会改变模型窗口），所以未传时沿用该槽已存的值
+      contextWindow: cfg.contextWindow !== undefined
+        ? this._cleanContextWindow(cfg.contextWindow)
+        : this._cleanContextWindow(prevSlot.contextWindow),
+      models: keyChanged ? undefined : prevSlot.models,
+      detected: keyChanged ? undefined : prevSlot.detected,
+    };
+    this._writeFile(file);
+    this.applyEnv();
+    return this.get();
+  }
+
+  // 只改「选定模型」，不动服务商/apiKey。'' = 自动（由引擎自己决定）。写入当前服务商的槽。
+  static setModel(engine: keyof EnginesConfig, model: string): EnginesConfig {
+    this._assertEngine('setModel', engine);
+    if (typeof model !== 'string') throw new Error(`setModel: invalid model=${model}`);
+    this._patchSlot(engine, (slot) => ({ ...slot, model: model.trim() }));
+    this.applyEnv();
+    return this.get();
+  }
+
+  // 只改「思考强度」。'' = 自动（不传 --effort / model_reasoning_effort）。写入当前服务商的槽。
+  static setEffort(engine: keyof EnginesConfig, effort: string): EnginesConfig {
+    this._assertEngine('setEffort', engine);
+    if (!isEffort(effort))
+      throw new Error(
+        `setEffort: invalid effort=${effort}（可选 ''(自动)/${EFFORT_LEVELS.map((e) => e.id).join('/')}）`,
+      );
+    this._patchSlot(engine, (slot) => ({ ...slot, effort: (effort || '') as EffortLevel }));
+    this.applyEnv();
+    return this.get();
+  }
+
+  // 缓存检测结果（候选列表 / 当前模型），供前端下拉与状态展示。写入当前服务商的槽，
+  // 因此 MiniMax 的候选列表绝不会出现在原版下。
+  static setCache(
+    engine: keyof EnginesConfig,
+    patch: { models?: ModelOption[]; detected?: ModelDetect },
+  ): EnginesConfig {
+    this._assertEngine('setCache', engine);
+    this._patchSlot(engine, (slot) => ({
+      ...slot,
+      models: patch.models !== undefined ? patch.models : slot.models,
+      detected: patch.detected !== undefined ? patch.detected : slot.detected,
+    }));
+    return this.get();
+  }
+
+  // 对「当前选中服务商」那一槽做局部更新（唯一的槽写入通道）
+  private static _patchSlot(
+    engine: keyof EnginesConfig,
+    fn: (slot: ProviderSlot) => ProviderSlot,
+  ): void {
+    const file = this._readFile();
+    const entry = file[engine];
+    entry.slots[entry.provider] = fn(entry.slots[entry.provider] || emptySlot());
+    this._writeFile(file);
+  }
+
+  // 解析某服务商在**这把 Key** 下实际要用的三个 base。
+  // 端点不能只看服务商：小米 MiMo 的订阅 Key（tp-）与按量 Key（sk-）走不同域名且互不通用，
+  // 用错域名会直接鉴权失败。official / custom 不走内置端点表 → 返回 null 由调用方处理。
+  private static _bases(provider: EngineProvider, apiKey: string): ProviderMeta | null {
+    if (provider === 'official' || provider === 'custom') return null;
+    return resolveProvider(provider, String(apiKey || ''), PROVIDERS);
+  }
+
+  // 当前 claude 服务商对应的托管环境变量（official / 未填 Key → 空对象＝全部清除）
+  static claudeEnv(): Record<string, string> {
+    const cfg = this.get().claude;
+    if (cfg.provider === 'official') return {};
+    const meta = this._bases(cfg.provider, cfg.apiKey);
+    const baseUrl = cfg.provider === 'custom' ? cfg.baseUrl : meta?.anthropicBase;
+    if (!baseUrl || !cfg.apiKey) return {};
+    const env: Record<string, string> = {
+      ANTHROPIC_BASE_URL: baseUrl,
+      ANTHROPIC_AUTH_TOKEN: cfg.apiKey,
+      ...(meta?.extraEnv || {}),
+    };
+    // 服务商 extraEnv 只声明了 AUTO_COMPACT_WINDOW、没声明模型大小时（MiniMax / Kimi），
+    // 把 MAX_CONTEXT_TOKENS 补成同一个值：CLI 会用「它以为的模型窗口」把前者夹一次，
+    // 不认识的名字默认 200K —— 只给后者等于没给。
+    if (env.CLAUDE_CODE_AUTO_COMPACT_WINDOW && !env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
+      env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+    // 用户显式填了「上下文窗口」→ 覆盖服务商 extraEnv 里写死的那个（如 clootee 的 1M）。
+    // 两个键必须一起给：CLAUDE_CODE_MAX_CONTEXT_TOKENS 是「这个模型有多大」，
+    // 而 CLAUDE_CODE_AUTO_COMPACT_WINDOW 会被 CLI 按模型窗口 `Math.min` 夹一次 ——
+    // 只给后者的话，不认识的模型名仍会被夹回它默认的 200K，等于没设。
+    // 自定义服务商留空时给 1M 出厂默认，避免它的模型名不被认识而被压到 200K。
+    const ctxWin = cfg.contextWindow || (cfg.provider === 'custom' ? CUSTOM_DEFAULT_CONTEXT_WINDOW : 0);
+    if (ctxWin && ctxWin > 0) {
+      env.CLAUDE_CODE_MAX_CONTEXT_TOKENS = String(ctxWin);
+      env.CLAUDE_CODE_AUTO_COMPACT_WINDOW = String(
+        Math.min(AUTO_COMPACT_WINDOW_MAX, Math.max(AUTO_COMPACT_WINDOW_MIN, ctxWin)),
+      );
+    }
+    // 用户显式选了思考强度 → 覆盖服务商 extraEnv 里写死的那个（如 kimi 的 max）。
+    // 命令行 `--effort` 也会传同一个值，两处保持一致。
+    if (cfg.effort) env.CLAUDE_CODE_EFFORT_LEVEL = cfg.effort;
+    if (!cfg.model) return env;
+    return {
+      ...env,
+      ANTHROPIC_MODEL: cfg.model,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: cfg.model,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: cfg.model,
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: cfg.model,
+      ANTHROPIC_DEFAULT_FABLE_MODEL: cfg.model,
+      CLAUDE_CODE_SUBAGENT_MODEL: cfg.model,
+    };
+  }
+
+  // codex 侧的思考强度取值（''=自动/不传）。codex 的 model_reasoning_effort 只认
+  // low/medium/high，所以 claude 的 xhigh/max 按 EFFORT_LEVELS 映射降级到 high。
+  static codexEffort(): string {
+    const effort = this.get().codex.effort;
+    if (!effort) return '';
+    const meta = EFFORT_LEVELS.find((e) => e.id === effort);
+    return meta ? meta.codex : '';
+  }
+
+  static codexUpstream(): { baseUrl: string; apiKey: string; model: string; label: string } {
+    const cfg = this.get().codex;
+    if (cfg.provider === 'official') throw new Error('Codex 当前使用原版 ChatGPT，无第三方上游');
+    const meta = this._bases(cfg.provider, cfg.apiKey);
+    const baseUrl = cfg.provider === 'custom' ? cfg.baseUrl || '' : meta?.chatBase || '';
+    if (!baseUrl || !cfg.apiKey || !cfg.model)
+      throw new Error('Codex 第三方服务商缺少 Base URL、API Key 或模型');
+    return {
+      // 用户常把完整端点（…/chat/completions）当 base 填进来；代理还会再拼一次，这里截回 base
+      baseUrl: this._cleanUrl(baseUrl).replace(/\/chat\/completions$/i, ''),
+      apiKey: cfg.apiKey,
+      model: cfg.model,
+      label: meta?.label || '自定义服务商',
+    };
+  }
+
+  // 应用 claude 服务商配置：注入本进程环境（spawn 的 claude 子进程继承）
+  // + 同步写 ~/.claude/settings.json 的 env 段（用户直接开终端跑 claude 也一致）。
+  // official → 两处的托管键都清除，回到订阅登录流程。
+  static applyEnv(): void {
+    const env = this.claudeEnv();
+    EnvHelper.applyManaged(process.env, MANAGED_ENV_KEYS, env);
+    this._syncClaudeSettings(env);
+    const codex = this.get().codex;
+    if (codex.provider !== 'official' && codex.apiKey)
+      process.env.CLAUDE_HUB_CODEX_API_KEY = codex.apiKey;
+    else
+      delete process.env.CLAUDE_HUB_CODEX_API_KEY;
+    this._syncCodexConfig(codex);
+  }
+
+  // 实时拉取某服务商模型列表（OpenAI 兼容 /v1/models）。
+  // 不做任何内置兜底：Key 错/网络不通/返回空 → 直接抛错让用户改 Key，避免拿假列表去跑。
+  static async listModels(
+    provider: EngineProvider,
+    apiKey: string,
+    baseUrl = '',
+    modelsUrl = '',
+  ): Promise<string[]> {
+    if (provider === 'official')
+      throw new Error('listModels: official（原版订阅）无需选择模型');
+    // 端点随 Key 走（订阅 Key 与按量 Key 不同域名），所以要把 apiKey 一起交给 _bases
+    const meta = this._bases(provider, apiKey);
+    if (provider !== 'custom' && !meta) throw new Error(`listModels: invalid provider=${provider}`);
+    if (!apiKey || !apiKey.trim()) throw new Error('listModels: 需要填写 API Key 才能拉取模型列表');
+    if (provider === 'custom') this._assertUrl(baseUrl, 'Base URL');
+    const url = provider === 'custom'
+      ? (modelsUrl ? this._cleanUrl(modelsUrl) : `${this._cleanUrl(baseUrl)}/models`)
+      : meta!.modelsUrl;
+    const ids = await this._fetchModels(url, apiKey.trim());
+    if (!ids.length)
+      throw new Error(
+        `listModels: ${provider} 返回了空模型列表——请确认这个 API Key 属于该服务商且已开通模型权限`,
+      );
+    return ids;
+  }
+
+  // 在服务商 API 真实返回的模型 id 里挑一个作默认（供前端「换服务商即自动选模型」）。
+  // 规则：先按该服务商的 preferModels 顺序找子串命中，都没命中就用 API 返回的第一个。
+  // ⚠ 不引入任何写死的兜底模型名——ids 为空就返回 ''，由调用方按「没有可用模型」处理。
+  static pickDefaultModel(provider: EngineProvider, ids: string[]): string {
+    if (!Array.isArray(ids) || !ids.length) return '';
+    const meta = provider === 'official' || provider === 'custom' ? null : PROVIDERS[provider];
+    for (const want of meta?.preferModels || []) {
+      const hit = ids.find((id) => id.toLowerCase().includes(want.toLowerCase()));
+      if (hit) return hit;
+    }
+    return ids[0];
+  }
+
+  // 服务商下拉里固定排在最前面的几个：其余 180 多条 models.dev 目录跟在后面。
+  // 顺序即展示顺序——「订阅 / 官方 API / 通用中转 / 国产大厂」是绝大多数人真正会选的，
+  // 不该让它们在目录里翻找（OpenRouter 尤其：Claude 与 Codex 都能用，是通用的第二选择）。
+  private static readonly FEATURED_PROVIDERS: Array<Exclude<EngineProvider, 'official' | 'custom'>> = [
+    'clootee', 'deepseek', 'anthropic', 'openai', 'openrouter', 'minimax', 'xiaomi', 'kimi', 'kimicode',
+  ];
+
+  // 供前端「新手引导 / 设置」展示的服务商清单（含开通链接与说明）
+  static providerList(): Array<{ id: EngineProvider; engines?: string[]; defaultContextWindow?: number } & Partial<ProviderMeta>> {
+    const featured = this.FEATURED_PROVIDERS.filter((id) => THIRD_PARTY_PROVIDERS.indexOf(id) >= 0);
+    const rest = THIRD_PARTY_PROVIDERS.filter((id) => featured.indexOf(id) < 0);
+    return [
+      {
+        id: 'official' as EngineProvider,
+        label: '原版（官方订阅登录）',
+        note: '用已有的 Claude / ChatGPT 账号登录，不需要 API Key',
+        signupUrl: 'https://claude.com/claude-code',
+        docsUrl: 'https://docs.claude.com/en/docs/claude-code/overview',
+      },
+      ...[...featured, ...rest].map((id) => ({
+        id, ...PROVIDERS[id],
+        engines: this._enginesOf(PROVIDERS[id]),
+        defaultContextWindow: this.defaultContextWindow(id),
+      })),
+      {
+        id: 'custom' as EngineProvider,
+        label: '自定义服务商',
+        note: '填写兼容 Base URL、模型列表 URL 与 API Key',
+        defaultContextWindow: CUSTOM_DEFAULT_CONTEXT_WINDOW,
+      },
+    ];
+  }
+
+  // 服务商出厂声明的上下文窗口（供前端显示「默认值」；undefined=未声明，引擎按 200K 猜）。
+  // custom 走 CUSTOM_DEFAULT_CONTEXT_WINDOW；其余取 extraEnv 里的两个键之一（后者可能被 CLI 夹）。
+  static defaultContextWindow(provider: EngineProvider): number | undefined {
+    if (provider === 'official') return undefined;
+    if (provider === 'custom') return CUSTOM_DEFAULT_CONTEXT_WINDOW;
+    const extra = PROVIDERS[provider]?.extraEnv || {};
+    const raw = Number(extra.CLAUDE_CODE_MAX_CONTEXT_TOKENS || extra.CLAUDE_CODE_AUTO_COMPACT_WINDOW);
+    return Number.isFinite(raw) && raw > 0 ? raw : undefined;
+  }
+
+  // 某服务商能被哪个引擎用：有 Anthropic 兼容端点 → Claude Code；有 OpenAI 兼容端点 → Codex。
+  // 官方 API 两家各只有一半：anthropic 只有 Anthropic 协议、openai 只有 OpenAI 协议，
+  // 所以不能再用「有没有 anthropicBase」一刀切成 claude+codex（会把选不了的引擎也列出来）。
+  private static _enginesOf(meta: ProviderMeta): string[] {
+    const engines: string[] = [];
+    if (meta.anthropicBase) engines.push('claude');
+    if (meta.chatBase) engines.push('codex');
+    return engines.length ? engines : ['codex'];
+  }
+
+  // 读盘并归一化成分槽结构（兼容旧版扁平格式）
+  private static _readFile(): EnginesFile {
+    const raw = this._read() as any;
+    return {
+      claude: this._normalizeEntry(raw?.claude),
+      codex: this._normalizeEntry(raw?.codex),
+    };
+  }
+
+  // 归一化一个引擎条目。
+  // **向后兼容**：旧版 engines.json 是扁平的 `{provider, apiKey, model, models, detected}`，
+  // 所有服务商共用一份字段（正是「选原版却看到 MiniMax 模型」的根因）。
+  // 迁移策略：把旧的那一份数据**只归到它当时选中的那个服务商槽**里；
+  // 若旧记录是 official 却带着第三方 Key/模型缓存（历史脏数据），一并丢弃——
+  // official 槽永远不该有 Key，模型候选也应由内置清单重新生成。
+  private static _normalizeEntry(raw: any): EngineFileEntry {
+    const provider: EngineProvider = isProvider(raw?.provider) ? raw.provider : 'official';
+    const slots: Partial<Record<EngineProvider, ProviderSlot>> = {};
+
+    if (raw && typeof raw === 'object' && raw.slots && typeof raw.slots === 'object') {
+      for (const [k, v] of Object.entries(raw.slots as Record<string, any>)) {
+        if (!isProvider(k) || !v || typeof v !== 'object') continue;
+        slots[k] = this._normalizeSlot(k as EngineProvider, v);
+      }
+    } else if (raw && typeof raw === 'object') {
+      // 旧版扁平结构 → 迁移到当前服务商那一槽
+      slots[provider] = this._normalizeSlot(provider, raw);
+    }
+    if (!slots[provider]) slots[provider] = emptySlot();
+    return { provider, slots };
+  }
+
+  private static _normalizeSlot(provider: EngineProvider, v: any): ProviderSlot {
+    const isOfficial = provider === 'official';
+    // official 槽强制无 Key：历史脏数据（official 却存着第三方 Key）在这里被清掉
+    const apiKey = isOfficial ? '' : String(v.apiKey || '');
+    let models = Array.isArray(v.models) ? (v.models as ModelOption[]) : undefined;
+    let model = String(v.model || '');
+    if (isOfficial) {
+      // `source:'api'` 的候选只可能来自第三方 /v1/models —— 原版永远不该有。
+      // 这是「选原版却在下拉里看到 MiniMax / 小米模型」的最后一道闸：
+      // 无论是旧版扁平脏数据还是别处写歪，读出来就被过滤掉。
+      const legit = (models || []).filter((m) => m && m.source !== 'api');
+      models = legit.length ? legit : undefined;
+      // 选定模型若不在原版自身的候选里 → 一并丢弃（不要求这条记录还带过第三方 Key）。
+      // 旧写法只在 `v.apiKey` 存在时才丢，漏了 Key 已被清空的情况：别的服务商的模型名
+      // （如 deepseek-flash）会残留在原版槽里，codex 拿它去打 ChatGPT 账号会直接 400 失败。
+      if (model && legit.length && !legit.some((m) => m.id === model)) model = '';
+    }
+    return {
+      apiKey,
+      model,
+      effort: isEffort(v.effort) ? ((v.effort || '') as EffortLevel) : '',
+      baseUrl: provider === 'custom' ? String(v.baseUrl || '') : undefined,
+      modelsUrl: provider === 'custom' ? String(v.modelsUrl || '') : undefined,
+      contextWindow: this._cleanContextWindow(v.contextWindow),
+      models,
+      detected: v.detected,
+    };
+  }
+
+  // ── IO 钩子（Realize 实现）──
+  // 返回落盘的原始 JSON（可能是旧的扁平结构，由 _normalizeEntry 兼容处理）
+  protected static _read(): EnginesConfig | null {
+    throw new Error('Not implemented');
+  }
+  protected static _write(_c: EnginesConfig): void {
+    throw new Error('Not implemented');
+  }
+  // 写入分槽结构。默认转调 _write（Realize 里两者都落到同一个文件）。
+  protected static _writeFile(c: EnginesFile): void {
+    this._write(c as unknown as EnginesConfig);
+  }
+  // 拉取模型 id 列表（Realize 用 HttpJson 实现）
+  protected static _fetchModels(_url: string, _apiKey: string): Promise<string[]> {
+    throw new Error('Not implemented');
+  }
+  // 把托管环境变量同步进 ~/.claude/settings.json 的 env 段（Realize 实现读改写）
+  protected static _syncClaudeSettings(_env: Record<string, string>): void {
+    throw new Error('Not implemented');
+  }
+  protected static _syncCodexConfig(_cfg: EngineProviderConfig): void {
+    throw new Error('Not implemented');
+  }
+
+  private static _cleanUrl(url: string): string {
+    return String(url || '').trim().replace(/\/+$/, '');
+  }
+
+  // 清洗「上下文窗口」（tokens）：非法/<=0/空 → undefined（＝不声明，交给引擎自己判断），
+  // 合法值夹到 [CONTEXT_WINDOW_MIN, CONTEXT_WINDOW_MAX]。
+  private static _cleanContextWindow(v: unknown): number | undefined {
+    if (v === undefined || v === null || v === '') return undefined;
+    const n = Math.round(Number(v));
+    if (!Number.isFinite(n) || n <= 0) return undefined;
+    return Math.min(CONTEXT_WINDOW_MAX, Math.max(CONTEXT_WINDOW_MIN, n));
+  }
+
+  private static _assertUrl(url: unknown, label: string): void {
+    const value = this._cleanUrl(String(url || ''));
+    let parsed: URL;
+    try { parsed = new URL(value); } catch { throw new Error(`${label} 不是有效 URL`); }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:')
+      throw new Error(`${label} 只支持 http/https`);
+  }
+
+  static DEFAULT = DEFAULT;
+}
