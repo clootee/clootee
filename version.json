@@ -1,10 +1,10 @@
 {
-  "version": "3.1.30",
+  "version": "3.1.31",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-04",
   "notesI18n": {
-    "zh": "安装时自动补齐 Node、Git、Claude Code、Codex 与依赖，镜像竞速与失败换源，运行验证通过后完成安装。 修复自动生成未知访问密码的问题：安全密码改为主动启用，未启用时本机直接使用，无登录或退出；提供旧版凭据恢复。安装及运行时检测缺失 Git 后自动安装并验证，完成后继续原操作。",
-    "en": "Automatically install Node, Git, Claude Code, Codex and dependencies during setup, with mirror selection, fallback and executable verification. Remove hidden generated workspace passwords: security passwords are opt-in, local use requires no sign-in, and legacy credentials can be recovered locally. Missing Git installs automatically during setup and runtime, verifies successfully, and resumes the pending action."
+    "zh": "修复各平台内置更新：Windows、macOS 桌面版校验完整安装包后更新并重新打开，保留用户数据；Linux 与源码包使用独立 Node 更新进程完成编译、重启及健康检查，无需 PM2。",
+    "en": "Fix cross-platform updates: Windows and macOS desktop apps verify and install complete release packages, relaunch and retain user data. Linux and source packages build, restart and verify health with a standalone Node supervisor, without requiring PM2."
   }
 }

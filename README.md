@@ -143,3 +143,11 @@ Public distributions contain product source, runtime assets, licenses, and build
 **[Apache 2.0](LICENSE)** · Contributions and issues welcome
 
 </div>
+
+### Built-in updates
+
+Windows EXE and macOS DMG desktop installations fetch the published download manifest, verify the complete package, install it and reopen automatically. User data, installed tools and browser preferences remain in the same user directory. Diagnostics are saved to `desktop-update.log` in that directory.
+
+Linux and cross-platform ZIP installations fetch source through Git and use an independent Node supervisor to build, restart and check health, without requiring PM2. Local source changes require confirmation before overwriting; build failures keep the existing server running.
+
+Desktop versions 3.1.30 and earlier require a one-time install of 3.1.31 from the official download page to gain the complete package update channel.
