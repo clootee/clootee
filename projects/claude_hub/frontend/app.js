@@ -242,7 +242,16 @@ async function api(path, body) {
       ? 'messageLinkRestartNeeded' : 'apiUnexpectedResponse'));
   }
   const json = await res.json();
-  if (!json.success) throw new Error(json.locked ? T('lockedHint') : (json.error || 'request failed'));
+  if (!json.success) {
+    const message = json.locked ? T('lockedHint') : (json.error || 'request failed');
+    if (!path.startsWith('/api/engine/') && EngineRecovery.missingEngine(message)) {
+      await EngineRecovery.fromError(message);
+      const error = new Error(T('engineRecoveryRetryAction'));
+      error.engineRecoveryHandled = true;
+      throw error;
+    }
+    throw new Error(message);
+  }
   return json.data;
 }
 
@@ -5796,6 +5805,7 @@ async function addTask() {
   if (initialId && !isFavoriteDraftId(initialId) && initialSelection !== sessionSelectionVersion) return;
   const selection = sessionSelectionVersion;
   const target = State.sessionId;
+  if (!(await EngineRecovery.ensure(State.session?.engine || State.settings.defaultEngine)) || selection !== sessionSelectionVersion) return;
   if (!(await SessionLimitUi.prepare(1)) || selection !== sessionSelectionVersion) return;
   if (!(await PromptCacheUi.ensure()) || selection !== sessionSelectionVersion) return;
   const prepared = await CostUi.prepare([applyQuickPrefix(applySlashPrefix(raw))]);
@@ -5824,7 +5834,7 @@ async function addTask() {
     }
     SessionLimitUi.refresh();
     if ((e.message || '').includes('session_message_limit_reached')) SessionLimitUi.showFeedback(T('sessionLimitBatch').replace('{remaining}', '0'));
-    else alert(e.message || 'Submit failed');
+    else if (!e.engineRecoveryHandled) alert(e.message || 'Submit failed');
   }
 }
 // ── 批量任务弹窗 ──
@@ -5862,6 +5872,7 @@ async function submitTasks() {
   const selection = sessionSelectionVersion;
   const target = State.sessionId;
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
+  if (!(await EngineRecovery.ensure(State.session?.engine || State.settings.defaultEngine)) || selection !== sessionSelectionVersion) return;
   if (!(await SessionLimitUi.prepare(prompts.length)) || selection !== sessionSelectionVersion) return;
   if (!(await PromptCacheUi.ensure()) || selection !== sessionSelectionVersion) return;
   const prepared = await CostUi.prepare(prompts.map(applyQuickPrefix));
@@ -5910,6 +5921,7 @@ async function stopChoiceNext() {
 }
 async function togglePause() {
   if (!State.session) return;
+  if (State.session.paused && !(await EngineRecovery.ensure(State.session.engine))) return;
   const path = State.session.paused ? '/api/flow/resume' : '/api/flow/pause';
   await api(path, { sessionId: State.sessionId });
 }
@@ -6279,6 +6291,7 @@ function connectWs() {
     // 任务事件：无论是否当前会话，都据此更新侧栏"执行中"标识
     if (e.kind === 'task') {
       updateRunningFromTask(e.sessionId, e.task);
+      if (e.task.status === 'error') void EngineRecovery.fromError(e.task.error, e.task.id);
       if (e.task.status === 'done' || e.task.status === 'error') { Clootee.onTaskEnd(e.task); ApiBill.onTaskEnd(e.sessionId); }
       if (e.task.status === 'done') dropTaskNotices(e.task.id); // 跑通了就撤掉中途的告警
       // 外部系统推送来的消息：不管现在正看哪个会话都弹一下，不能让用户全靠手动刷新才发现

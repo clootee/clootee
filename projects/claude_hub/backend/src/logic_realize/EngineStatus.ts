@@ -10,6 +10,8 @@ import { AppConfig } from '../config/AppConfig';
 
 export class EngineStatus extends EngineStatusStruct {
   protected static _probe(engine: Engine): EngineAvail {
+    if (engine === 'claude') ClaudeBin.clearCache();
+    else CodexBin.clearCache();
     const bundled = engine === 'claude' ? !!OutEnd.claudeCmd() : !!OutEnd.codexCmd();
     let ready = false;
     try {
@@ -22,7 +24,7 @@ export class EngineStatus extends EngineStatusStruct {
     }
     // ready 为真而内置为假 → 只能来自系统；ready 为真且内置也有 → 系统未知，用独立探测补齐
     const system = ready && !bundled ? true : this._onSystem(engine);
-    return { system, bundled, ready: ready || bundled };
+    return { system, bundled, ready };
   }
 
   // 只看系统 PATH（不看 out_end）
