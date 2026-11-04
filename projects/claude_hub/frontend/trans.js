@@ -990,6 +990,7 @@ const DICT = {
   obNext: { en: 'Next', zh: '下一步' },
   obDone: { en: 'Finish', zh: '完成' },
   obSelected: { en: 'Selected', zh: '已选' },
+  loginInstallNote: { en: 'To install Clootee, please visit:', zh: '如果需要安装 Clootee，请访问：' },
   loginTitle: { en: 'Unlock workspace', zh: '使用安全密码解锁工作台' },
   password: { en: 'Password', zh: '密码' },
   loginBtn: { en: 'Unlock', zh: '解锁' },
@@ -1482,7 +1483,11 @@ const DICT = {
   lockedHint: { en: 'Private directory — click to enter password', zh: '私有目录，点击输入密码查看' },
 };
 
-let LANG = localStorage.getItem('lang') || (navigator.language.startsWith('zh') ? 'zh' : 'en');
+const savedLang = localStorage.getItem('lang');
+const browserLang = (navigator.languages || [navigator.language])
+  .map(lang => String(lang).toLowerCase().split('-')[0])
+  .find(lang => lang === 'zh' || lang === 'en');
+let LANG = ['zh', 'en'].includes(savedLang) ? savedLang : (browserLang || 'en');
 
 function T(key) {
   const e = DICT[key];
