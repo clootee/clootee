@@ -16,7 +16,7 @@ const baseline = path.join(output, 'baseline');
 const version = require('../../projects/claude_hub/backend/package.json').version;
 const oldVersion = '3.1.30';
 const windows = process.platform === 'win32';
-const sourceExe = windows ? path.join(baseline, 'win-unpacked/Clootee.exe') : path.join(baseline, 'mac-universal/Clootee.app/Contents/MacOS/Clootee');
+const sourceExe = windows ? path.join(baseline, 'win-unpacked/Clootee.exe') : path.join(baseline, 'mac-' + process.arch + '/Clootee.app/Contents/MacOS/Clootee');
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee update profile '));
 const executable = windows ? sourceExe : path.join(baseline,'installed app/Clootee.app/Contents/MacOS/Clootee');
 function buildBaseline() {
