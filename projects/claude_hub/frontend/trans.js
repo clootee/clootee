@@ -1,5 +1,18 @@
 // 国际化字典与翻译函数。至少支持 zh / en
 const DICT = {
+  engineRecoveryRetryAction: { en: 'Retry the previous action after installing the missing engine.', zh: '安装缺失引擎后，请重试刚才的操作。' },
+  engineRecoveryTitle: {"en": "Install missing AI engines", "zh": "安装缺失的 AI 引擎"},
+  engineRecoveryMissing: {"en": "{engines} is not installed. Install all missing engines now? This uses the same installer as Settings and selects a download mirror automatically.", "zh": "尚未安装 {engines}。是否立即安装全部缺失引擎？安装方式与设置页相同，会自动选择下载源。"},
+  engineRecoveryInstall: {"en": "Install missing engines", "zh": "安装全部缺失引擎"},
+  engineRecoveryLater: {"en": "Not now", "zh": "暂不安装"},
+  engineRecoveryInstalling: {"en": "Installing {engine}. Keep this page open.", "zh": "正在安装 {engine}，请保持页面打开"},
+  engineRecoveryDone: {"en": "Installation completed. Continue to submit your message. If a task already failed, retry it manually.", "zh": "安装完成。可以继续提交消息；若任务此前已失败，请手动重试该任务。"},
+  engineRecoveryReady: {"en": "All missing engines are ready.", "zh": "缺失引擎已全部就绪。"},
+  engineRecoveryContinue: {"en": "Continue", "zh": "继续"},
+  engineRecoveryVerify: {"en": "{engine} is still unavailable after installation. Retry installation.", "zh": "安装后 {engine} 仍不可用，请重试安装。"},
+  engineRecoveryFailed: {"en": "Installation incomplete. Check your connection and retry here.", "zh": "安装尚未完成，请检查网络后在此重试。"},
+  engineRecoveryRetry: {"en": "Retry installation", "zh": "重试安装"},
+  engineRecoveryCheckFailed: {"en": "Could not check installed engines. Check your connection and try again.", "zh": "无法检查引擎安装状态，请检查连接后重试。"},
   messageLinkRestartNeeded: { en: 'The running service has not loaded this feature yet. Restart Clootee and try again.', zh: '当前服务尚未加载此功能，请重启 Clootee 后重试。' },
   apiUnexpectedResponse: { en: 'The service returned an invalid response. Refresh the page and try again.', zh: '服务返回了异常内容，请刷新页面后重试。' },
   messageLinkFolder: { en: 'Open folder', zh: '打开所在文件夹' },

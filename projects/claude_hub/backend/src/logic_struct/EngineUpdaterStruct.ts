@@ -24,8 +24,23 @@ const PKG: Record<string, string> = {
 };
 
 export class EngineUpdaterStruct {
+  private static _updates = new Map<string, Promise<UpdateResult>>();
+  private static _tail: Promise<unknown> = Promise.resolve();
+
   // 安装/更新指定引擎到最新版（npm 全局）。onProgress 有值时逐行回传 npm 输出。
   static async update(engine: string, onProgress?: UpdateProgress): Promise<UpdateResult> {
+    if (!PKG[engine]) throw new Error(`update: invalid engine=${engine}`);
+    const active = this._updates.get(engine);
+    if (active) return active;
+    // Settings, onboarding and runtime recovery share one npm installation queue.
+    const work = this._tail.catch(() => {}).then(() => this._performUpdate(engine, onProgress));
+    this._updates.set(engine, work);
+    this._tail = work;
+    try { return await work; }
+    finally { this._updates.delete(engine); }
+  }
+
+  private static async _performUpdate(engine: string, onProgress?: UpdateProgress): Promise<UpdateResult> {
     const pkg = PKG[engine];
     if (!pkg) throw new Error(`update: invalid engine=${engine}`);
     const registry = await this._pickRegistry();
@@ -36,7 +51,12 @@ export class EngineUpdaterStruct {
     CodexBin.clearCache();
     // 「装没装」的探测结果是进程级缓存的，装完必须作废，否则界面还显示未安装
     EngineStatus.invalidate();
+    await this._verify(engine);
     return { ok: true, engine, pkg, log, registry };
+  }
+
+  protected static _verify(_engine: string): Promise<void> {
+    throw new Error('Not implemented');
   }
 
   // 选定 npm 源：用户配过就用他的，否则探测官方源与国内镜像谁快（Realize 实现）。

@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
   <link rel="stylesheet" href="dog.css?v=20261026e" />
-  <link rel="stylesheet" href="styles.css?v=20261103onboard" />
+  <link rel="stylesheet" href="styles.css?v=20261104runtime" />
 </head>
 <body class="dark">
   <!-- 登录遮罩 -->
@@ -1191,10 +1191,20 @@
     </div>
   </dialog>
 
-  <script src="trans.js?v=20261103onboard"></script>
+  <dialog id="engineRecoveryModal" class="batch-cost-modal" aria-labelledby="engineRecoveryTitle" aria-describedby="engineRecoveryNote">
+    <h3 id="engineRecoveryTitle"></h3>
+    <p id="engineRecoveryNote"></p>
+    <pre id="engineRecoveryProgress" class="sx-note sx-pre" role="status" aria-live="polite" hidden></pre>
+    <div class="modal-actions">
+      <button type="button" id="engineRecoveryClose"></button>
+      <button type="button" class="primary" id="engineRecoveryInstall"></button>
+    </div>
+  </dialog>
+
+  <script src="trans.js?v=20261104runtime"></script>
   <script src="workspace.js?v=20261029sessionfix"></script>
   <script src="rootwizard.js?v=20261031quickstart"></script>
-  <script src="health.js?v=20260911a"></script>
+  <script src="health.js?v=20261104runtime"></script>
   <script src="onboard.js?v=20261103onboard"></script>
   <script src="galaxy.js?v=20260801p"></script>
   <script src="cyber.js?v=20260801z1"></script>
@@ -1212,6 +1222,7 @@
   <script src="prompt-cache.js?v=20261012e"></script>
   <script src="cost-optimization.js?v=20261015a"></script>
   <script src="session-limit.js?v=20261016c"></script>
-  <script src="app.js?v=20261103email"></script>
+  <script src="engine-recovery.js?v=20261104runtime"></script>
+  <script src="app.js?v=20261104runtime"></script>
 </body>
 </html>

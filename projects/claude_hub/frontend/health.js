@@ -145,6 +145,7 @@ async function renderClaudeLogin(el, opts) {
   el.innerHTML = `<div class="cl"><div class="cl-hint">${T('clChecking')}</div></div>`;
   try {
     Health.auth = await api('/api/claude/auth/status');
+    if (!Health.auth.cliFound && await EngineRecovery.ensure('claude', true)) Health.auth = await api('/api/claude/auth/status');
   } catch (e) {
     el.innerHTML = `<div class="cl bad"><div class="cl-hint">${T('clStatusFail')}${escapeHtml(e.message || '')}</div>` +
       `<div class="cl-acts"><button type="button" class="hc-btn" data-cl-recheck="1">${T('clRecheck')}</button></div></div>`;
@@ -466,6 +467,7 @@ async function renderCodexLogin(el, opts) {
   el.innerHTML = `<div class="cl"><div class="cl-hint">${T('cxChecking')}</div></div>`;
   try {
     Health.cxAuth = await api('/api/codex/auth/status');
+    if (!Health.cxAuth.cliFound && await EngineRecovery.ensure('codex', true)) Health.cxAuth = await api('/api/codex/auth/status');
   } catch (e) {
     el.innerHTML = `<div class="cl bad"><div class="cl-hint">${T('cxStatusFail')}${escapeHtml(e.message || '')}</div>` +
       `<div class="cl-acts"><button type="button" class="hc-btn" data-cx-recheck="1">${T('cxRecheck')}</button></div></div>`;

@@ -3400,3 +3400,10 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 .ob-provider-default { border-color:var(--accent); background:var(--active); }
 .ob-provider-other { width:100%; min-height:44px; text-align:left; }
 #onboardTitle[hidden],#onboardSub[hidden],.ob-foot[hidden] { display:none !important; }
+
+#engineRecoveryModal { max-width: min(600px, 94vw); }
+#engineRecoveryModal > h3, #engineRecoveryModal > p { margin: 0 0 18px; }
+#engineRecoveryProgress { margin: 18px 0; max-height: 38vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+#engineRecoveryModal .modal-actions { position: sticky; bottom: -20px; padding: 14px 0; border-top: 1px solid var(--border); background: var(--panel2); display: flex; justify-content: center; gap: 12px; }
+#engineRecoveryModal::backdrop { background: color-mix(in srgb, var(--text) 25%, transparent); }
+@media (max-width: 600px) { #engineRecoveryModal { width: 100%; max-width: 100%; margin: auto 0 0; border-radius: 16px 16px 0 0; } #engineRecoveryModal .modal-actions button { flex: 1; } }

@@ -56,6 +56,7 @@
     "scripts/release/manifest.mjs",
     "scripts/release/smoke-desktop.cjs",
     "scripts/release/setup.test.cjs",
+    "scripts/release/engine-recovery.test.cjs",
     "scripts/release/cdn/package.json",
     "scripts/release/cdn/package-lock.json",
     "scripts/release/cdn/publish.cjs",
