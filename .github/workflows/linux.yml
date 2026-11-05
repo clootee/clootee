@@ -1,0 +1,81 @@
+name: Clootee Linux packages
+run-name: linux-${{ inputs.build_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        required: true
+        type: string
+      source_ref:
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      build_id:
+        required: true
+        type: string
+      source_ref:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix projects/claude_hub/backend --include=dev --no-audit --no-fund
+      - run: npm run build --prefix projects/claude_hub/backend
+      - run: node --test scripts/release/linux.test.cjs
+      - run: node scripts/release/linux-package.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: release-output/*.tar.gz
+          if-no-files-found: error
+  publish:
+    needs: linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: linux-*
+          merge-multiple: true
+          path: release-output
+      - run: npm ci --prefix scripts/release/cdn --no-audit --no-fund
+      - run: node scripts/release/linux-publish.cjs
+        env:
+          NODE_PATH: ${{ github.workspace }}/scripts/release/cdn/node_modules
+          BUILD_ID: ${{ inputs.build_id }}
+          COS_SECRET_ID: ${{ secrets.CLOOTEE_COS_SECRET_ID }}
+          COS_SECRET_KEY: ${{ secrets.CLOOTEE_COS_SECRET_KEY }}
+      - name: Publish verified Linux release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_ID: ${{ inputs.build_id }}
+        run: |
+          [[ "$BUILD_ID" =~ ^[a-zA-Z0-9-]{1,70}$ ]] || exit 1
+          gh release create "linux-$BUILD_ID" release-output/* --target "$(git rev-parse HEAD)" --title "Clootee Linux $(node -p "require('./version.json').version")" --notes "Linux x64 and ARM64 runtime bundles plus one-command installer. See linux.json and LINUX-SHA256SUMS.txt." --latest=false

@@ -77,7 +77,13 @@
     "scripts/release/update.test.cjs",
     "scripts/release/smoke-update.cjs",
     "projects/claude_hub/backend/pnpm-lock.yaml",
-    "projects/claude_hub/backend/.npmrc"
+    "projects/claude_hub/backend/.npmrc",
+    ".github/workflows/linux.yml",
+    "scripts/linux/install.sh",
+    "scripts/linux/control.cjs",
+    "scripts/release/linux-package.mjs",
+    "scripts/release/linux-publish.cjs",
+    "scripts/release/linux.test.cjs"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [

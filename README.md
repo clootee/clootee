@@ -151,3 +151,35 @@ Windows EXE and macOS DMG desktop installations fetch the published download man
 Linux and cross-platform ZIP installations fetch source through Git and use an independent Node supervisor to build, restart and check health, without requiring PM2. Local source changes require confirmation before overwriting; build failures keep the existing server running.
 
 Desktop versions 3.1.30 and earlier require a one-time install of 3.1.31 from the official download page to gain the complete package update channel.
+
+### Linux one-command installation
+
+On Linux x64 or ARM64 with glibc 2.28+:
+
+```bash
+curl -fsSL https://clootee.com/download/install.sh | bash
+clootee status
+```
+
+Downloads a SHA256-verified Tencent COS bundle containing Node.js and the compiled
+app, then starts it in the background. Closing the installer terminal is safe.
+No global PM2 or boot autostart is configured. Requires `curl`, `tar`, `sha256sum`
+and `flock`.
+
+| Command | Action |
+| --- | --- |
+| `clootee start` | Start |
+| `clootee stop` | Stop |
+| `clootee restart` | Restart |
+| `clootee status` | Show status |
+| `clootee logs` | Follow logs; Ctrl+C stops viewing |
+| `clootee version` | Show installed version |
+
+User installs use `~/.local/share/clootee` and `~/.local/bin/clootee`; root installs
+use `/opt/clootee` and `/usr/local/bin/clootee`. If the command is outside PATH,
+use the full path printed by the installer. Set `CLOOTEE_HOME` and
+`CLOOTEE_BIN_DIR` to absolute paths to customize them. Run the install command
+again to update while preserving settings, sessions and downloaded tools.
+
+Open `http://127.0.0.1:8970` locally. For a remote server, first run
+`ssh -L 8970:127.0.0.1:8970 user@server`, then open that URL in your own browser.
