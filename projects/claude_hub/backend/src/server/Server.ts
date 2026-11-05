@@ -540,13 +540,13 @@ export class Server {
     );
     app.post('/api/session/remove', (req, res) =>
       this._wrap(res, 'session.remove', () => {
-        SessionManager.removeSession(req.body.id);
+        TaskQueue.removeSession(req.body.id);
         return { id: req.body.id };
       }),
     );
     // 批量删除会话
     app.post('/api/session/remove-batch', (req, res) =>
-      this._wrap(res, 'session.removeBatch', () => SessionManager.removeSessions(req.body.ids)),
+      this._wrap(res, 'session.removeBatch', () => TaskQueue.removeSessions(req.body.ids)),
     );
     app.post('/api/session/pin', (req, res) =>
       this._wrap(res, 'session.pin', () => SessionManager.setPinned(req.body.id, !!req.body.pinned)),

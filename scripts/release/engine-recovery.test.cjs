@@ -104,3 +104,64 @@ test('backend rejects an installation whose executable verification fails', asyn
   // A failed earlier job must not block the queue forever.
   await assert.rejects(Updater.update('codex'), /not runnable/);
 });
+
+function queueFixture() {
+  const calls = [], exports = {};
+  const session = { id: 'root_test:draft-test', rootId: 'root_test', engine: 'codex', tasks: [], messages: [] };
+  let removed = false, callbacks;
+  const manager = {
+    getRuntimeSession() { if (removed) throw Error('getSession: not found'); return session; },
+    getSessionFull() { return session; },
+    removeSession(id) { calls.push(['remove', id]); removed = true; },
+  };
+  const mocks = {
+    SessionManager: manager, RootManager: { getRoot: () => ({ path: '/test-project' }) },
+    SessionLimit: { status: () => ({ count: 0, max: 100 }) }, Settings: { get: () => ({}) },
+    CostOptimizer: { consume() {} }, CostPolicy: { cache() {} }, SUBSCRIPTION_PROVIDERS: [],
+    EngineConfig: { get: () => ({ claude: {}, codex: {} }) }, CodexRunner: { billingMeta: () => ({}) },
+    TraceStore: { record: (id, ev) => calls.push(['trace', id, ev.kind]) },
+  };
+  const queueFile = path.join(process.env.HUB_TEST_DIST || path.join(__dirname,
+    '../../projects/claude_hub/backend/dist'), 'logic_struct/TaskQueueStruct.js');
+  vm.runInNewContext(fs.readFileSync(queueFile, 'utf8'), {
+    exports, require: () => mocks,
+  });
+  class Queue extends exports.TaskQueueStruct {
+    static _ensureProjectPrompt() {}
+    static _traceSessionId() { return manager.getRuntimeSession().id; }
+    static _markRunning(id, taskId) { session.tasks.find(t => t.id === taskId).status = 'running'; }
+    static _recordUserMessage() {}
+    static _setHandle() {}
+    static _launchRunner(runner, s, root, prompt, cb) { callbacks = cb; return {}; }
+    static _reconcileSessionId(id, realId) { manager.getRuntimeSession().claudeSessionId = realId; }
+    static _setPaused() { calls.push(['pause']); session.paused = true; }
+    static _currentRunningTaskId() { return session.tasks.find(t => t.status === 'running')?.id; }
+    static _killHandle() { calls.push(['kill']); }
+    static _finishTask(id, taskId, status) { session.tasks.find(t => t.id === taskId).status = status; }
+    static _consumeKilled() { return removed; }
+  }
+  return { Queue, session, calls, callbacks: () => callbacks };
+}
+test('deleting a running draft stops its runner before removal; late engine events cannot throw', () => {
+  const f = queueFixture(), task = { id: 'task-test', prompt: 'test', status: 'pending' };
+  f.session.tasks.push(task);
+  f.Queue._startTask(f.session, task);
+  f.callbacks().onEvent({ kind: 'raw' });
+  f.callbacks().onSessionId('real-test');
+  assert.equal(f.session.claudeSessionId, 'real-test');
+  f.Queue.removeSession('root_test:real-test');
+  assert.equal(task.status, 'stopped');
+  assert.deepEqual(f.calls.slice(-3), [['pause'], ['kill'], ['remove', f.session.id]]);
+  const count = f.calls.length;
+  assert.doesNotThrow(() => f.callbacks().onEvent({ kind: 'raw' }));
+  assert.doesNotThrow(() => f.callbacks().onSessionId('late-id'));
+  assert.doesNotThrow(() => f.callbacks().onDone(true));
+  assert.equal(f.calls.length, count);
+});
+test('batch deletion isolates failures and rejects malformed requests', () => {
+  const f = queueFixture();
+  const result = f.Queue.removeSessions([f.session.id, 'missing']);
+  assert.deepEqual(Array.from(result.removed), [f.session.id]);
+  assert.deepEqual(Array.from(result.failed), ['missing']);
+  assert.throws(() => f.Queue.removeSessions(null), /invalid ids/);
+});

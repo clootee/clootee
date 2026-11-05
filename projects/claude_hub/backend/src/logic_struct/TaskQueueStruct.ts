@@ -31,6 +31,24 @@ export interface LaunchResult {
 }
 
 export class TaskQueueStruct {
+  // 删除前先停止任务流，避免引擎继续向已移除的草稿会话投递事件。
+  static removeSession(sessionId: string): void {
+    const session = SessionManager.getRuntimeSession(sessionId);
+    this.pauseFlow(session.id);
+    SessionManager.removeSession(session.id);
+  }
+
+  static removeSessions(ids: string[]): { removed: string[]; failed: string[] } {
+    if (!Array.isArray(ids) || ids.length === 0)
+      throw new Error(`removeSessions: invalid ids=${JSON.stringify(ids)}`);
+    const removed: string[] = [], failed: string[] = [];
+    for (const id of ids.filter((id) => !!id)) {
+      try { this.removeSession(id); removed.push(id); }
+      catch { failed.push(id); }
+    }
+    return { removed, failed };
+  }
+
   // ── 调度骨架：addTasks ─────────────────────────────────────────────
   // 一次可提交多个任务，全部以 pending 入队；若当前正在执行则自动累计，等前一个完成再继续
   // this._appendTasks  → 把任务写入会话并落盘（realize）
@@ -148,8 +166,13 @@ export class TaskQueueStruct {
         EventBus.broadcast({ kind: 'output', sessionId: session.id, taskId: task.id, text }),
       onFinal: (text) => this._recordAssistantMessage(session.id, task.id, text),
       // 全过程轨迹：引擎每个事件原样落盘（会话 id 取最新值，草稿首跑中途会被校正为真实 uuid）
-      onEvent: (ev) => TraceStore.record(this._traceSessionId(session.id), { ...ev, taskId: task.id }),
-      onSessionId: (realId) => this._reconcileSessionId(session.id, realId),
+      onEvent: (ev) => {
+        if (task.status === 'running')
+          TraceStore.record(this._traceSessionId(session.id), { ...ev, taskId: task.id });
+      },
+      onSessionId: (realId) => {
+        if (task.status === 'running') this._reconcileSessionId(session.id, realId);
+      },
       // 运行中的异常提示（不结束任务）：直接广播到界面，别让用户对着空白猜
       onNotice: (level, message) =>
         EventBus.broadcast({ kind: 'notice', sessionId: session.id, taskId: task.id, level, message }),
