@@ -4,7 +4,7 @@ const DICT = {
   serverHealthLoading: { en: 'Reading status…', zh: '正在读取状态…' },
   serverHealthFailed: { en: 'Status unavailable · retrying', zh: '状态暂不可用 · 自动重试中' },
   serverLoad: { en: 'Load · 1 min', zh: '负载 · 1分钟' },
-  serverDisk: { en: 'Disk free', zh: '剩余磁盘' },
+  serverDisk: { en: 'Disk usage', zh: '磁盘占用率' },
   serverMemory: { en: 'Memory used', zh: '内存使用率' },
   serverHigh: { en: 'High', zh: '偏高' },
   serverLow: { en: 'Low', zh: '不足' },

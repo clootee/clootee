@@ -7998,8 +7998,8 @@ function startServerHealth() {
       const grid = document.createElement('div');
       grid.className = 'server-health-grid';
       const metrics = [
-        [T('serverLoad'), data.load.toFixed(2), data.loadPercent, 100, T('serverCores').replace('{n}', data.cores), 'serverHigh'],
-        [T('serverDisk'), data.disk ? bytes(data.disk.available) : '—', data.disk?.usedPercent, 90, data.disk ? `/ ${bytes(data.disk.total)}` : '', 'serverLow'],
+        [T('serverLoad'), `${data.loadPercent.toFixed(0)}%`, data.loadPercent, 100, `${data.load.toFixed(2)} / ${T('serverCores').replace('{n}', data.cores)}`, 'serverHigh'],
+        [T('serverDisk'), data.disk ? `${data.disk.usedPercent.toFixed(0)}%` : '—', data.disk?.usedPercent, 90, data.disk ? `${bytes(data.disk.total - data.disk.available)} / ${bytes(data.disk.total)}` : '', 'serverHigh'],
         [T('serverMemory'), data.memory ? `${data.memory.usedPercent.toFixed(0)}%` : '—', data.memory?.usedPercent, 90, data.memory ? `/ ${bytes(data.memory.total)}` : '', 'serverHigh'],
       ];
       for (const [label, value, percent, threshold, detail, warning] of metrics) {

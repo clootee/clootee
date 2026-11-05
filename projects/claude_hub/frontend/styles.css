@@ -3452,10 +3452,10 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 .server-health { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel2); color: var(--muted); font-size: 12px; }
 .server-health-title { margin-bottom: 8px; font-size: 11px; }
 .server-health-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.server-health-metric { min-width: 0; color: var(--accent); }
+.server-health-metric { display: flex; flex-direction: column; min-width: 0; color: var(--accent); }
 .server-health-label { display: block; color: var(--muted); font-size: 11px; }
 .server-health-metric b { display: block; margin: 3px 0; font-size: 16px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.server-health-metric small { display: block; min-height: 14px; font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
+.server-health-metric small { display: block; flex: 1; min-height: 14px; font-size: 10px; color: var(--muted); overflow-wrap: anywhere; }
 .server-health-metric.is-high, .server-health-metric.is-high small { color: var(--red); }
 .server-health meter { display: block; width: 100%; height: 4px; margin-top: 6px; border: 0; border-radius: 2px; background: var(--border); appearance: none; }
 .server-health meter::-webkit-meter-bar { background: var(--border); border: 0; border-radius: 2px; }

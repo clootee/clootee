@@ -1,10 +1,10 @@
 {
-  "version": "3.1.34",
+  "version": "3.1.35",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-05",
   "notesI18n": {
-    "zh": "统一更新 Windows、macOS、源码与 Linux x64/ARM64 安装包；Linux 支持一键安装及后台启停，设置顶部展示服务器状态。",
-    "en": "Update Windows, macOS, source and Linux x64/ARM64 packages together. Linux supports one-command installation and background lifecycle commands, with compact server status in Settings."
+    "zh": "设置顶部磁盘和负载改为百分比显示，磁盘小字显示已用与总容量。",
+    "en": "Show disk usage and load as percentages in Settings, with used and total disk capacity below."
   }
 }
