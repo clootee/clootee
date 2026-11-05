@@ -144,3 +144,37 @@ Windows EXE 和 macOS DMG 安装的桌面版会从官网下载清单获取新版
 Linux 与跨平台 ZIP 使用 Git 获取新代码，通过独立 Node 进程完成编译、重启及健康检查，无需安装 PM2。覆盖本地源码改动前会要求确认；编译失败不会停止原服务。
 
 3.1.30 及更早桌面版尚无完整安装包更新通道，请先从官网下载并覆盖安装 3.1.31；后续版本可使用内置更新。
+
+### Linux 一键安装与后台运行
+
+在 Linux x64 或 ARM64（glibc 2.28+）上执行：
+
+```bash
+curl -fsSL https://clootee.com/download/install.sh | bash
+clootee status
+```
+
+安装包从腾讯 COS 下载，校验 SHA256 后安装，内含 Node.js 和编译产物。
+安装后自动在后台启动；可关闭安装终端，无需全局 PM2。
+
+| 命令 | 用途 |
+| --- | --- |
+| `clootee start` | 启动 |
+| `clootee stop` | 关闭 |
+| `clootee restart` | 重启 |
+| `clootee status` | 查看运行状态 |
+| `clootee logs` | 持续查看日志（Ctrl+C 退出查看） |
+| `clootee version` | 查看安装版本 |
+
+普通用户安装目录为 `~/.local/share/clootee`，命令为 `~/.local/bin/clootee`；
+root 用户分别为 `/opt/clootee` 和 `/usr/local/bin/clootee`。
+若命令目录不在 PATH，使用安装完成时显示的完整命令路径。
+支持用 `CLOOTEE_HOME`、`CLOOTEE_BIN_DIR` 指定绝对安装路径。
+重新执行安装命令可更新；配置、会话和工具保留在安装目录的共享数据区。
+不配置开机自启。需要 `curl`、`tar`、`sha256sum`、`flock`。
+
+本机浏览器打开 `http://127.0.0.1:8970`。远程服务器可建立 SSH 隧道后访问：
+
+```bash
+ssh -L 8970:127.0.0.1:8970 user@server
+```

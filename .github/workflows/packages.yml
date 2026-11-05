@@ -71,8 +71,16 @@ jobs:
           name: desktop-${{ matrix.extension }}
           path: scripts/release/desktop/output/*.${{ matrix.extension }}
           if-no-files-found: error
+  linux:
+    permissions:
+      contents: write
+    uses: ./.github/workflows/linux.yml
+    with:
+      build_id: ${{ inputs.build_id }}
+      source_ref: ${{ inputs.source_ref }}
+    secrets: inherit
   publish:
-    needs: [source, desktop]
+    needs: [source, desktop, linux]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
