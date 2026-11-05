@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import net from 'node:net';
 import { check, checkHistory, checkPayload, stripDependencyNotes } from './public-snapshot.mjs';
 const checkFiles = new Set(check()); checkHistory('HEAD');
 const arch = process.arch;
@@ -47,4 +48,46 @@ try {
   checkPayload(temp);
   fs.mkdirSync('release-output', { recursive: true });
   execFileSync('tar', ['-czf', path.join(root, `release-output/clootee-${version}-linux-${arch}.tar.gz`), '-C', temp, '.']);
+  // Verify the actual bundled runtime and backend on the native architecture.
+  // Data created by this check stays outside the already-created release archive.
+  const probe = net.createServer();
+  await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve));
+  const port = probe.address().port;
+  await new Promise(resolve => probe.close(resolve));
+  const profile = path.join(temp, 'smoke-profile'); fs.mkdirSync(profile);
+  const runtime = path.join(temp, 'runtime/bin/node');
+  const child = spawn(runtime, [path.join(backend, 'dist/index.js')], {
+    cwd: backend, stdio: ['ignore', 'ignore', 'ignore'],
+    env: { ...process.env, HOME: profile, PORT: String(port), PATH: path.dirname(runtime) + path.delimiter + process.env.PATH }
+  });
+  let spawnError;
+  child.once('error', error => { spawnError = error; });
+  const exited = new Promise(resolve => child.once('exit', resolve));
+  try {
+    let healthy = false;
+    for (let i = 0; i < 90; i++) {
+      if (spawnError) throw spawnError;
+      if (child.exitCode !== null) throw Error('Bundled Linux backend exited before readiness');
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/api/auth/status`, { signal: AbortSignal.timeout(1000) });
+        const auth = await response.json();
+        if (response.ok && auth.success && auth.data.passwordEnabled === false) { healthy = true; break; }
+      } catch {}
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    if (!healthy) throw Error('Bundled Linux backend did not become ready');
+    const response = await fetch(`http://127.0.0.1:${port}/api/system/health`);
+    const health = await response.json();
+    if (!response.ok || !health.success || health.data.platform !== 'linux' || !health.data.memory || !health.data.disk) throw Error('Bundled Linux metrics check failed');
+    const page = await fetch(`http://127.0.0.1:${port}/`);
+    if (!page.ok || !(await page.text()).includes('serverHealth')) throw Error('Bundled Linux frontend check failed');
+    console.log(`Native Linux ${arch} bundle passed: real Node, backend, frontend and server metrics`);
+  } finally {
+    if (child.pid && child.exitCode === null) {
+      child.kill('SIGTERM');
+      const deadline = setTimeout(() => child.kill('SIGKILL'), 5000); deadline.unref();
+      await exited; clearTimeout(deadline);
+    }
+  }
+
 } finally { fs.rmSync(temp, { recursive: true, force: true }); }

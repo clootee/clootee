@@ -1,10 +1,10 @@
 {
-  "version": "3.1.33",
+  "version": "3.1.34",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-05",
   "notesI18n": {
-    "zh": "设置顶部新增 Linux 服务器负载、剩余磁盘和内存使用率，紧凑展示并在高占用时标红。",
-    "en": "Show compact Linux server load, free disk space and memory usage at the top of Settings, with red warnings for high usage."
+    "zh": "统一更新 Windows、macOS、源码与 Linux x64/ARM64 安装包；Linux 支持一键安装及后台启停，设置顶部展示服务器状态。",
+    "en": "Update Windows, macOS, source and Linux x64/ARM64 packages together. Linux supports one-command installation and background lifecycle commands, with compact server status in Settings."
   }
 }
