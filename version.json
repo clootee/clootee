@@ -1,10 +1,10 @@
 {
-  "version": "3.1.31",
+  "version": "3.1.32",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-04",
+  "releasedAt": "2026-11-05",
   "notesI18n": {
-    "zh": "修复各平台内置更新：Windows、macOS 桌面版校验完整安装包后更新并重新打开，保留用户数据；Linux 与源码包使用独立 Node 更新进程完成编译、重启及健康检查，无需 PM2。",
-    "en": "Fix cross-platform updates: Windows and macOS desktop apps verify and install complete release packages, relaunch and retain user data. Linux and source packages build, restart and verify health with a standalone Node supervisor, without requiring PM2."
+    "zh": "美化左侧会话列表滚动条：细圆角设计，配色随主题切换，悬停与拖动时高亮。",
+    "en": "Refine the session list scrollbar with a slim rounded design, theme-aware colors, and hover and drag highlights."
   }
 }
