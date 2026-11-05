@@ -75,7 +75,9 @@
     "scripts/release/desktop/updater.cjs",
     "scripts/release/desktop/install-update.cjs",
     "scripts/release/update.test.cjs",
-    "scripts/release/smoke-update.cjs"
+    "scripts/release/smoke-update.cjs",
+    "projects/claude_hub/backend/pnpm-lock.yaml",
+    "projects/claude_hub/backend/.npmrc"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [
