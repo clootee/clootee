@@ -1,10 +1,10 @@
 {
-  "version": "3.1.32",
+  "version": "3.1.33",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-05",
   "notesI18n": {
-    "zh": "美化左侧会话列表滚动条：细圆角设计，配色随主题切换，悬停与拖动时高亮。",
-    "en": "Refine the session list scrollbar with a slim rounded design, theme-aware colors, and hover and drag highlights."
+    "zh": "设置顶部新增 Linux 服务器负载、剩余磁盘和内存使用率，紧凑展示并在高占用时标红。",
+    "en": "Show compact Linux server load, free disk space and memory usage at the top of Settings, with red warnings for high usage."
   }
 }

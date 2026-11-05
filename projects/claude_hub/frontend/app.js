@@ -7970,13 +7970,78 @@ function paneById(id) {
   return SETTINGS_PANES.find((p) => p.id === id) || null;
 }
 
+let ServerHealthTimer = null;
+let ServerHealthGeneration = 0;
+function startServerHealth() {
+  clearTimeout(ServerHealthTimer);
+  const generation = ++ServerHealthGeneration;
+  const box = $('serverHealth');
+  box.hidden = State.settings.platform !== 'linux';
+  if (box.hidden) return;
+  box.textContent = T('serverHealthLoading');
+  const bytes = n => {
+    const unit = n >= 1024 ** 4 ? 'TiB' : n >= 1024 ** 3 ? 'GiB' : 'MiB';
+    const divisor = unit === 'TiB' ? 1024 ** 4 : unit === 'GiB' ? 1024 ** 3 : 1024 ** 2;
+    return `${(n / divisor).toFixed(1)} ${unit}`;
+  };
+  async function refresh() {
+    if (generation !== ServerHealthGeneration || $('settingsOverlay').hidden) return;
+    try {
+      if (document.hidden || !$('settingsPaneOverlay').hidden) return;
+      const data = await api('/api/system/health');
+      if (generation !== ServerHealthGeneration || $('settingsOverlay').hidden) return;
+      if (data.platform !== 'linux') { box.hidden = true; return; }
+      box.replaceChildren();
+      const title = document.createElement('div');
+      title.className = 'server-health-title';
+      title.textContent = T('serverHealth');
+      const grid = document.createElement('div');
+      grid.className = 'server-health-grid';
+      const metrics = [
+        [T('serverLoad'), data.load.toFixed(2), data.loadPercent, 100, T('serverCores').replace('{n}', data.cores), 'serverHigh'],
+        [T('serverDisk'), data.disk ? bytes(data.disk.available) : '—', data.disk?.usedPercent, 90, data.disk ? `/ ${bytes(data.disk.total)}` : '', 'serverLow'],
+        [T('serverMemory'), data.memory ? `${data.memory.usedPercent.toFixed(0)}%` : '—', data.memory?.usedPercent, 90, data.memory ? `/ ${bytes(data.memory.total)}` : '', 'serverHigh'],
+      ];
+      for (const [label, value, percent, threshold, detail, warning] of metrics) {
+        const high = Number.isFinite(percent) && percent >= threshold;
+        const cell = document.createElement('div');
+        cell.className = 'server-health-metric' + (high ? ' is-high' : '');
+        const name = document.createElement('span');
+        name.className = 'server-health-label';
+        name.textContent = label;
+        const number = document.createElement('b');
+        number.textContent = value;
+        const sub = document.createElement('small');
+        sub.textContent = high ? `${T(warning)} · ${detail}` : detail;
+        const bar = document.createElement('meter');
+        bar.min = 0; bar.max = 100; bar.value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+        bar.setAttribute('aria-label', label);
+        if (!Number.isFinite(percent)) bar.hidden = true;
+        cell.append(name, number, sub, bar);
+        grid.append(cell);
+      }
+      box.append(title, grid);
+    } catch (e) {
+      if (generation !== ServerHealthGeneration) return;
+      ErrorHandler.handle(e, 'ServerHealth');
+      box.textContent = T('serverHealthFailed');
+    } finally {
+      if (generation === ServerHealthGeneration && !$('settingsOverlay').hidden) ServerHealthTimer = setTimeout(refresh, 5000);
+    }
+  }
+  refresh();
+}
+
 function openSettings() {
   closeDrawer(); // 移动端：打开设置前先收起左侧抽屉，避免遮挡
   renderSettingsNav();
   $('settingsOverlay').hidden = false;
+  startServerHealth();
 }
 function closeSettings() {
   $('settingsOverlay').hidden = true;
+  clearTimeout(ServerHealthTimer);
+  ServerHealthGeneration++;
 }
 
 // 板块列表：图标 + 标题 + 说明 + 当前状态摘要 + ›
