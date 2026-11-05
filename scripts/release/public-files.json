@@ -83,7 +83,9 @@
     "scripts/linux/control.cjs",
     "scripts/release/linux-package.mjs",
     "scripts/release/linux-publish.cjs",
-    "scripts/release/linux.test.cjs"
+    "scripts/release/linux.test.cjs",
+    "scripts/release/cdn/pnpm-lock.yaml",
+    "scripts/release/cdn/.npmrc"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [
