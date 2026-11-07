@@ -54,7 +54,7 @@ test('startup asks for unlocking only when the user has enabled a password', asy
       refreshSecurityState: async () => ({ passwordEnabled: enabled, localAccess: true }),
       showLogin: async () => calls.push('unlock'), showAccessError: () => calls.push('error'),
       api: async () => ({ setupDone: true }), startApp: async () => calls.push('start'), showOnboard: async () => calls.push('onboard') };
-    vm.runInNewContext(appSource.slice(appSource.indexOf('async function main() {')).replace(/main\(\);\s*$/, '') + '\nglobalThis.run = main;', context);
+    vm.runInNewContext(appSource.slice(appSource.indexOf('async function main() {')).replace(/(?:window\.ClooteeBootReady\s*=\s*)?main\(\);\s*$/, '') + '\nglobalThis.run = main;', context);
     await context.run();
     assert.deepEqual(calls, enabled ? ['unlock'] : ['start']);
   }
@@ -63,7 +63,7 @@ test('a failed status check shows a connection error instead of inventing a logi
   const calls = [];
   const context = { securityKnown: false, applyTheme() {}, applyText() {}, bind() {}, refreshSecurityState: async () => { throw Error('offline'); },
     showAccessError: () => calls.push('connection'), showLogin: () => calls.push('unlock') };
-  vm.runInNewContext(appSource.slice(appSource.indexOf('async function main() {')).replace(/main\(\);\s*$/, '') + '\nglobalThis.run = main;', context);
+  vm.runInNewContext(appSource.slice(appSource.indexOf('async function main() {')).replace(/(?:window\.ClooteeBootReady\s*=\s*)?main\(\);\s*$/, '') + '\nglobalThis.run = main;', context);
   await context.run(); assert.deepEqual(calls, ['connection']);
 });
 test('password-free state hides workspace lock and clears only workspace credentials', async () => {
@@ -157,4 +157,99 @@ test('real HTTP and WebSocket lifecycle: no password, enable, change, disable, l
   assert.equal((await call('/api/auth/check')).status,401);
   assert.equal((await call('/api/auth/login', { password: 'persisted-password' })).data.token,enabled.data.token);
   assert.equal(fs.readFileSync(providerFile,'utf8'), '{"sentinel":"provider-account-unchanged"}');
+});
+
+function securityPaneFixture(enabled = true, failVerification = false) {
+  const f = authFixture();
+  if (enabled) f.Auth.setup('old-password');
+  const fields = {};
+  const element = id => fields[id] || (fields[id] = { value: '', textContent: '', hidden: true, disabled: false });
+  element('allowLanChk').checked = false;
+  const notices = [], calls = [];
+  const context = {
+    $: element, SecurityState: { passwordEnabled: enabled }, TOKEN: f.Auth.token(), hubWs: null,
+    State: { settings: { allowLan: false } }, T: key => key,
+    localStorage: { setItem() {} }, hideLogin() {}, connectWs() {}, alert() {},
+    refreshSecurityState: async () => {},
+    setPaneNotice: (...args) => notices.push(args),
+    patchSettings: async patch => { calls.push('settings'); context.State.settings.allowLan = patch.allowLan; return patch; },
+    api: async (url, body) => {
+      calls.push(url);
+      if (url === '/api/auth/change') return { token: f.Auth.changePassword(body.oldPassword, body.newPassword) };
+      if (url === '/api/auth/setup') return { token: f.Auth.setup(body.password) };
+      if (url === '/api/auth/reset') return { token: f.Auth.resetPassword(body.newPassword) };
+      if (url === '/api/auth/login') {
+        if (failVerification) throw Error('verification failed');
+        return { token: f.Auth.login(body.password) };
+      }
+      throw Error('Unexpected endpoint');
+    },
+  };
+  const between = (start, end) => appSource.slice(appSource.indexOf(start), appSource.indexOf(end, appSource.indexOf(start)));
+  vm.runInNewContext(between('function hasSecurityPasswordDraft()', 'function fillPromptPane()')
+    + between('let SecuritySavePending =', 'async function disableSecurityPassword()')
+    + between('function resetLanPassword()', '// ── Codex 档位')
+    + '\nglobalThis.save = saveNetworkPane; globalThis.change = changePassword;', context);
+  return { ...f, fields, element, notices, calls, context, draft(old = 'old-password', next = 'saved-password') {
+    element('pwOld').value = old; element('pwNew').value = next; element('pwConfirm').value = next;
+  } };
+}
+
+test('network section Save persists and verifies a password before leaving, including first setup', async () => {
+  for (const enabled of [false, true]) {
+    const f = securityPaneFixture(enabled); f.draft(enabled ? 'old-password' : '');
+    assert.equal(await f.context.save(), true);
+    assert.equal(f.Auth.login('saved-password'), f.context.TOKEN);
+    assert.deepEqual(f.calls, [enabled ? '/api/auth/change' : '/api/auth/setup', '/api/auth/login', 'settings']);
+    assert.equal(f.element('pwNew').value, '');
+  }
+});
+
+test('network section Save includes the expanded reset-password form', async () => {
+  const f = securityPaneFixture(); f.element('lanPwReset').hidden = false;
+  f.element('lanPwNew').value = 'reset-password'; f.element('lanPwNew2').value = 'reset-password';
+  assert.equal(await f.context.save(), true);
+  assert.equal(f.Auth.login('reset-password'), f.context.TOKEN);
+  assert.deepEqual(f.calls, ['/api/auth/reset', '/api/auth/login', 'settings']);
+});
+
+test('wrong old password or mismatched confirmation blocks Save and retains the draft', async () => {
+  for (const badOld of [false, true]) {
+    const f = securityPaneFixture(); f.draft(badOld ? 'wrong-password' : 'old-password');
+    if (!badOld) f.element('pwConfirm').value = 'different-password';
+    assert.equal(await f.context.save(), false);
+    assert.ok(f.Auth.login('old-password'));
+    assert.equal(f.element('pwNew').value, 'saved-password');
+    assert.ok(!f.calls.includes('settings'));
+    assert.equal(f.notices.at(-1)[2], 'err');
+  }
+});
+
+test('password verification failure cannot report success or discard password inputs', async () => {
+  const f = securityPaneFixture(true, true); f.draft();
+  assert.equal(await f.context.save(), false);
+  assert.equal(f.element('pwNew').value, 'saved-password');
+  assert.ok(!f.calls.includes('settings'));
+  assert.equal(f.notices.at(-1)[2], 'err');
+});
+
+test('duplicate saves share one password change and empty security fields preserve credentials', async () => {
+  const f = securityPaneFixture(); f.draft();
+  const first = f.context.change(), second = f.context.change();
+  assert.equal(first, second);
+  assert.equal(await first, true);
+  assert.equal(f.calls.filter(x => x === '/api/auth/change').length, 1);
+  assert.equal(f.element('pwChangeBtn').disabled, false);
+  f.calls.length = 0;
+  assert.equal(await f.context.save(), true);
+  assert.deepEqual(f.calls, ['settings']);
+  assert.ok(f.Auth.login('saved-password'));
+});
+
+test('two simultaneously filled password forms must be resolved before Save', async () => {
+  const f = securityPaneFixture(); f.draft(); f.element('lanPwReset').hidden = false;
+  f.element('lanPwNew').value = 'another-password';
+  assert.equal(await f.context.save(), false);
+  assert.deepEqual(f.calls, []);
+  assert.ok(f.Auth.login('old-password'));
 });
