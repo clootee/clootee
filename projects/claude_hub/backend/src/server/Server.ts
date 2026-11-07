@@ -58,6 +58,7 @@ export class Server {
     const app = express();
     app.use(express.json({ limit: '4mb' }));
     FrontendAssets.mount(app);
+    const server = http.createServer(app);
 
     // Optional security password is independent of provider accounts.
     app.get('/api/auth/status', (req, res) =>
@@ -182,7 +183,22 @@ export class Server {
     app.get('/api/system/health', (_req, res) => this._wrapAsync(res, 'system.health', () => ServerHealth.get()));
     app.get('/api/settings', (_req, res) => this._ok(res, Settings.get()));
     app.post('/api/settings', (req, res) =>
-      this._wrap(res, 'settings.set', () => Settings.update(req.body)),
+      this._wrapAsync(res, 'settings.set', async () => {
+        const previous = Settings.get().allowLan;
+        const settings = Settings.update(req.body);
+        if (previous !== settings.allowLan) {
+          if (process.env.CLOOTEE_SUPERVISED !== '1') {
+            try { await this._listenHost(server, settings.allowLan); }
+            catch (error) {
+              Settings.update({ allowLan: previous });
+              await this._listenHost(server, previous);
+              throw error;
+            }
+          }
+          EventBus.revalidate();
+        }
+        return settings;
+      }),
     );
 
     // ── 引擎服务商配置（claude/codex：原版 / 小米 MiMo / kimi / minimax + apiKey + model）──
@@ -786,7 +802,6 @@ export class Server {
     // 注：小白教程的 AI 小助手不在这里。MiniMax 官方接口已放行 CORS，教程页直接从浏览器调用，
     // 后端不参与，也就没有「忘了重启就失灵」这回事。见 frontend/learn-assist.js。
 
-    const server = http.createServer(app);
     // 绑定失败（最常见是 EADDRINUSE：端口被别的进程、或上一个没死干净的自己占着）时，
     // 不能只在 stderr 甩一句 "address already in use"——要把占用方是谁写进生命周期日志。
     // 必须抢在 new WebSocketServer 之前注册：ws 会往 server 上挂一个「把 error 转发给 wss」的
@@ -808,7 +823,7 @@ export class Server {
       EventBus.register(ws, () => this._canAccess(req as Request, token));
     });
 
-    // 安全：默认仅 localhost 可访问；设置里开启「允许局域网访问」后才绑定 0.0.0.0（需重启生效）。
+    // 安全：默认仅 localhost 可访问；设置里开启「允许局域网访问」后才绑定 0.0.0.0（立即生效）。
     const allowLan = Settings.get().allowLan;
     const host = allowLan && process.env.CLOOTEE_SUPERVISED !== '1' ? '0.0.0.0' : '127.0.0.1';
     server.listen(AppConfig.PORT, host, () => {
@@ -821,6 +836,18 @@ export class Server {
       LifeGuard.install(AppConfig.PORT);
       const gitCheck = setTimeout(() => { void GitBin.ensure().catch(error => Logger.warn('Git', 'automatic installation incomplete', error)); }, 1000);
       gitCheck.unref();
+    });
+  }
+
+  private static _listenHost(server: http.Server, allowLan: boolean): Promise<void> {
+    // Release the listener while keeping active HTTP/WS connections and tasks alive.
+    if (server.listening) server.close();
+    return new Promise((resolve, reject) => {
+      const onError = (error: Error) => { server.off('listening', onListening); reject(error); };
+      const onListening = () => { server.off('error', onError); resolve(); };
+      server.once('error', onError);
+      server.once('listening', onListening);
+      server.listen(AppConfig.PORT, allowLan ? '0.0.0.0' : '127.0.0.1');
     });
   }
 
@@ -877,6 +904,7 @@ export class Server {
   }
 
   private static _canAccess(req: Request, token: string | undefined): boolean {
+    if (!Settings.get().allowLan && !this._isLocalRequest(req)) return false;
     return AuthManager.passwordEnabled() ? AuthManager.verify(token) : this._isLocalRequest(req);
   }
 

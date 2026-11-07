@@ -1195,10 +1195,10 @@ const DICT = {
     en: 'Bundled library (out_end): not ready — run out_end/bootstrap to download the bundled Node/Claude/Codex; otherwise the ones installed on this computer are used.',
     zh: 'out_end 内置库：未就绪（运行 out_end/bootstrap 下载内置 Node/Claude/Codex；否则用电脑已安装的）',
   },
-  lanNeedRestart: {
-    en: 'Changing “Allow LAN access” takes effect after restarting the service.',
-    zh: '「允许局域网访问」的更改需重启服务后生效。',
-  },
+  lanSaving: { en: 'Updating LAN access…', zh: '正在更新局域网访问设置…' },
+  lanSaved: { en: 'LAN access updated.', zh: '局域网访问设置已生效。' },
+  lanAccessHint: { en: 'Enable a security password on this computer before accessing from another device. Remote access requires that password.', zh: '请先在本机启用安全密码，再从其他设备访问；远程访问需输入该密码。' },
+  securityUsePasswordButton: { en: 'Use the password button to apply your changes, or clear the password fields before leaving.', zh: '请点击对应的密码按钮完成修改，或清空密码输入后离开。' },
   // ── 模型跟随服务商自动定档 ──
   modelAutoOfficial: {
     en: 'The official subscription picks the model for you — nothing to set here.',

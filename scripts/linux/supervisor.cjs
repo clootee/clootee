@@ -15,6 +15,29 @@ function createSupervisor({ backend, node = process.execPath, port = 8970, host 
   const data = path.resolve(backend, '../data');
   let worker, workerPort, starting, stopping = false, retry, failures = 0;
   const sockets = new Set();
+  const settingsFile = path.join(data, 'settings.json');
+  let watchedPort, rebinding = Promise.resolve();
+  function desiredHost() {
+    try { return JSON.parse(fs.readFileSync(settingsFile, 'utf8')).allowLan === true ? '0.0.0.0' : '127.0.0.1'; }
+    catch { return '127.0.0.1'; }
+  }
+  function refreshListener() {
+    rebinding = rebinding.then(async () => {
+      const next = desiredHost();
+      if (stopping || next === host) return;
+      const previous = host;
+      const bind = target => new Promise((resolve, reject) => {
+        const failed = error => { server.off('listening', ready); reject(error); };
+        const ready = () => { server.off('error', failed); resolve(); };
+        server.once('error', failed); server.once('listening', ready);
+        server.listen(watchedPort, target);
+      });
+      server.close();
+      try { await bind(next); host = next; }
+      catch (error) { await bind(previous); throw error; }
+    }).catch(error => console.error('LAN listener update failed:', error.message));
+    return rebinding;
+  }
   const json = (res, status, value) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
   function allowed(req) {
     // Never accept cross-site recovery, even when a browser has a saved token.
@@ -168,9 +191,17 @@ function createSupervisor({ backend, node = process.execPath, port = 8970, host 
   });
   return {
     server, start, healthy,
-    async listen() { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); }); start().catch(e => { if (!stopping) console.error(e.message); }); return server.address(); },
+    async listen() {
+      await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); });
+      watchedPort = server.address().port;
+      fs.watchFile(settingsFile, { interval: 100, persistent: false }, refreshListener);
+      start().catch(e => { if (!stopping) console.error(e.message); });
+      return server.address();
+    },
     async close() {
       stopping = true; clearTimeout(retry);
+      fs.unwatchFile(settingsFile, refreshListener);
+      await rebinding;
       for (const socket of sockets) socket.destroy();
       await new Promise(resolve => server.close(resolve));
       if (alive(worker)) {

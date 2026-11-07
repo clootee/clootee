@@ -92,3 +92,24 @@ test('unauthorized remote recovery stays on the page with a useful error',async(
 test('desktop reconnect uses the isolated native bridge',async()=>{
   const f=uiFixture({desktop:true});await f.context.recoverWorkspace();assert.deepEqual(f.calls,['desktop','reload']);
 });
+
+test('LAN settings rebind the launcher without restarting its worker', async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-lan-'));
+  const backend = path.join(tmp, 'backend');
+  fs.mkdirSync(path.join(backend, 'dist'), {recursive:true});
+  fs.mkdirSync(path.join(tmp, 'data'));
+  fs.writeFileSync(path.join(backend, 'dist/index.js'), `require('http').createServer((q,s)=>s.end(JSON.stringify({success:true,data:{passwordEnabled:false}}))).listen(Number(process.env.PORT),'127.0.0.1')`);
+  const launcher = createSupervisor({backend,port:0});
+  try {
+    const address = await launcher.listen(); await launcher.start(); const pid = launcher.worker.pid;
+    for (const enabled of [true, false]) {
+      fs.writeFileSync(path.join(tmp, 'data/settings.json'), JSON.stringify({allowLan:enabled}));
+      const expected = enabled ? '0.0.0.0' : '127.0.0.1';
+      for (let i=0;i<100 && launcher.server.address()?.address !== expected;i++) await pause(20);
+      assert.equal(launcher.server.address().address, expected);
+      assert.equal(launcher.server.address().port, address.port);
+      assert.equal(launcher.worker.pid, pid);
+      assert.equal(await launcher.healthy(), true);
+    }
+  } finally { await launcher.close(); fs.rmSync(tmp,{recursive:true,force:true}); }
+});
