@@ -31,9 +31,18 @@ if [ -z "$NODE_BIN" ]; then
   exit 1
 fi
 
-# When run as root, write as the account that owns the app data, otherwise the
-# 0600 auth.json would become unreadable by the running service.
-if [ "$(id -u)" = "0" ] && id claudeuser >/dev/null 2>&1; then
-  exec runuser -u claudeuser -- "$NODE_BIN" "$ENTRY" "$@"
+# Keep the existing data owner when root invokes recovery on a server.
+if [ "$(id -u)" = "0" ]; then
+  OWNER_PATH="$BACKEND"
+  if [ -d "$DIR/data" ]; then OWNER_PATH="$DIR/data"; fi
+  if [ -f "$DIR/data/auth.json" ]; then OWNER_PATH="$DIR/data/auth.json"; fi
+  OWNER_UID="$("$NODE_BIN" -e 'console.log(require("fs").statSync(process.argv[1]).uid)' "$OWNER_PATH")"
+  if [ "$OWNER_UID" != "0" ]; then
+    if command -v runuser >/dev/null 2>&1; then
+      OWNER_NAME="$(id -nu "$OWNER_UID")"
+      exec runuser -u "$OWNER_NAME" -- "$NODE_BIN" "$ENTRY" "$@"
+    fi
+    exec sudo -u "#$OWNER_UID" -- "$NODE_BIN" "$ENTRY" "$@"
+  fi
 fi
 exec "$NODE_BIN" "$ENTRY" "$@"
