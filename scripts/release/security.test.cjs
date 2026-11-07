@@ -144,6 +144,7 @@ test('real HTTP and WebSocket lifecycle: no password, enable, change, disable, l
   assert.equal(fs.existsSync(path.join(data,'auth.json')), false);
   fs.writeFileSync(path.join(data,'auth.json'), JSON.stringify({ salt: 'legacy', hash: Hash.sha256('unknown-random-password::legacy') }));
   status = await call('/api/auth/status'); assert.equal(status.data.legacyCredentials, true);
+  assert.match(status.data.recoveryCommand, /passwd\.(sh|bat)/);
   assert.equal((await call('/api/auth/legacy/disable', {})).success, false);
   assert.equal((await call('/api/auth/legacy/disable', { confirm: true }, undefined, { origin: 'http://attacker.test' })).success, false);
   assert.equal((await call('/api/auth/legacy/disable', { confirm: true })).success, true);
