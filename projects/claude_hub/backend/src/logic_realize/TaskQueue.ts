@@ -47,6 +47,11 @@ export class TaskQueue extends TaskQueueStruct {
     return this._running.has(sessionId);
   }
 
+  // 全局正在运行的任务数：一个会话同一时刻最多一个任务，所以就是 _running 的大小
+  static _runningCount(): number {
+    return this._running.size;
+  }
+
   static _runningTaskId(sessionId: string): string | null {
     return this._running.get(sessionId)?.taskId ?? null;
   }
