@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# Stop the installation-scoped Linux supervisor before checking legacy launchers.
+if [ "$(uname -s)" = Linux ]; then
+  clootee_root="$(cd "$(dirname "$0")/.." && pwd -P)"
+  if [ -f "$clootee_root/run/server.json" ]; then
+    . "$clootee_root/scripts/node-env.sh" || exit 1
+    "$NODE_EXE" "$clootee_root/scripts/linux/control.cjs" stop || exit 1
+  fi
+fi
 # claude-hub 停止器 —— macOS / Linux 实现（与 stop-windows.bat 对应）
 # 不要直接跑这个文件：请双击仓库根目录的 Mac_Stop.command，
 # 或在 Linux 上执行 ./Linux_Stop.sh。

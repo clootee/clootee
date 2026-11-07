@@ -40,6 +40,25 @@ function createSupervisor({ backend, node = process.execPath, port = 8970, host 
       return res.ok && value.success === true && typeof value.data?.passwordEnabled === 'boolean';
     } catch { return false; }
   }
+  // 遍历 /proc 找出某进程的全部后代（恢复时先杀子孙，避免它们被 init 收养后继续压机器）
+  function descendants(pid) {
+    const out = [];
+    for (const name of fs.readdirSync('/proc')) {
+      if (!/^[0-9]+$/.test(name)) continue;
+      try {
+        const stat = fs.readFileSync('/proc/' + name + '/stat', 'utf8');
+        const ppid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+        if (ppid === pid) out.push(Number(name));
+      } catch {}
+    }
+    return out;
+  }
+  function processTree(pid) {
+    const all = [];
+    const walk = (p) => { for (const c of descendants(p)) { all.push(c); walk(c); } };
+    walk(pid);
+    return all;
+  }
   async function start() {
     if (starting) return starting;
     starting = (async () => {
@@ -50,9 +69,23 @@ function createSupervisor({ backend, node = process.execPath, port = 8970, host 
         if (await healthy(Math.min(healthTimeout, Math.max(1, deadline - Date.now())))) return;
         if (!alive(worker)) break;
         if (Date.now() >= deadline) {
-          const error = Error('The workspace process is running but did not respond in time. Check the service log and retry.');
-          error.code = 'WORKER_BUSY';
-          throw error;
+          // 用户点了「恢复」：worker 还在但已经不可响应（通常是任务把机器压死）。
+          // 只回 503 的话按钮永远救不回来，这里强杀整棵子树后重新拉起。
+          const pid = worker.pid;
+          const old = worker;
+          console.error('[' + new Date().toISOString() + '] worker unresponsive pid=' + pid + '; killing process tree for recovery');
+          old.removeAllListeners('exit');
+          for (const p of processTree(pid)) { try { process.kill(p, 'SIGTERM'); } catch {} }
+          try { process.kill(pid, 'SIGTERM'); } catch {}
+          const killDeadline = Date.now() + 5000;
+          while (alive(old) && Date.now() < killDeadline) await new Promise(resolve => setTimeout(resolve, 200));
+          if (alive(old)) {
+            for (const p of processTree(pid).concat([pid])) { try { process.kill(p, 'SIGKILL'); } catch {} }
+          }
+          worker = null;
+          workerPort = null;
+          failures = 0;
+          break;
         }
         await new Promise(resolve => setTimeout(resolve, Math.min(500, Math.max(1, deadline - Date.now()))));
       }

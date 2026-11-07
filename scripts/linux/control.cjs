@@ -85,10 +85,11 @@ async function start() {
 }
 async function main() {
   const command = process.argv[2] || 'help';
+  if (command === 'autostart') { process.stdout.write(require('./autostart.cjs').autostart(home, process.argv[3] || 'enable', Number(process.env.PORT || 8970)) + '\n'); return; }
   if (command === 'version' || command === '--version') { process.stdout.write(JSON.parse(fs.readFileSync(path.join(home, fs.existsSync(path.join(home, 'current')) ? 'current/version.json' : 'version.json'))).version + '\n'); return; }
   if (command === 'logs') { const p = spawn('tail', ['-n', '100', '-f', log], { stdio: 'inherit' }); p.on('error', e => { process.stderr.write(e.message + '\n'); process.exitCode = 1; }); return; }
   if (command === 'status') { const r = read(); const running = owned(r); process.stdout.write(running ? `Clootee running · PID ${r.pid} · http://127.0.0.1:${r.port}\n${r.backend}\n` : 'Clootee stopped\n'); process.exitCode = running ? 0 : 3; return; }
-  if (!['start', 'stop', 'restart'].includes(command)) { process.stdout.write('Usage: clootee {start|stop|restart|status|logs|version}\n'); process.exitCode = command === 'help' ? 0 : 2; return; }
+  if (!['start', 'stop', 'restart'].includes(command)) { process.stdout.write('Usage: clootee {start|stop|restart|status|logs|version|autostart enable|autostart disable|autostart status}\n'); process.exitCode = command === 'help' ? 0 : 2; return; }
   fs.mkdirSync(state, { recursive: true, mode: 0o700 });
   try { fs.mkdirSync(lock); } catch (e) {
     if (e.code !== 'EEXIST') throw e;

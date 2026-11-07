@@ -165,16 +165,25 @@ clootee status
 | `clootee status` | 查看运行状态 |
 | `clootee logs` | 持续查看日志（Ctrl+C 退出查看） |
 | `clootee version` | 查看安装版本 |
+| `clootee autostart enable` / `disable` / `status` | 管理开机启动 |
 
 普通用户安装目录为 `~/.local/share/clootee`，命令为 `~/.local/bin/clootee`；
 root 用户分别为 `/opt/clootee` 和 `/usr/local/bin/clootee`。
 若命令目录不在 PATH，使用安装完成时显示的完整命令路径。
 支持用 `CLOOTEE_HOME`、`CLOOTEE_BIN_DIR` 指定绝对安装路径。
 重新执行安装命令可更新；配置、会话和工具保留在安装目录的共享数据区。
-不配置开机自启。需要 `curl`、`tar`、`sha256sum`、`flock`。
+在 systemd 系统上默认配置开机自启：root 使用独立系统服务，普通用户使用启用 linger 的用户服务。配置失败会明确提示。需要 `curl`、`tar`、`sha256sum`、`flock`。
 
 本机浏览器打开 `http://127.0.0.1:8970`。远程服务器可建立 SSH 隧道后访问：
 
 ```bash
 ssh -L 8970:127.0.0.1:8970 user@server
 ```
+
+Linux 启动器独立于主服务运行，主服务退出后仍保留原访问地址和恢复入口，
+并最多自动尝试恢复三次。断连弹窗可启动服务并重连，重复点击不会重启健康服务。
+远程恢复需要工作台授权，拒绝跨站请求。源码版可在项目目录使用
+`node scripts/linux/control.cjs` 加相同子命令；`Linux_Start.sh` 也会尝试配置开机启动。
+
+桌面安装版首次配置时启用登录自动启动；关闭窗口后服务留在托盘运行，
+在托盘选择「退出并停止服务」才会停止。在系统中禁用自动启动后，后续打开不会强行重新开启。

@@ -163,8 +163,9 @@ clootee status
 
 Downloads a SHA256-verified Tencent COS bundle containing Node.js and the compiled
 app, then starts it in the background. Closing the installer terminal is safe.
-No global PM2 or boot autostart is configured. Requires `curl`, `tar`, `sha256sum`
-and `flock`.
+On systemd hosts, installation enables boot startup (a dedicated system unit for root,
+or a user unit with linger for ordinary users). Failures to enable it are reported.
+Requires `curl`, `tar`, `sha256sum` and `flock`.
 
 | Command | Action |
 | --- | --- |
@@ -174,6 +175,7 @@ and `flock`.
 | `clootee status` | Show status |
 | `clootee logs` | Follow logs; Ctrl+C stops viewing |
 | `clootee version` | Show installed version |
+| `clootee autostart enable` / `disable` / `status` | Manage boot startup |
 
 User installs use `~/.local/share/clootee` and `~/.local/bin/clootee`; root installs
 use `/opt/clootee` and `/usr/local/bin/clootee`. If the command is outside PATH,
@@ -183,3 +185,14 @@ again to update while preserving settings, sessions and downloaded tools.
 
 Open `http://127.0.0.1:8970` locally. For a remote server, first run
 `ssh -L 8970:127.0.0.1:8970 user@server`, then open that URL in your own browser.
+
+The Linux launcher keeps the browser address and recovery controls available if the
+worker exits, and retries failed workers up to three times. The disconnected dialog
+can start a stopped worker without restarting healthy tasks. Recovery requires the
+workspace token for remote access; cross-site requests are rejected. Source checkouts
+use `node scripts/linux/control.cjs` with the same subcommands. `Linux_Start.sh`
+also enables boot startup when systemd and linger are available.
+
+Desktop installs enable login startup on first setup. Closing the window leaves the
+service running in the tray; choose **Quit and stop service** to stop it. An OS-disabled
+login item is respected on subsequent launches.

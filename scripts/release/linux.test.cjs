@@ -14,9 +14,11 @@ function fixture(base) {
   const app = path.join(base, 'app');
   for (const dir of ['runtime/bin', 'scripts/linux', 'projects/claude_hub/backend/dist']) fs.mkdirSync(path.join(app, dir), { recursive: true });
   fs.symlinkSync(process.execPath, path.join(app, 'runtime/bin/node'));
-  fs.copyFileSync(controller, path.join(app, 'scripts/linux/control.cjs'));
+  for (const name of ['control.cjs', 'supervisor.cjs', 'autostart.cjs']) fs.copyFileSync(path.join(root, 'scripts/linux', name), path.join(app, 'scripts/linux', name));
+  fs.mkdirSync(path.join(app, 'projects/claude_hub/frontend'));
+  fs.writeFileSync(path.join(app, 'projects/claude_hub/frontend/index.html'), 'workspace');
   fs.writeFileSync(path.join(app, 'version.json'), '{"version":"1.2.3"}');
-  fs.writeFileSync(path.join(app, 'projects/claude_hub/backend/dist/index.js'), "require('http').createServer((q,s)=>{s.setHeader('content-type','application/json');s.end(JSON.stringify({success:true}));}).listen(Number(process.env.PORT),'127.0.0.1');");
+  fs.writeFileSync(path.join(app, 'projects/claude_hub/backend/dist/index.js'), "require('http').createServer((q,s)=>{s.setHeader('content-type','application/json');s.end(JSON.stringify({success:true,data:{passwordEnabled:false}}));}).listen(Number(process.env.PORT),'127.0.0.1');");
   return app;
 }
 function cli(home, command, env = {}) { return execFileSync(process.execPath, [controller, command], { env: { ...process.env, CLOOTEE_HOME: home, ...env }, encoding: 'utf8', timeout: 45000 }); }
@@ -53,7 +55,7 @@ test('installer verifies SHA256, installs and upgrades with persistent data, ref
     const installer = path.join(temp, 'install.sh');
     let script = fs.readFileSync(path.join(root, 'scripts/linux/install.sh'), 'utf8').replaceAll('@@VERSION@@','1.2.3').replaceAll('@@RELEASE@@','1.2.3-fixture').replaceAll('@@X64_URL@@','https://example.com/x64').replaceAll('@@ARM64_URL@@','https://example.com/arm64').replaceAll('@@X64_SHA@@',sha).replaceAll('@@ARM64_SHA@@',sha);
     fs.writeFileSync(installer,script);
-    const env = {...process.env, PATH: tools + ':' + process.env.PATH, FIXTURE:archive, CLOOTEE_HOME:home, CLOOTEE_BIN_DIR:path.join(temp,'bin'), PORT:String(await port())};
+    const env = {...process.env, PATH: tools + ':' + process.env.PATH, FIXTURE:archive, CLOOTEE_AUTOSTART:'0', CLOOTEE_HOME:home, CLOOTEE_BIN_DIR:path.join(temp,'bin'), PORT:String(await port())};
     const install = () => execFileSync('bash',[installer],{env,encoding:'utf8',timeout:45000});
     assert.match(install(),/Installed/);
     fs.writeFileSync(path.join(home,'data/keep'),'persistent');

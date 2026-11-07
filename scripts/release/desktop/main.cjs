@@ -1,18 +1,20 @@
 /* Desktop shell only. The backend runs with a real bundled Node in a writable,
  * per-user installation; credentials and downloaded tools survive upgrades. */
-const { app, BrowserWindow, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, dialog, shell, Menu, Tray, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
 const { bindUpdates } = require('./updater.cjs');
-let win, child, quitting = false, installationComplete = false;
+let win, child, tray, recoverBackend, quitting = false, installationComplete = false;
+const background = process.argv.includes('--background');
 const installOnly = process.argv.includes('--install-only');
 if (installOnly && process.env.CLOOTEE_UPDATE_PROFILE) app.setPath('userData', process.env.CLOOTEE_UPDATE_PROFILE);
 const single = app.requestSingleInstanceLock();
 if (!single) app.exit(installOnly ? 1 : 0);
 else {
-  app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
+  app.on('second-instance', () => { if (win) { win.show(); win.focus(); } if (recoverBackend) recoverBackend().catch(error => dialog.showErrorBox('Clootee', error.message)); });
+  app.on('open-url', (event, url) => { event.preventDefault(); if (url === 'clootee://start' && win) { win.show(); win.focus(); if (recoverBackend) recoverBackend().catch(error => dialog.showErrorBox('Clootee', error.message)); } });
   app.whenReady().then(start).catch(error => { dialog.showErrorBox('Clootee', error.message); app.exit(1); });
 }
 function stopChild() {
@@ -50,7 +52,8 @@ async function start() {
   const home = app.getPath('userData');
   const root = path.join(home, 'versions', app.getVersion());
   const hub = path.join(root, 'projects', 'claude_hub');
-  win = new BrowserWindow({ width: 1380, height: 900, minWidth: 360, minHeight: 520, title: 'Clootee', icon: path.join(__dirname, 'icon.png'), backgroundColor: '#f8f9ff', webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  win = new BrowserWindow({ width: 1380, height: 900, minWidth: 360, minHeight: 520, title: 'Clootee', icon: path.join(__dirname, 'icon.png'), backgroundColor: '#f8f9ff', show: !(background || (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin)), webPreferences: { preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false, contextIsolation: true, sandbox: true } });
+  win.on('close', event => { if (!quitting && tray) { event.preventDefault(); win.hide(); } });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ label: 'Clootee', submenu: [{ role: 'about' }, { type: 'separator' }, { role: 'quit' }] }] : []),
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
@@ -107,23 +110,60 @@ async function start() {
     const bash = path.join(hub, 'out_end', 'git', 'bin', 'bash.exe');
     if (fs.existsSync(bash)) env.CLAUDE_CODE_GIT_BASH_PATH = bash;
   }
-  if (installOnly) { fs.closeSync(log); app.quit(); return; }
-  child = spawn(node, [path.join(backend, 'dist', 'index.js')], { cwd: backend, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', log, log, 'ipc'] });
-  bindUpdates(child, { app, home, node, port, stop: () => { quitting = true; stopChild(); }, feed: process.env.CLOOTEE_UPDATE_FEED });
-  fs.closeSync(log);
-  let failure;
-  child.once('error', e => { failure = e; });
-  child.once('exit', code => { failure = new Error('本地服务已停止 / Local service stopped (' + code + '). ' + path.join(home, 'desktop.log')); if (!quitting && win && !win.isDestroyed()) { dialog.showErrorBox('Clootee', failure.message); app.quit(); } });
-  const base = 'http://127.0.0.1:' + port;
-  let ready = false;
-  for (let attempt = 0; attempt < 120; attempt++) {
-    if (failure) throw failure;
-    try { const response = await fetch(base + '/api/auth/status', { signal: AbortSignal.timeout(800) }); if (response.ok) { ready = true; break; } } catch {}
-    await new Promise(resolve => setTimeout(resolve, 500));
+  if (app.isPackaged && ['win32', 'darwin'].includes(process.platform)) {
+    app.setAsDefaultProtocolClient('clootee');
+    const marker = path.join(home, 'autostart-configured');
+    if (!fs.existsSync(marker)) {
+      app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: ['--background'], name: 'Clootee' });
+      fs.writeFileSync(marker, '1');
+    }
   }
-  if (!ready) throw new Error('启动超时 / Startup timed out. ' + path.join(home, 'desktop.log'));
+  if (installOnly) { fs.closeSync(log); app.quit(); return; }
+  tray = new Tray(path.join(__dirname, 'icon.png'));
+  tray.setToolTip('Clootee — 后台服务运行中 / Service running');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '打开 Clootee / Open Clootee', click: () => { win.show(); win.focus(); } },
+    { label: '退出并停止服务 / Quit and stop service', click: () => app.quit() }
+  ]));
+  tray.on('double-click', () => { win.show(); win.focus(); });
+  const base = 'http://127.0.0.1:' + port;
+  let restarting;
+  recoverBackend = () => {
+    if (restarting) return restarting;
+    restarting = (async () => {
+      if (child && child.pid && child.exitCode === null && child.signalCode === null) {
+        const response = await fetch(base + '/api/auth/status', { signal: AbortSignal.timeout(3000) });
+        if (response.ok) return;
+        throw new Error('服务仍在运行，请检查 desktop.log / Service is running; check desktop.log');
+      }
+      await launchBackend();
+    })().finally(() => { restarting = null; });
+    return restarting;
+  };
+  ipcMain.handle('clootee:recover', event => {
+    if (event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame || new URL(event.senderFrame.url).origin !== base) throw Error('Unauthorized recovery');
+    return recoverBackend();
+  });
+  async function launchBackend() {
+    const workerLog = fs.openSync(path.join(home, 'desktop.log'), 'a');
+    child = spawn(node, [path.join(backend, 'dist', 'index.js')], { cwd: backend, env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', workerLog, workerLog, 'ipc'] });
+    bindUpdates(child, { app, home, node, port, stop: () => { quitting = true; stopChild(); }, feed: process.env.CLOOTEE_UPDATE_FEED });
+    fs.closeSync(workerLog);
+    let failure;
+    child.once('error', e => { failure = e; });
+    child.once('exit', code => { failure = new Error('本地服务已停止 / Local service stopped (' + code + '). ' + path.join(home, 'desktop.log')); if (!quitting && win && !win.isDestroyed()) win.webContents.executeJavaScript('if (typeof showAccessError === "function") showAccessError();').catch(() => {}); });
+    let ready = false;
+    for (let attempt = 0; attempt < 120; attempt++) {
+      if (failure) throw failure;
+      try { const response = await fetch(base + '/api/auth/status', { signal: AbortSignal.timeout(800) }); if (response.ok) { ready = true; break; } } catch {}
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    if (!ready) throw new Error('启动超时 / Startup timed out. ' + path.join(home, 'desktop.log'));
+  }
+  fs.closeSync(log);
+  await launchBackend();
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//.test(url)) shell.openExternal(url); return { action: 'deny' }; });
-  win.webContents.on('will-navigate', (event, url) => { if (new URL(url).origin !== base) { event.preventDefault(); if (/^https?:\/\//.test(url)) shell.openExternal(url); } });
+  win.webContents.on('will-navigate', (event, url) => { if (url === 'clootee://start') { event.preventDefault(); recoverBackend().catch(error => dialog.showErrorBox('Clootee', error.message)); return; } if (new URL(url).origin !== base) { event.preventDefault(); if (/^https?:\/\//.test(url)) shell.openExternal(url); } });
   await win.loadURL(base);
 }
 app.on('window-all-closed', () => {

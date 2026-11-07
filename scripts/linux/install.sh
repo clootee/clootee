@@ -63,3 +63,9 @@ fi
 printf '\n安装完成 / Installed: %s\n启动 start | 关闭 stop | 重启 restart | 状态 status | 日志 logs\n' "$bin_dir/clootee"
 case ":$PATH:" in *":$bin_dir:"*) printf 'clootee status\n';; *) printf '命令 / Command: %s status\n（该目录不在 PATH，可使用上面的完整路径 / use the full path above）\n' "$bin_dir/clootee";; esac
 printf '服务器远程访问 / SSH tunnel: ssh -L 8970:127.0.0.1:8970 user@server\n浏览器 / Browser: http://127.0.0.1:8970\n'
+
+if [ "${CLOOTEE_AUTOSTART:-1}" != 0 ]; then
+  if ! "$bin_dir/clootee" autostart enable; then
+    printf '\n警告：开机自动启动未配置成功。安装服务后执行：%s autostart enable\nWarning: automatic startup is not enabled; retry the command above on a systemd host.\n' "$bin_dir/clootee" >&2
+  fi
+fi

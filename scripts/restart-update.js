@@ -112,7 +112,12 @@ async function main() {
       if (current?.instance !== previous.instance) throw new Error('Server identity changed; restart cancelled');
       process.kill(previousPid, 'SIGTERM');
     } else await approveStop();
-    if (env.pm_id !== undefined) {
+    if (env.CLOOTEE_SUPERVISED === '1') {
+      const publicPort = Number(env.CLOOTEE_PUBLIC_PORT);
+      if (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65535) throw Error('Invalid launcher port');
+      await waitUntil(async () => { const current = await status(publicPort); return !!current?.instance && current.instance !== previous?.instance; }, 60000, 'Clootee launcher did not restart the updated server');
+      note('UPDATE COMPLETE: Clootee launcher replacement is healthy');
+    } else if (env.pm_id !== undefined) {
       // PM2 owns the replacement process; do not start a second server.
       await waitUntil(async () => { const current = await status(port); return !!current?.instance && current.instance !== previous?.instance; }, 60000, 'PM2 did not restart the updated server');
       note('UPDATE COMPLETE: PM2 replacement is healthy');
