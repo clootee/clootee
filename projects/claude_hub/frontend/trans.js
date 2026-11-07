@@ -251,6 +251,8 @@ const DICT = {
   listModeAllHint: { en: 'Every indexed session across all workspaces', zh: '所有工作目录里已建索引的会话' },
   allSessionsFolder: { en: 'All directories', zh: '全部目录' },
   noAllSessions: { en: 'No indexed sessions yet — sessions created from now on show up here', zh: '暂无已索引会话——从现在起新建的会话都会出现在这里' },
+  sessionListLoadFailed: { en: 'Could not load sessions', zh: '会话列表加载失败' },
+  sessionListRetry: { en: 'Retry', zh: '重试' },
   loadMoreSessions: { en: 'Load more', zh: '加载更多' },
   sessionsShownOf: { en: 'showing {shown} / {total}', zh: '已显示 {shown} / {total}' },
   clearFilter: { en: 'Clear filter', zh: '清除筛选' },

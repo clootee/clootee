@@ -223,6 +223,31 @@ export class FsHelper {
     }
   }
 
+  // Async, bounded windows for list previews. Discard partial JSONL frames instead
+  // of seeking backwards through an arbitrarily large tool-output line.
+  static async readEdgeLinesAsync(full: string, window = 256 * 1024): Promise<{ head: string[]; tail: string[] }> {
+    const fd = await fs.promises.open(full, 'r');
+    try {
+      const { size } = await fd.stat();
+      const read = async (start: number, length: number): Promise<string> => {
+        const buf = Buffer.alloc(length);
+        const { bytesRead } = await fd.read(buf, 0, length, start);
+        return buf.subarray(0, bytesRead).toString('utf8');
+      };
+      if (size <= window * 2) {
+        const lines = this._splitLines(await read(0, size));
+        return { head: lines, tail: lines };
+      }
+      const headText = await read(0, window);
+      const tailText = await read(size - window, window);
+      const head = headText.split(/\r?\n/);
+      head.pop();
+      const tail = tailText.split(/\r?\n/);
+      tail.shift();
+      return { head: head.filter(Boolean), tail: tail.filter(Boolean) };
+    } finally { await fd.close(); }
+  }
+
   // 从文件末尾取「若干完整行」（起点对齐到换行，绝不截断帧）。
   private static _tailLines(fd: number, size: number, wanted: number): string[] {
     const start = this._alignLineStart(fd, size - Math.max(0, Math.floor(wanted)));

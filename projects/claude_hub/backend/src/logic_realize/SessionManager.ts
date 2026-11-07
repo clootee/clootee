@@ -42,6 +42,8 @@ export class SessionManager extends SessionManagerStruct {
     this._live.delete(id);
     this._persist();
   }
+  static runtimeSessions(): Session[] { return this._all(); }
+
   protected static _all(): Session[] {
     return [...this._live.values()];
   }

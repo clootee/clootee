@@ -226,18 +226,19 @@ let SecurityState = { passwordEnabled: false, legacyCredentials: false, localAcc
 let securityKnown = false;
 
 // ── API ──
-async function api(path, body, authRetried = false) {
+async function api(path, body, authRetried = false, signal) {
   const headers = { 'x-auth-token': TOKEN };
   if (body) headers['Content-Type'] = 'application/json';
   const res = await fetch(path, {
     method: body ? 'POST' : 'GET',
+    signal,
     headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401) {
     try {
       const state = await refreshSecurityState();
-      if (!state.passwordEnabled && state.localAccess && !authRetried) return api(path, body, true);
+      if (!state.passwordEnabled && state.localAccess && !authRetried) return api(path, body, true, signal);
       await showLogin();
     }
     catch (error) { showAccessError(error.message); }
@@ -809,18 +810,11 @@ async function loadRoots() {
   renderWorkdirBar();
   renderRootMeta();
   await loadSessions();
-  refreshFavoriteSessions(false);
 }
 
 async function refreshRootRecency() {
   try {
-    const sessions = await api('/api/session/list-all');
-    const recent = {};
-    sessions.forEach((s) => {
-      if (!s.rootId) return;
-      recent[s.rootId] = Math.max(recent[s.rootId] || 0, s.updatedAt || 0);
-    });
-    State.rootRecent = recent;
+    State.rootRecent = await api('/api/session/recency');
   } catch {
     State.rootRecent = {};
   }
@@ -1481,25 +1475,59 @@ async function deleteSelectedSessions() {
 }
 
 // ── 会话（仅显示当前根目录关联的会话） ──
-async function loadSessions() {
+async function loadSessions(append = false) {
+  if (append && (Page.loading || !Page.more)) return;
+  const scope = sessionListScope(), key = sessionPageKey(), selection = sessionSelectionVersion;
   const request = ++sessionListRequest;
-  const scope = sessionListScope();
-  const selection = sessionSelectionVersion;
-  let sessions;
-  if (!isWorkspace() && State.favoritesOnly) sessions = await loadFavoriteSessions();
-  else if (isWorkspace()) sessions = await api('/api/session/list-all');
-  else if (State.rootId) sessions = await api('/api/session/list?rootId=' + encodeURIComponent(State.rootId));
-  else sessions = [];
-  if (request !== sessionListRequest || scope !== sessionListScope()) return;
-  State.sessions = sessions;
-  rebuildRunning();
+  if (Page.controller) Page.controller.abort();
+  const controller = new AbortController();
+  Page.controller = controller;
+  const continuing = append && Page.key === key;
+  if (!continuing) {
+    Page.offset = 0; Page.snapshot = ''; Page.more = 0;
+    if (Page.key !== key) {
+      State.sessions = []; Page.directories = []; Page.total = 0;
+      const cached = Page.cache.get(key);
+      if (cached) { State.sessions = cached.sessions; Object.assign(Page, cached.page); }
+    }
+  }
+  Page.key = key; Page.loading = true; Page.error = '';
   renderSessions();
-  // 缺席可能只是旧快照、刚创建或收藏状态变化，不能据此抢走当前会话。
-  const current = State.session;
-  const needsSelection = !State.sessionId || (!State.favoritesOnly && !isWorkspace()
-    && current && current.rootId !== State.rootId);
-  if (selection === sessionSelectionVersion && needsSelection) {
-    await selectSession(State.sessions[0]?.id || null);
+  try {
+    const params = new URLSearchParams({
+      mode: isWorkspace() ? 'workspace' : State.listMode === 'all' ? 'indexed' : State.listMode,
+      rootId: State.rootId || '', filterRootId: State.favoritesOnly ? FavDir.rootId : '',
+      status: State.tab, q: Search.query, fullText: Search.advanced ? '1' : '0',
+      run: [...State.runFilters].sort().join(','),
+      finished: [...new Set([...State.justFinished, ...State.justFinishedSeen])].join(','),
+      limit: String(Page.size), offset: String(continuing ? Page.offset : 0),
+      snapshot: continuing ? Page.snapshot : '',
+    });
+    const result = await api('/api/session/page?' + params, undefined, false, controller.signal);
+    if (request !== sessionListRequest || scope !== sessionListScope() || key !== sessionPageKey()) return;
+    const prior = continuing && !result.reset ? State.sessions : [];
+    const drafts = State.favoritesOnly ? State.favoriteSessions.filter(s => isFavoriteDraftId(s.id)) : [];
+    State.sessions = [...new Map([...drafts, ...prior, ...result.items].map(s => [s.id, s])).values()];
+    if (State.favoritesOnly) { State.favoriteSessions = State.sessions; State.favoriteCacheReady = true; }
+    Object.assign(Page, { offset: result.nextOffset, snapshot: result.snapshot, total: result.total,
+      more: result.hasMore ? Math.max(1, result.total - result.nextOffset) : 0,
+      directories: result.directories, running: result.running });
+    if (!continuing || result.reset) Search.hits = new Map();
+    for (const [id, snippet] of Object.entries(result.snippets || {})) Search.hits.set(id, snippet);
+    Page.cache.set(key, { sessions: State.sessions, page: {
+      offset: Page.offset, snapshot: Page.snapshot, total: Page.total, more: Page.more,
+      directories: Page.directories, running: Page.running,
+    } });
+    while (Page.cache.size > 8) Page.cache.delete(Page.cache.keys().next().value);
+    rebuildRunning();
+    const current = State.session;
+    const needsSelection = !State.sessionId || (!State.favoritesOnly && !isWorkspace()
+      && current && current.rootId !== State.rootId);
+    if (selection === sessionSelectionVersion && needsSelection) await selectSession(State.sessions[0]?.id || null);
+  } catch (error) {
+    if (request === sessionListRequest && error.name !== 'AbortError') Page.error = error.message;
+  } finally {
+    if (request === sessionListRequest) { Page.loading = false; setSearchPending(false); renderSessions(); }
   }
 }
 
@@ -1564,7 +1592,7 @@ function matchSnippet(s, q) {
 // 依据会话列表（后端为准）重建"执行中"集合与每会话的运行任务 id 集，后续由 WS 任务事件增量更新
 function rebuildRunning() {
   State.runningTasks = new Map();
-  for (const s of State.sessions) {
+  for (const s of [...(Page.running || []), ...State.sessions]) {
     const ids = (s.tasks || []).filter((t) => t.status === 'running').map((t) => t.id);
     if (ids.length) State.runningTasks.set(s.id, new Set(ids));
   }
@@ -1630,47 +1658,22 @@ function sortSessionsForList(sessions) {
 }
 
 async function refreshFavoriteSessions(renderAfter = false) {
-  if (isWorkspace()) return;
-  try {
-    await loadFavoriteSessions();
-    if (State.favoritesOnly) {
-      State.sessions = State.favoriteSessions;
-      rebuildRunning();
-      if (renderAfter) renderSessions();
-    }
-  } catch {
-    /* 收藏夹后台刷新失败时保留当前缓存 */
-  }
+  if (!isWorkspace() && State.favoritesOnly) await loadSessions();
 }
+async function loadFavoriteSessions() { await loadSessions(); return State.favoriteSessions; }
 
-async function loadFavoriteSessions() {
-  const request = ++favoriteListRequest;
-  const mode = State.listMode;
-  const sessions = await api(listModeApi());
-  if (request !== favoriteListRequest || mode !== State.listMode) return State.favoriteSessions;
-  // 在返回时读取草稿：请求期间用户可能刚刚点了新建，不能用请求前的快照覆盖。
-  const drafts = State.favoriteSessions.filter((s) => isFavoriteDraftId(s.id));
-  State.favoriteSessions = sortSessionsForList([...drafts, ...sessions]);
-  State.favoriteCacheReady = true;
-  // 恢复的目录筛选可能已无对应收藏（取消收藏/删目录）→ 自动失效，避免列表看起来空
-  if (FavDir.rootId && !State.favoriteSessions.some((s) => s.rootId === FavDir.rootId)) setFavDir('');
-  return State.favoriteSessions;
+// Server pagination: only fetch the next 20 previews when needed.
+const Page = { size: 20, offset: 0, snapshot: '', total: 0, more: 0,
+  loading: false, error: '', controller: null, key: '', directories: [], running: [], cache: new Map() };
+function sessionPageKey() {
+  return [sessionListScope(), State.tab, FavDir.rootId, Search.query, Search.advanced,
+    [...State.runFilters].sort().join(',')].join('|');
 }
-
-// ── 会话列表分页：默认只渲染 20 条，滚到底自动追加 20 条 ──
-// 搜索时不分页（"搜索能搜到全部"），其余视图（单目录 / 收藏夹 / 全部目录）一律分页。
-const Page = { size: 20, shown: 20 };
-function resetSessionPage() {
-  Page.shown = Page.size;
-}
-function growSessionPage() {
-  Page.shown += Page.size;
-  renderSessions();
-}
-// 滚到距底部 80px 内就追加下一页（只在还有剩余时生效，renderSessions 会记下总数）
+function resetSessionPage() { Page.offset = 0; Page.snapshot = ''; }
+function growSessionPage() { return loadSessions(true); }
 function onSessionListScroll() {
   const el = $('sessionList');
-  if (!el || !Page.more) return;
+  if (!el || !Page.more || Page.loading || Page.error || Page.key !== sessionPageKey()) return;
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) growSessionPage();
 }
 
@@ -1690,7 +1693,7 @@ function toggleSearch() {
     setSearchPending(false);
     $('sessionSearch').value = '';
     updateSearchClear();
-    renderSessions();
+    scheduleFullTextSearch();
   }
 }
 
@@ -1702,45 +1705,12 @@ function setSearchPending(pending) {
 }
 // 全文搜索走后端（跨会话读 jsonl）。300ms 防抖 + 序号防竞态；非全文/空词即清空命中集。
 function scheduleFullTextSearch() {
-  if (Search.timer) clearTimeout(Search.timer);
-  Search.timer = null;
-  if (!Search.advanced || !Search.query) {
-    Search.hits = new Map();
-    Search.reqSeq++; // 让在途请求的结果作废
-    setSearchPending(false);
-    return;
-  }
+  clearTimeout(Search.timer); Search.reqSeq++; sessionListRequest++;
   setSearchPending(true);
-  Search.timer = setTimeout(runFullTextSearch, 300);
+  if (Page.controller) Page.controller.abort();
+  Search.timer = setTimeout(runFullTextSearch, Search.query ? 300 : 0);
 }
-async function runFullTextSearch() {
-  const q = Search.query;
-  if (!Search.advanced || !q) {
-    Search.hits = new Map();
-    setSearchPending(false);
-    return;
-  }
-  const seq = ++Search.reqSeq;
-  try {
-    let url = '/api/session/search?q=' + encodeURIComponent(q);
-    // 经典单目录模式限定当前根目录；工作台/收藏夹跨目录则不限定，交由列表成员集自然收敛
-    if (!isWorkspace() && !State.favoritesOnly && State.rootId)
-      url += '&rootId=' + encodeURIComponent(State.rootId);
-    const hits = await api(url);
-    if (seq !== Search.reqSeq) return; // 丢弃过期响应
-    const map = new Map();
-    for (const h of hits) map.set(h.id, h.snippet || '');
-    Search.hits = map;
-    renderSessions();
-  } catch {
-    if (seq === Search.reqSeq) {
-      Search.hits = new Map();
-      renderSessions();
-    }
-  } finally {
-    if (seq === Search.reqSeq) setSearchPending(false);
-  }
-}
+async function runFullTextSearch() { await loadSessions(); }
 function updateSearchClear() {
   $('sessionSearchClear').hidden = !$('sessionSearch').value;
 }
@@ -1749,7 +1719,6 @@ function onSearchInput() {
   resetSessionPage();
   updateSearchClear();
   scheduleFullTextSearch();
-  renderSessions();
 }
 function resetSessionSearch(focus = false) {
   $('sessionSearch').value = '';
@@ -1762,7 +1731,6 @@ function clearSessionSearch() {
 function onAdvToggle() {
   Search.advanced = $('advSearch').checked;
   scheduleFullTextSearch();
-  renderSessions();
 }
 
 // 三态视图切换：单目录 / 收藏夹 / 全部目录（由星标按钮的下拉菜单调用）
@@ -1841,6 +1809,9 @@ const FDF_RUNNING_AT = 8.64e15;
 // 收藏会话涉及的根目录（去重 + 计数），按「最近有任务」倒序
 // 顺带按目录累计「执行中」「刚执行完」的会话数：标签右上角一个这种会话画一个点
 function favDirOptions() {
+  if (Page.directories.length) return Page.directories.map(d => ({ ...d,
+    name: rootName(d.rootId) || d.rootId, lastAt: d.running ? FDF_RUNNING_AT : d.lastAt
+  })).sort((a, b) => b.lastAt - a.lastAt || b.count - a.count || a.name.localeCompare(b.name));
   const map = new Map();
   State.sessions.forEach((s) => {
     if (!s.rootId) return;
@@ -1864,9 +1835,9 @@ function favFilterRootId() {
   return State.roots.some((r) => r.id === FavDir.rootId) ? FavDir.rootId : '';
 }
 
-function pickFavDir(rootId) {
+async function pickFavDir(rootId) {
   setFavDir(FavDir.rootId === rootId ? '' : rootId);
-  renderSessions();
+  await loadSessions();
   // 切到某个目录时顺手打开该目录下最顶端的会话（取消筛选时不动当前会话）
   if (FavDir.rootId) selectTopVisibleSession();
 }
@@ -1882,7 +1853,7 @@ function selectTopVisibleSession() {
 
 function clearFavDir() {
   setFavDir('');
-  renderSessions();
+  loadSessions();
 }
 
 const FDF_NAME_MAX = 20; // 标签上目录名最多 20 字符，超出截断
@@ -2066,7 +2037,7 @@ function switchTab(tab) {
   State.tab = tab;
   resetSessionPage();
   document.querySelectorAll('.s-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  renderSessions();
+  loadSessions();
 }
 
 const RUN_TAB_LABELS = { all: 'runTabAll', running: 'runTabRunning', justFinished: 'runTabJustFinished' };
@@ -2095,7 +2066,7 @@ function toggleRunFilter(key) {
   else State.runFilters.add(key);
   State.justFinishedSeen.clear(); // 切换筛选=开启新一轮：上一轮点开过的会话到这时才真正移出「刚执行完」
   syncRunTabs();
-  renderSessions();
+  loadSessions();
 }
 
 // 刷新运行状态筛选按钮：勾中的加 ✓ 前缀；空集时高亮「所有」
@@ -2115,40 +2086,14 @@ function renderSessions() {
   renderFavDirFilter();
   refreshLockRootBtn();
   if (State.sessions.length === 0) {
-    list.innerHTML = `<div class="empty">${T(emptyListKey())}</div>`;
-    Page.more = 0;
+    const emptyKey = Search.query ? 'noSearchResults' : (runFilterEmptyKey() || ({ active: 'noActiveSessions', testing: 'noTestingSessions', completed: 'noCompletedSessions' })[State.tab] || emptyListKey());
+    list.innerHTML = `<div class="empty">${escapeHtml(T(Page.loading ? 'loading' : Page.error ? 'sessionListLoadFailed' : emptyKey))}</div>`;
+    if (Page.error) appendSessionPageControl(list);
     return;
   }
   const q = Search.query;
-  let sessions = State.sessions;
-  // 收藏夹内的目录筛选：纯前端即时过滤
-  if (State.favoritesOnly && FavDir.rootId) sessions = sessions.filter((s) => s.rootId === FavDir.rootId);
-  if (State.tab !== 'all') sessions = sessions.filter((s) => (s.status || 'active') === State.tab);
-  // 运行状态筛选：执行中 / 刚执行（已停止且用户还没点开看过）——多选时取并集；空集不过滤
-  if (State.runFilters.size) sessions = sessions.filter(matchRunFilters);
-  if (q) {
-    sessions = sessions.filter((s) => {
-      if (sessionTitle(s).toLowerCase().includes(q)) return true;
-      if (Search.advanced) {
-        if (Search.hits.has(s.id)) return true; // 后端全文命中（覆盖全部会话）
-        // 当前打开会话正文已在本地，即时命中（不必等后端）
-        return sessionMessages(s).some((m) => (m.text || '').toLowerCase().includes(q));
-      }
-      return false;
-    });
-  }
-  if (sessions.length === 0) {
-    const emptyKeyByTab = { active: 'noActiveSessions', testing: 'noTestingSessions', completed: 'noCompletedSessions' };
-    const emptyKey = q ? 'noSearchResults'
-      : (runFilterEmptyKey() || emptyKeyByTab[State.tab] || emptyListKey());
-    list.innerHTML = `<div class="empty">${T(emptyKey)}</div>`;
-    Page.more = 0;
-    return;
-  }
-  // 分页：搜索时展示全部命中，否则只渲染前 Page.shown 条，剩下的滚到底再追加
-  const total = sessions.length;
-  if (!q && total > Page.shown) sessions = sessions.slice(0, Page.shown);
-  Page.more = total - sessions.length;
+  const sessions = State.sessions; // filtered on the server before paging
+  const total = Page.total;
   list.innerHTML = '';
   setTimeout(() => ApiBill.flushList(), 0);
   sessions.forEach((s) => {
@@ -2261,15 +2206,23 @@ function renderSessions() {
     });
     list.appendChild(div);
   });
-  if (Page.more > 0) {
-    const more = document.createElement('div');
-    more.className = 'session-more';
-    more.innerHTML = `<button type="button" class="sm">${escapeHtml(T('loadMoreSessions'))}</button>`
-      + `<span>${escapeHtml(T('sessionsShownOf').replace('{shown}', String(sessions.length)).replace('{total}', String(total)))}</span>`;
-    more.querySelector('button').addEventListener('click', growSessionPage);
-    list.appendChild(more);
-  }
+  appendSessionPageControl(list);
   if (State.batchMode) refreshBatchBar();
+}
+
+function appendSessionPageControl(list) {
+  if (!Page.more && !Page.error && !Page.loading && !Page.total) return;
+  const more = document.createElement('div'); more.className = 'session-more';
+  const count = document.createElement('span');
+  count.textContent = T('sessionsShownOf').replace('{shown}', String(State.sessions.length)).replace('{total}', String(Page.total));
+  if (Page.loading) {
+    const status = document.createElement('span'); status.textContent = T('loading'); more.appendChild(status);
+  } else if (Page.more || Page.error) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'sm';
+    button.textContent = T(Page.error ? 'sessionListRetry' : 'loadMoreSessions');
+    button.addEventListener('click', () => loadSessions(Page.offset > 0 && !!Page.snapshot)); more.appendChild(button);
+  }
+  more.appendChild(count); list.appendChild(more);
 }
 
 // 列表整体为空时的文案：按当前视图区分（单目录 / 收藏夹 / 全部目录）
