@@ -291,3 +291,27 @@ test('LAN checkbox saves immediately without submitting password drafts and roll
   assert.equal(f.element('allowLanChk').checked, true);
   assert.equal(f.element('allowLanChk').disabled, false);
 });
+
+test('reverse proxy mode keeps real HTTP listeners on loopback across access toggles', async () => {
+  const { AppConfig } = require(path.join(backend, 'dist/config/AppConfig'));
+  const { Server } = require(path.join(backend, 'dist/server/Server'));
+  const previous = { port: AppConfig.PORT, loopback: AppConfig.LOOPBACK_ONLY };
+  const server = http.createServer((_req, res) => res.end('loopback-ok'));
+  try {
+    AppConfig.PORT = 0;
+    AppConfig.LOOPBACK_ONLY = true;
+    for (const allowLan of [true, false, true]) {
+      await Server._listenHost(server, allowLan);
+      const address = server.address();
+      assert.equal(address.address, '127.0.0.1');
+      const response = await fetch(`http://127.0.0.1:${address.port}`);
+      assert.equal(await response.text(), 'loopback-ok');
+      server.closeAllConnections();
+    }
+  } finally {
+    AppConfig.PORT = previous.port;
+    AppConfig.LOOPBACK_ONLY = previous.loopback;
+    server.closeAllConnections();
+    if (server.listening) await new Promise(resolve => server.close(resolve));
+  }
+});
