@@ -117,11 +117,13 @@ export class TaskQueueStruct {
     if (!next.supplement && running >= max) {
       const firstTime = !this._capped.has(sessionId);
       this._capped.add(sessionId);
-      // 只在「刚被挡下」时提醒一次，避免每个 tick 都弹
+      // 只在「刚被挡下」时提醒一次，避免每个 tick 都弹。
+      // 带上正在执行的任务清单：上限是全局的，用户当前可能只看到自己的项目，
+      // 不列出来会误以为「明明没人在跑」。
       if (firstTime) {
         EventBus.broadcast({
           kind: 'notice', sessionId, taskId: next.id, level: 'warn',
-          message: 'task_queue_waiting', max, running,
+          message: 'task_queue_waiting', max, running, runningTasks: this._runningInfo(),
         });
       }
       return;
@@ -364,6 +366,10 @@ export class TaskQueueStruct {
   static _isRunning(_sessionId: string): boolean { throw new Error('Not implemented'); }
   // 当前全局正在运行的任务数（并发上限按它判断；由 Realize 提供）
   protected static _runningCount(): number { throw new Error('Not implemented'); }
+  // 正在执行的任务清单（只用于给用户的「为什么在排队」说明；由 Realize 提供）
+  protected static _runningInfo(): Array<{ sessionId: string; rootId: string; prompt: string; startedAt?: number }> {
+    throw new Error('Not implemented');
+  }
   static _runningTaskId(_sessionId: string): string | null { throw new Error('Not implemented'); }
   protected static _setHandle(_sessionId: string, _taskId: string, _handle: unknown): void { throw new Error('Not implemented'); }
   protected static _killHandle(_sessionId: string, _taskId: string): void { throw new Error('Not implemented'); }

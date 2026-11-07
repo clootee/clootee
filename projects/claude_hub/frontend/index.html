@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
   <link rel="stylesheet" href="dog.css?v=20261026e" />
-  <link rel="stylesheet" href="styles.css?v=20261107queue" />
+  <link rel="stylesheet" href="styles.css?v=20261107queue2" />
 </head>
 <body class="dark">
   <div id="gitInstallStatus" class="sx-note sx-pre" role="status" aria-live="polite" hidden style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(620px,90vw);max-height:35vh;overflow:auto;padding:16px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:12px;z-index:10050"></div>
@@ -1196,6 +1196,10 @@
       <div class="qw-stat"><b id="queueWaitRunning">0</b><span id="queueWaitRunningLabel"></span></div>
       <div class="qw-stat qw-stat-limit"><b id="queueWaitLimit">0</b><span id="queueWaitLimitLabel"></span></div>
     </div>
+    <div class="qw-running" id="queueWaitRunningList" hidden>
+      <div class="qw-running-title" id="queueWaitRunningTitle"></div>
+      <ul id="queueWaitRunningItems"></ul>
+    </div>
     <div class="qw-actions">
       <button type="button" class="qw-primary" id="queueWaitSettings"></button>
       <button type="button" class="qw-secondary" id="queueWaitOk"></button>
@@ -1232,7 +1236,7 @@
     </div>
   </dialog>
 
-  <script src="trans.js?v=20261107queue"></script>
+  <script src="trans.js?v=20261107queue2"></script>
   <script src="workspace.js?v=20261029sessionfix"></script>
   <script src="rootwizard.js?v=20261031quickstart"></script>
   <script src="health.js?v=20261104runtime"></script>
@@ -1254,6 +1258,6 @@
   <script src="cost-optimization.js?v=20261015a"></script>
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
-  <script src="app.js?v=20261107queue"></script>
+  <script src="app.js?v=20261107queue2"></script>
 </body>
 </html>

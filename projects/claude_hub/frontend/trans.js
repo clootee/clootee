@@ -590,9 +590,12 @@ const DICT = {
   paneTaskSummary: { en: '{n} at a time', zh: '同时 {n} 个' },
   taskConcurrencyLabel: { en: 'Tasks running at the same time', zh: '同时运行中的任务数量' },
   taskConcurrencyNote: {
-    zh: '每个正在运行的任务都会占用 CPU、内存和磁盘。达到这个数量后，新任务会自动排队，等前面的任务结束再依次开始；机器性能较弱时建议调小。',
-    en: 'Every running task uses CPU, memory and disk. Once this many tasks are running, new ones wait in a queue and start one by one as slots free up. Lower it on a slower machine.',
+    zh: '每个正在运行的任务都会占用 CPU、内存和磁盘。达到这个数量后，新任务会自动排队，等前面的任务结束再依次开始；机器性能较弱时建议调小。只统计真正在执行的任务：排队、暂停、暂定的都不算。',
+    en: 'Every running task uses CPU, memory and disk. Once this many tasks are running, new ones wait in a queue and start one by one as slots free up. Lower it on a slower machine. Only tasks that are actually executing count — queued, paused and held tasks do not.',
   },
+  taskQueueRunningTitle: { en: 'Currently running', zh: '正在执行的任务' },
+  taskQueueRunningMore: { en: '{n} more', zh: '还有 {n} 个' },
+  taskQueueRunningUntitled: { en: 'Untitled task', zh: '未命名任务' },
   taskConcurrencyInvalid: { en: 'Enter a whole number between 1 and 20', zh: '请填写 1–20 之间的整数' },
   taskQueueWaitTitle: { en: 'Task queued', zh: '任务已自动排队' },
   taskQueueWaitBody: {
