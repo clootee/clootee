@@ -42,12 +42,17 @@ export class NativeSession extends NativeSessionStruct {
     } catch {
       // 文件读不到：保持空标题、frames=0（与旧实现一致，损坏文件不阻断列表）
     }
+    return this.fromEdges(rootId, uuid, mtimeMs, headLines, tailLines, 0, this._scan(tailLines).lastUser || this._lastUserBackward(file) || this._scan(headLines).lastUser);
+  }
+
+  // List pages supply bounded asynchronously read windows; detail paths retain deep previews.
+  static fromEdges(rootId: string, uuid: string, mtimeMs: number, headLines: string[], tailLines: string[], createdAt = 0, lastUser?: string): Session {
     const head = this._scan(headLines);
     const tail = this._scan(tailLines);
     const frames = head.frames + tail.frames;
     // 尾部窗口有提问就直接用；没有则说明最近一条提问离文件尾部太远（助手长篇输出会在其之后），
     // 从末尾向前回溯找它——绝不能退回 head（那是最早的一条，预览会严重失真）。
-    const lastUser = tail.lastUser || this._lastUserBackward(file) || head.lastUser;
+    const preview = lastUser ?? tail.lastUser;
     // 来源判定：手动输入 > sdk 脚本 > 空会话(无对话) > 其它
     const source: Session['source'] = head.hasTyped || tail.hasTyped
       ? 'typed'
@@ -69,7 +74,7 @@ export class NativeSession extends NativeSessionStruct {
       tasks: [],
       messages: [],
       source,
-      lastUser,
+      lastUser: preview,
     };
   }
 
@@ -127,6 +132,10 @@ export class NativeSession extends NativeSessionStruct {
       }
     }
     return { title: title || firstUser.slice(0, 60), firstUser, lastUser, createdAt, frames, hasTyped, hasSdk };
+  }
+
+  static messagesFromLines(lines: string[], uuid: string): Message[] {
+    return this._parseMessages(lines, uuid);
   }
 
   protected static _parseMessages(lines: string[], uuid: string): Message[] {

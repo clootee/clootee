@@ -12,6 +12,7 @@ import { ErrorHandler } from '../helper/ErrorHandler';
 import { EventBus } from '../helper/EventBus';
 import { RootManager } from '../logic_realize/RootManager';
 import { CodexStoreHelper } from '../helper/CodexStoreHelper';
+import { SessionList } from '../logic_realize/SessionList';
 import { SessionManager } from '../logic_realize/SessionManager';
 import { TaskQueue } from '../logic_realize/TaskQueue';
 import { CostOptimizer } from '../logic_realize/CostOptimizer';
@@ -113,7 +114,7 @@ export class Server {
     //    列表类接口不拦，改为在返回时把加锁目录的会话脱敏（前端显示「加密」）；锁管理接口自行校验密码 ──
     app.use('/api', (req, res, next) => {
       const p = req.path;
-      if (p.startsWith('/root/lock/') || p === '/root/list' || p.startsWith('/session/list') || p === '/session/search') {
+      if (p.startsWith('/root/lock/') || p === '/root/list' || p.startsWith('/session/list') || p === '/session/page' || p === '/session/recency' || p === '/session/search') {
         next();
         return;
       }
@@ -492,6 +493,20 @@ export class Server {
     );
 
     // ── 会话 ──
+    app.get('/api/session/page', (req, res) => this._wrapAsync(res, 'session.page', async () => {
+      const keys = RootLock.keysFromCookie(req.headers.cookie);
+      const controller = new AbortController();
+      res.once('close', () => controller.abort());
+      const result = await SessionList.page({
+        mode: String(req.query.mode || 'single'), rootId: String(req.query.rootId || ''),
+        filterRootId: String(req.query.filterRootId || ''), status: String(req.query.status || 'all'),
+        q: String(req.query.q || ''), fullText: req.query.fullText === '1',
+        run: String(req.query.run || ''), finished: String(req.query.finished || '').split(',').filter(Boolean),
+        offset: Number(req.query.offset || 0), limit: Number(req.query.limit || 20), snapshot: String(req.query.snapshot || ''),
+      }, rootId => RootLock.canAccess(rootId, keys), controller.signal);
+      return { ...result, items: this._redact(req, result.items) };
+    }));
+    app.get('/api/session/recency', (_req, res) => this._wrapAsync(res, 'session.recency', () => SessionList.recency()));
     app.get('/api/session/list', (req, res) =>
       this._wrapAsync(res, 'session.list', () => CodexStoreHelper.withIndex(Settings.effectiveHomeDir(), () => this._redact(req, SessionManager.listSessions(String(req.query.rootId))))),
     );

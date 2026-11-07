@@ -45,10 +45,15 @@ export class CodexSession extends CodexSessionStruct {
     } catch {
       // 文件读不到：保持空标题、count=0（损坏文件不阻断列表）
     }
+    return this.fromEdges(rootId, uuid, mtimeMs, headLines, tailLines, createdAt, this._scan(tailLines).lastUser || this._lastUserBackward(file) || this._scan(headLines).lastUser);
+  }
+
+  // List pages supply bounded asynchronously read windows; detail paths retain deep previews.
+  static fromEdges(rootId: string, uuid: string, mtimeMs: number, headLines: string[], tailLines: string[], createdAt = 0, lastUser?: string): Session {
     const head = this._scan(headLines);
     const tail = this._scan(tailLines);
     // 同 claude：尾部窗口无提问时从末尾向前回溯，避免退回最早的提问
-    const lastUser = tail.lastUser || this._lastUserBackward(file) || head.lastUser;
+    const preview = lastUser ?? tail.lastUser;
     return {
       id: `${rootId}:${uuid}`,
       rootId,
@@ -61,7 +66,7 @@ export class CodexSession extends CodexSessionStruct {
       tasks: [],
       messages: [],
       source: head.count + tail.count > 0 ? 'typed' : 'empty',
-      lastUser,
+      lastUser: preview,
     };
   }
 
@@ -102,6 +107,10 @@ export class CodexSession extends CodexSessionStruct {
       }
     }
     return { title, lastUser, count };
+  }
+
+  static messagesFromLines(lines: string[], uuid: string): Message[] {
+    return this._parseMessages(lines, uuid);
   }
 
   protected static _parseMessages(lines: string[], uuid: string): Message[] {
