@@ -24,5 +24,9 @@ When uploading `.gz` files without that suffix, set `Content-Encoding: gzip`.
 The loader verifies SHA-256 and falls back to the local `/static/` copy if the CDN is unavailable.
 Keep old hashed files available for browser tabs opened before an update.
 
+For a TLS reverse proxy, set `CLOOTEE_LOOPBACK_ONLY=1` to keep the backend port on
+localhost even when remote access is enabled. Enable remote access in Settings and
+keep a security password configured; the proxy handles the public HTTPS connection.
+
 After building, run `node --test scripts/release/web-assets.test.cjs` from the repository root
 to check bundle integrity, HTTP compression, caching, and source/API fallback.

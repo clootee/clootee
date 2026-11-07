@@ -825,12 +825,12 @@ export class Server {
 
     // 安全：默认仅 localhost 可访问；设置里开启「允许局域网访问」后才绑定 0.0.0.0（立即生效）。
     const allowLan = Settings.get().allowLan;
-    const host = allowLan && process.env.CLOOTEE_SUPERVISED !== '1' ? '0.0.0.0' : '127.0.0.1';
+    const host = allowLan && !AppConfig.LOOPBACK_ONLY && process.env.CLOOTEE_SUPERVISED !== '1' ? '0.0.0.0' : '127.0.0.1';
     server.listen(AppConfig.PORT, host, () => {
       Logger.info(
         'Server',
         `claude-hub listening on http://localhost:${AppConfig.PORT}` +
-          (allowLan ? `（局域网可访问 0.0.0.0:${AppConfig.PORT}）` : '（仅 localhost）'),
+          (host === '0.0.0.0' ? `（局域网可访问 0.0.0.0:${AppConfig.PORT}）` : '（仅 localhost）'),
       );
       // 端口到手后才开始看护：记开机行、挂信号钩子、开心跳
       LifeGuard.install(AppConfig.PORT);
@@ -847,7 +847,7 @@ export class Server {
       const onListening = () => { server.off('error', onError); resolve(); };
       server.once('error', onError);
       server.once('listening', onListening);
-      server.listen(AppConfig.PORT, allowLan ? '0.0.0.0' : '127.0.0.1');
+      server.listen(AppConfig.PORT, allowLan && !AppConfig.LOOPBACK_ONLY ? '0.0.0.0' : '127.0.0.1');
     });
   }
 

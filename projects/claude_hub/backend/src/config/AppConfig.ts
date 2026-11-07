@@ -2,6 +2,8 @@
 export const AppConfig = {
   // HTTP / WebSocket 端口
   PORT: Number(process.env.PORT) || 8970,
+  // TLS reverse proxies can allow authenticated remote users without exposing Node's port.
+  LOOPBACK_ONLY: process.env.CLOOTEE_LOOPBACK_ONLY === '1',
 
   // 本地 claude CLI 命令名（在 PATH 中）
   CLAUDE_BIN: process.env.CLAUDE_BIN || 'claude',

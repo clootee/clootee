@@ -1,10 +1,10 @@
 {
-  "version": "3.1.39",
+  "version": "3.1.40",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-08",
   "notesI18n": {
-    "zh": "统一发布首屏按需加载、安全密码保存与验证、登录恢复指引和界面布局修复。",
-    "en": "Ship faster startup, verified password saving, login recovery guidance, and settings layout fixes across all packages."
+    "zh": "访问开关立即生效，精简安全设置保存操作，支持反向代理仅监听本机。",
+    "en": "Apply remote access changes immediately, simplify security settings, and support loopback-only reverse proxy deployments."
   }
 }
