@@ -81,7 +81,14 @@ function kill(pid) {
     assert.equal(fs.readFileSync(path.join(profile,'desktop-ports.json'),'utf8'),ports);
     assert.equal(fs.readFileSync(path.join(profile,'data/auth.json'),'utf8'),authBefore);
     assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'data/upgrade-sentinel.json'))).provider,'keep-provider-credentials');
-    kill(replacementPid);replacementPid=null;
+    kill(replacementPid);
+    // The backend can stop before Electron releases its single-instance lock.
+    // Relaunching during that gap redirects to the exiting app and creates no window.
+    await wait(()=>{
+      try { process.kill(replacementPid,0); return false; }
+      catch(error) { if(error.code==='ESRCH')return true; throw error; }
+    },20000,'Updated desktop process did not exit before reopening');
+    replacementPid=null;
     await wait(async()=>{try{await fetch(origin+'/api/auth/status',{signal:AbortSignal.timeout(300)});return false;}catch{return true;}},20000,'Updated backend did not stop');
     app=await _electron.launch({executablePath:executable,args:['--user-data-dir='+profile],timeout:1200000});
     win=await app.firstWindow();await win.waitForURL(origin+'/',{timeout:1200000});
