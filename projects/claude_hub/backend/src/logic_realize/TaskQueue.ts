@@ -52,6 +52,27 @@ export class TaskQueue extends TaskQueueStruct {
     return this._running.size;
   }
 
+  // 正在执行的任务清单：只统计「引擎进程还活着」的任务，排队/暂定/暂停的一律不算。
+  // 给排队提示用：上限是全局的，用户可能只盯着自己的项目，不列出来会以为没人占名额。
+  static _runningInfo(): Array<{ sessionId: string; rootId: string; prompt: string; startedAt?: number }> {
+    const out: Array<{ sessionId: string; rootId: string; prompt: string; startedAt?: number }> = [];
+    for (const [sessionId, state] of this._running) {
+      try {
+        const session = SessionManager.getSession(sessionId);
+        const task = session.tasks.find((t) => t.id === state.taskId) || session.tasks.find((t) => t.status === 'running');
+        out.push({
+          sessionId,
+          rootId: session.rootId,
+          prompt: String(task?.prompt || '').replace(/\s+/g, ' ').slice(0, 80),
+          startedAt: task?.startedAt,
+        });
+      } catch {
+        // 会话刚被删掉时忽略这条，不影响排队判断
+      }
+    }
+    return out;
+  }
+
   static _runningTaskId(sessionId: string): string | null {
     return this._running.get(sessionId)?.taskId ?? null;
   }

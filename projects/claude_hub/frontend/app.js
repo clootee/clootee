@@ -6415,7 +6415,7 @@ function connectWs() {
       if (e.message === 'task_queue_waiting') {
         const max = Number(e.max) || taskConcurrency();
         e.message = T('taskQueueWaitNotice').replace('{max}', max);
-        QueueWaitUi.show(max, Number(e.running) || max);
+        QueueWaitUi.show(max, Number(e.running) || max, e.runningTasks);
       }
       pushNotice(e); return;
     }
@@ -8060,7 +8060,7 @@ async function saveTaskPane() {
 
 // 并发已满 → 任务自动排队时的说明弹窗（由后端 notice 事件触发）
 const QueueWaitUi = {
-  show(max, running) {
+  show(max, running, tasks) {
     const dlg = $('queueWaitModal');
     if (!dlg) return;
     $('queueWaitTitle').textContent = T('taskQueueWaitTitle');
@@ -8072,6 +8072,31 @@ const QueueWaitUi = {
     $('queueWaitSettings').textContent = T('taskQueueGoSettings');
     $('queueWaitOk').textContent = T('taskQueueOk');
     $('queueWaitClose').setAttribute('aria-label', T('close'));
+    // 列出真正占着名额的任务（全项目范围），否则用户只盯着当前项目会以为没人跑
+    const list = $('queueWaitRunningList');
+    const ul = $('queueWaitRunningItems');
+    const arr = Array.isArray(tasks) ? tasks : [];
+    ul.textContent = '';
+    list.hidden = arr.length === 0;
+    if (arr.length) {
+      $('queueWaitRunningTitle').textContent = T('taskQueueRunningTitle');
+      arr.slice(0, 4).forEach((t) => {
+        const root = State.roots.find((r) => r.id === t.rootId);
+        const li = document.createElement('li');
+        const b = document.createElement('b');
+        b.textContent = root ? `${root.name} · ` : '';
+        const s = document.createElement('span');
+        s.textContent = String(t.prompt || '').trim() || T('taskQueueRunningUntitled');
+        li.append(b, s);
+        ul.appendChild(li);
+      });
+      if (arr.length > 4) {
+        const li = document.createElement('li');
+        li.className = 'qw-running-more';
+        li.textContent = T('taskQueueRunningMore').replace('{n}', arr.length - 4);
+        ul.appendChild(li);
+      }
+    }
     if (!dlg.open) dlg.showModal();
   },
   close() {
