@@ -41,6 +41,8 @@
     "projects/claude_hub/frontend/assist/docs.md",
     "scripts/node-env.bat",
     "scripts/node-env.sh",
+    "scripts/build-web.cjs",
+    "scripts/release/web-assets.test.cjs",
     "scripts/restart-update.js",
     "scripts/restart-update.ps1",
     "scripts/start-unix.sh",

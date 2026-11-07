@@ -1,3 +1,15 @@
+// Optional tools never block authentication or the first workspace view.
+async function ensureOptionalAsset(group, element) {
+  try {
+    if (window.ClooteeAssets) await window.ClooteeAssets.load(group);
+    return true;
+  } catch (error) {
+    if (!element) throw error;
+    element.textContent = LANG === 'en' ? 'Could not load this tool. Close and reopen to retry.' : '工具加载失败，请关闭后重新打开重试。';
+    return false;
+  }
+}
+
 // 前端逻辑：API 调用、WebSocket 实时更新、渲染。无业务逻辑下沉，仅渲染与转发
 const State = {
   roots: [],
@@ -5505,10 +5517,11 @@ function renderSessionStats(s) {
   setTimeout(() => { _renderCharChart(s, 1); _renderPhaseChart(rows); }, 0);
 }
 
-function _renderCharChart(stats, intervalMinutes) {
+async function _renderCharChart(stats, intervalMinutes) {
   const el = $('statsCharChart');
   if (Stats.charChart) { try { Stats.charChart.dispose(); } catch { /* ignore */ } Stats.charChart = null; }
-  if (!el || !el.isConnected || typeof echarts === 'undefined') return;
+  if (!el || !el.isConnected) return;
+  if (!await ensureOptionalAsset('charts', el) || !el.isConnected || typeof echarts === 'undefined') return;
   const source = Array.isArray(stats.charTimeline) ? stats.charTimeline : [];
   const size = Math.max(1, intervalMinutes) * 60000;
   const buckets = new Map();
@@ -5542,9 +5555,10 @@ function _renderCharChart(stats, intervalMinutes) {
 }
 
 // 横向条形图：每个阶段一根条（秒）。跟随明暗主题取色。
-function _renderPhaseChart(rows) {
+async function _renderPhaseChart(rows) {
   const el = $('statsPhaseChart');
-  if (!el || !el.isConnected || typeof echarts === 'undefined' || !rows.length) return;
+  if (!el || !el.isConnected || !rows.length) return;
+  if (!await ensureOptionalAsset('charts', el) || !el.isConnected || typeof echarts === 'undefined') return;
   const cs = getComputedStyle(document.body);
   const cText = (cs.getPropertyValue('--text') || '#cbd5e1').trim();
   const cBorder = (cs.getPropertyValue('--border') || '#475569').trim();
@@ -6701,7 +6715,7 @@ function chartCardEl(chart) {
   const cols = chart.rows.length ? Object.keys(chart.rows[0]) : [];
   const isChart = chart.type === 'bar' || chart.type === 'line' || chart.type === 'pie';
 
-  if (!isChart || typeof echarts === 'undefined') {
+  if (!isChart || (typeof echarts === 'undefined' && !window.ClooteeAssets)) {
     // table（或 echarts 不可用时兜底成表）
     if (chart.title) {
       const tt = document.createElement('div');
@@ -6738,8 +6752,9 @@ function chartCardEl(chart) {
 }
 
 const _CHART_PALETTE = ['#2563eb', '#16a34a', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
-function renderChart(el, chart, xKey, yKey) {
-  if (!el.isConnected || typeof echarts === 'undefined') return;
+async function renderChart(el, chart, xKey, yKey) {
+  if (!el.isConnected) return;
+  if (!await ensureOptionalAsset('charts', el) || !el.isConnected || typeof echarts === 'undefined') return;
   const ch = echarts.init(el);
   const cats = chart.rows.map((r) => String(r[xKey] == null ? '' : r[xKey]));
   const vals = chart.rows.map((r) => Number(r[yKey]) || 0);
@@ -7155,6 +7170,7 @@ async function openEditor(f) {
   try {
     data = await api('/api/fm/read?rootId=' + encodeURIComponent(State.rootId) +
       '&rel=' + encodeURIComponent(f.name));
+    await ensureOptionalAsset('editor');
   } catch (e) {
     alert(T('loadFail') + ': ' + e.message);
     return;
@@ -7275,6 +7291,7 @@ async function openFilePreview(f, urlFn) {
   body.innerHTML = `<div class="fp-msg">${T('loading')}</div>`;
   try {
     if (kind === 'grid') {
+      await ensureOptionalAsset('sheets');
       const buf = await (await fetch(url)).arrayBuffer();
       const wb = XLSX.read(buf, { type: 'array' });
       const sheets = wb.SheetNames.map((sn) => ({ name: sn, html: XLSX.utils.sheet_to_html(wb.Sheets[sn], { editable: false }) }));
@@ -7291,6 +7308,7 @@ async function openFilePreview(f, urlFn) {
       const raw = await (await fetch(url)).text();
       showCopy(raw);
       const mode = extToCmMode(ext);
+      if (mode) await ensureOptionalAsset('editor');
       body.innerHTML = '';
       if (mode && window.CodeMirror) {
         // 代码文件：只读 CodeMirror 高亮预览
@@ -7874,7 +7892,7 @@ function renderLanGuide() {
 }
 
 // 展开/收起某个局域网地址的二维码。首次展开时才用本地 qrcode 库生成（离线可用，无需联网）。
-function toggleLanQr(url, btn, panel) {
+async function toggleLanQr(url, btn, panel) {
   const open = panel.hidden; // 当前隐藏 → 本次要展开
   panel.hidden = !open;
   btn.classList.toggle('on', open);
@@ -7883,6 +7901,7 @@ function toggleLanQr(url, btn, panel) {
   const box = document.createElement('div');
   box.className = 'lan-qr-img';
   try {
+    await ensureOptionalAsset('qr');
     if (typeof qrcode !== 'function') throw new Error('qr lib missing');
     const qr = qrcode(0, 'M'); // typeNumber=0 自动，纠错级别 M
     qr.addData(url);
@@ -9675,4 +9694,4 @@ async function main() {
   }
 
 }
-main();
+window.ClooteeBootReady = main();
