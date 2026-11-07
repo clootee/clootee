@@ -7559,6 +7559,9 @@ function bind() {
   $('mdlClaudeListBtn').addEventListener('click', () => detectAvailableModels('claude'));
   $('mdlCodexListBtn').addEventListener('click', () => detectAvailableModels('codex'));
   $('pwChangeBtn').addEventListener('click', changePassword);
+  for (const id of ['pwOld', 'pwNew', 'pwConfirm', 'lanPwNew', 'lanPwNew2']) {
+    $(id).addEventListener('input', () => setPaneNotice(null));
+  }
   $('searchToggleBtn').addEventListener('click', toggleSearch);
   $('favoritesToggleBtn').addEventListener('click', toggleListModeMenu);
   document.querySelectorAll('.lmm-item').forEach((b) =>
@@ -8215,6 +8218,7 @@ function renderPaneStatus() {
     return;
   }
   if (CurrentPane === 'engine' && (EngineDirty.claude || EngineDirty.codex || PromptCacheUi.dirty)) return show(T('engDirty'), 'warn');
+  if (CurrentPane === 'network' && (hasSecurityPasswordDraft() || hasSecurityResetDraft())) return show(T('engDirty'), 'warn');
   show('', '');
 }
 
@@ -8441,6 +8445,12 @@ async function saveEnginePane() {
   return true;
 }
 
+function hasSecurityPasswordDraft() {
+  return ['pwOld', 'pwNew', 'pwConfirm'].some(id => $(id).value !== '');
+}
+function hasSecurityResetDraft() {
+  return !$('lanPwReset').hidden && ['lanPwNew', 'lanPwNew2'].some(id => $(id).value !== '');
+}
 function fillNetworkPane() {
   $('allowLanChk').checked = !!State.settings.allowLan;
   renderLanGuide();
@@ -8451,10 +8461,21 @@ function fillNetworkPane() {
   $('pwNew').value = '';
 }
 async function saveNetworkPane() {
+  // The section Save/back/close actions must include its password fields.
+  if (hasSecurityPasswordDraft() && hasSecurityResetDraft()) {
+    setPaneNotice('securityPasswordOneForm', null, 'err', 0);
+    return false;
+  }
+  if (hasSecurityPasswordDraft() && !await changePassword()) return false;
+  if (hasSecurityResetDraft() && !await resetLanPassword()) return false;
   const allowLan = $('allowLanChk').checked;
   const wasLan = State.settings.allowLan;
-  await patchSettings({ allowLan });
+  if (!await patchSettings({ allowLan })) {
+    setPaneNotice('engSaveFailShort', null, 'err', 0);
+    return false;
+  }
   if (wasLan !== State.settings.allowLan) alert(T('lanNeedRestart'));
+  return true;
 }
 
 function fillPromptPane() {
@@ -9509,24 +9530,50 @@ async function updateEngine(engine) {
 }
 
 // ── 修改访问密码 ──
-async function changePassword() {
+let SecuritySavePending = null;
+function changePassword() {
+  return saveSecurityPassword(persistSecurityPassword);
+}
+function saveSecurityPassword(action) {
+  if (SecuritySavePending) return SecuritySavePending;
+  $('pwChangeBtn').disabled = true;
+  $('lanPwResetBtn').disabled = true;
+  SecuritySavePending = action().finally(() => {
+    SecuritySavePending = null;
+    $('pwChangeBtn').disabled = false;
+    $('lanPwResetBtn').disabled = false;
+  });
+  return SecuritySavePending;
+}
+async function persistSecurityPassword() {
   const oldPassword = $('pwOld').value;
   const newPassword = $('pwNew').value;
   const status = $('pwStatus');
   if (newPassword.length < 4 || newPassword !== $('pwConfirm').value) {
-    status.className = 'sx-note err'; status.textContent = T('securityPasswordMismatch'); return;
+    status.className = 'sx-note err'; status.textContent = T('securityPasswordMismatch');
+    setPaneNotice('securityPasswordMismatch', null, 'err', 0);
+    return false;
   }
   try {
     const data = SecurityState.passwordEnabled
       ? await api('/api/auth/change', { oldPassword, newPassword })
       : await api('/api/auth/setup', { password: newPassword });
     TOKEN = data.token; localStorage.setItem('token', TOKEN);
+    // Verify the persisted password before reporting success or allowing a lock.
+    const verified = await api('/api/auth/login', { password: newPassword });
+    if (verified.token !== TOKEN) throw new Error(T('securityPasswordVerifyFailed'));
     await refreshSecurityState();
     hideLogin();
     $('pwOld').value = ''; $('pwNew').value = ''; $('pwConfirm').value = '';
     status.className = 'sx-note ok'; status.textContent = T('securitySaved');
+    setPaneNotice('securitySaved', null, 'ok', 0);
     if (hubWs) { hubWs.close(); hubWs = null; } connectWs();
-  } catch (error) { status.className = 'sx-note err'; status.textContent = error.message; }
+    return true;
+  } catch (error) {
+    status.className = 'sx-note err'; status.textContent = error.message;
+    setPaneNotice('securityPasswordSaveFailed', { error: error.message }, 'err', 0);
+    return false;
+  }
 }
 async function disableSecurityPassword() {
   if (!confirm(T('securityDisableConfirm'))) return;
@@ -9554,22 +9601,35 @@ function toggleLanPwReset(e) {
   }
 }
 // 重置密码（无需旧密码；已在设置面板内即持有有效 token）
-async function resetLanPassword() {
+function resetLanPassword() {
+  return saveSecurityPassword(persistLanPasswordReset);
+}
+async function persistLanPasswordReset() {
   const st = $('lanPwResetStatus');
   const p1 = $('lanPwNew').value;
   const p2 = $('lanPwNew2').value;
-  if (!p1 || p1.length < 4) { st.className = 'sx-note err'; st.textContent = '新密码至少 4 位。'; return; }
-  if (p1 !== p2) { st.className = 'sx-note err'; st.textContent = '两次输入的新密码不一致。'; return; }
+  if (!p1 || p1.length < 4 || p1 !== p2) {
+    st.className = 'sx-note err'; st.textContent = T('securityPasswordMismatch');
+    setPaneNotice('securityPasswordMismatch', null, 'err', 0);
+    return false;
+  }
   try {
     const data = await api('/api/auth/reset', { newPassword: p1 });
     TOKEN = data.token;
     localStorage.setItem('token', TOKEN);
+    const verified = await api('/api/auth/login', { password: p1 });
+    if (verified.token !== TOKEN) throw new Error(T('securityPasswordVerifyFailed'));
     $('lanPwNew').value = ''; $('lanPwNew2').value = '';
     st.className = 'sx-note ok';
-    st.textContent = '✓ 密码已重置。请把新密码告诉需要访问的人。';
+    st.textContent = T('securitySaved');
+    setPaneNotice('securitySaved', null, 'ok', 0);
+    if (hubWs) { hubWs.close(); hubWs = null; } connectWs();
+    return true;
   } catch (e) {
     st.className = 'sx-note err';
-    st.textContent = '重置失败：' + e.message;
+    st.textContent = e.message;
+    setPaneNotice('securityPasswordSaveFailed', { error: e.message }, 'err', 0);
+    return false;
   }
 }
 

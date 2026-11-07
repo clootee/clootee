@@ -1,10 +1,10 @@
 {
-  "version": "3.1.37",
+  "version": "3.1.38",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-08",
   "notesI18n": {
-    "zh": "优化远程工作台首屏加载：按需加载工具、合并静态资源和缓存加速。",
-    "en": "Improve remote workspace startup with on-demand tools, bundled assets, and caching."
+    "zh": "修复安全设置底部保存未保存密码的问题，增加保存后校验及错误提示。",
+    "en": "Fix section Save ignoring security passwords; verify saved passwords and keep failed edits visible."
   }
 }
