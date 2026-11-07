@@ -88,6 +88,13 @@ function tscEntry() {
  */
 function build(opts) {
   const force = !!(opts && opts.force);
+  try {
+    const root = path.resolve(BACKEND, '../../..');
+    const { buildWeb } = require(path.join(root, 'scripts/build-web.cjs'));
+    buildWeb(root, path.join(BACKEND, '../frontend/dist'));
+  } catch (error) {
+    return { ok: false, error: `Frontend build failed: ${error.message}` };
+  }
   if (!force && isFresh()) return { ok: true, skipped: true, assets: 0 };
 
   const tsc = tscEntry();

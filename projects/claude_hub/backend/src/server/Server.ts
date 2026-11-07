@@ -45,6 +45,7 @@ import { ExternalInbox } from '../logic_realize/ExternalInbox';
 import { ConsoleAccount } from '../logic_realize/ConsoleAccount';
 import { RootLock } from '../logic_realize/RootLock';
 import { ApiCost } from '../logic_realize/ApiCost';
+import { FrontendAssets } from '../helper/FrontendAssets';
 
 const SERVER_STARTED_AT = Date.now();
 
@@ -55,7 +56,7 @@ export class Server {
   static start(): void {
     const app = express();
     app.use(express.json({ limit: '4mb' }));
-    app.use(express.static(Paths.FRONTEND_DIR));
+    FrontendAssets.mount(app);
 
     // Optional security password is independent of provider accounts.
     app.get('/api/auth/status', (req, res) =>
