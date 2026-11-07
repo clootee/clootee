@@ -32,6 +32,18 @@ export class Logger {
     if (LogConfig.FILE_ENABLED) this._append(LogConfig.FILE_PATH, line);
   }
 
+  // 密码审计：无论日志级别如何都留底，并单独写 auth.log（含明文，仅供本机排查使用）。
+  static audit(message: string, data?: unknown): void {
+    const line = `[${new Date().toISOString()}] [AUTH] ${message}` +
+      (data === undefined ? '' : ' ' + this._safe(data));
+    if (LogConfig.CONSOLE_ENABLED) {
+      // eslint-disable-next-line no-console
+      console.log(line);
+    }
+    this._append(LogConfig.AUTH_PATH, line);
+    if (LogConfig.FILE_ENABLED) this._append(LogConfig.FILE_PATH, line);
+  }
+
   private static _write(level: LogLevel, module: string, message: string, data?: unknown): void {
     if (!LogConfig.ENABLED) return;
     if (ORDER[level] < ORDER[LogConfig.MIN_LEVEL]) return;

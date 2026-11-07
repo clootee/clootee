@@ -67,7 +67,7 @@ export class Server {
     app.post('/api/auth/setup', (req, res) =>
       this._wrap(res, 'auth.setup', () => {
         if (!this._isLocalRequest(req)) throw new Error('Set a security password on the computer running Clootee');
-        return { token: AuthManager.setup(req.body.password) };
+        return { token: AuthManager.setup(req.body.password, this._client(req)) };
       }),
     );
     app.post('/api/auth/quickstart', (req, res) =>
@@ -84,7 +84,7 @@ export class Server {
       }),
     );
     app.post('/api/auth/login', (req, res) =>
-      this._wrap(res, 'auth.login', () => ({ token: AuthManager.login(req.body.password) })),
+      this._wrap(res, 'auth.login', () => ({ token: AuthManager.login(req.body.password, this._client(req)) })),
     );
 
     // ── 外部消息注入（供第三方系统接入，如 bug_tracker 回复转发）：
@@ -136,22 +136,23 @@ export class Server {
 
     // 客户端用持久 token 探测登录态
     app.get('/api/auth/check', (_req, res) => this._ok(res, { ok: true, version: PackageInfo.version(), instance: `${process.pid}:${SERVER_STARTED_AT}` }));
-    // 修改密码（需先验证旧密码）
+    // 修改密码（必须验证旧密码）
     app.post('/api/auth/change', (req, res) =>
       this._wrap(res, 'auth.change', () => ({
-        token: AuthManager.changePassword(req.body.oldPassword, req.body.newPassword),
+        token: AuthManager.changePassword(req.body.oldPassword, req.body.newPassword, this._client(req)),
       })),
     );
-    // 重置密码（忘记旧密码）：已通过鉴权中间件即视为本机授权用户，无需旧密码
+    // 重置密码：与修改密码一样必须先给出正确的旧密码——
+    // 忘记密码时请在本机命令行执行 passwd.bat / ./passwd.sh（见 authctl），不要留无门槛重置接口。
     app.post('/api/auth/reset', (req, res) =>
       this._wrap(res, 'auth.reset', () => ({
-        token: AuthManager.resetPassword(req.body.newPassword),
+        token: AuthManager.resetPassword(req.body.oldPassword, req.body.newPassword, this._client(req)),
       })),
     );
 
     app.post('/api/auth/disable', (req, res) =>
       this._wrap(res, 'auth.disable', () => {
-        AuthManager.disable(req.body.password);
+        AuthManager.disable(req.body.password, this._client(req));
         return { passwordEnabled: false };
       }),
     );
@@ -385,17 +386,17 @@ export class Server {
     // 目录私有密码：设置/修改（已加锁需旧密码）、关闭、解锁
     app.post('/api/root/lock/set', (req, res) =>
       this._wrap(res, 'root.lockSet', () =>
-        RootLock.setPassword(String(req.body.id || ''), String(req.body.password || ''), req.body.oldPassword),
+        RootLock.setPassword(String(req.body.id || ''), String(req.body.password || ''), req.body.oldPassword, this._client(req)),
       ),
     );
     app.post('/api/root/lock/clear', (req, res) =>
       this._wrap(res, 'root.lockClear', () =>
-        RootLock.clear(String(req.body.id || ''), String(req.body.password || '')),
+        RootLock.clear(String(req.body.id || ''), String(req.body.password || ''), this._client(req)),
       ),
     );
     app.post('/api/root/lock/unlock', (req, res) =>
       this._wrap(res, 'root.lockUnlock', () =>
-        RootLock.unlock(String(req.body.id || ''), String(req.body.password || '')),
+        RootLock.unlock(String(req.body.id || ''), String(req.body.password || ''), this._client(req)),
       ),
     );
     app.post('/api/root/add', (req, res) =>
@@ -875,6 +876,14 @@ export class Server {
 
   private static _canAccess(req: Request, token: string | undefined): boolean {
     return AuthManager.passwordEnabled() ? AuthManager.verify(token) : this._isLocalRequest(req);
+  }
+
+  // 审计日志里的客户端标识：真实来源 IP（nginx 会写 X-Forwarded-For）+ 浏览器 UA 前 120 字。
+  // 多窗口/多设备同时改密码时，靠这个区分是哪一边提交的。
+  private static _client(req: Request): string {
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    const ua = String(req.headers['user-agent'] || '').slice(0, 120);
+    return `${ip} ${ua}`.trim();
   }
 
   private static _ok(res: Response, data: unknown): void {

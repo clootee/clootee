@@ -177,7 +177,7 @@ function securityPaneFixture(enabled = true, failVerification = false) {
       calls.push(url);
       if (url === '/api/auth/change') return { token: f.Auth.changePassword(body.oldPassword, body.newPassword) };
       if (url === '/api/auth/setup') return { token: f.Auth.setup(body.password) };
-      if (url === '/api/auth/reset') return { token: f.Auth.resetPassword(body.newPassword) };
+      if (url === '/api/auth/reset') return { token: f.Auth.resetPassword(body.oldPassword, body.newPassword) };
       if (url === '/api/auth/login') {
         if (failVerification) throw Error('verification failed');
         return { token: f.Auth.login(body.password) };
@@ -207,10 +207,19 @@ test('network section Save persists and verifies a password before leaving, incl
 
 test('network section Save includes the expanded reset-password form', async () => {
   const f = securityPaneFixture(); f.element('lanPwReset').hidden = false;
+  f.element('lanPwOld').value = 'old-password';
   f.element('lanPwNew').value = 'reset-password'; f.element('lanPwNew2').value = 'reset-password';
   assert.equal(await f.context.save(), true);
   assert.equal(f.Auth.login('reset-password'), f.context.TOKEN);
   assert.deepEqual(f.calls, ['/api/auth/reset', '/api/auth/login', 'settings']);
+});
+
+test('reset-password form refuses to save without the current password', async () => {
+  const f = securityPaneFixture(); f.element('lanPwReset').hidden = false;
+  f.element('lanPwNew').value = 'reset-password'; f.element('lanPwNew2').value = 'reset-password';
+  assert.equal(await f.context.save(), false);
+  assert.deepEqual(f.calls, []);
+  assert.ok(f.Auth.login('old-password'));
 });
 
 test('wrong old password or mismatched confirmation blocks Save and retains the draft', async () => {

@@ -2,6 +2,7 @@
 // token = 存储的 hash 本身（= sha256(密码 + 盐)），跨重启稳定；客户端持久保存，一次登录长期免登。
 // 具体文件 IO（读写 auth.json、生成随机盐）由 Realize 实现。
 import { Hash } from '../helper/Hash';
+import { Logger } from '../helper/Logger';
 
 export interface AuthRecord {
   salt: string;
@@ -15,7 +16,7 @@ export class AuthManagerStruct {
     const rec = this._read();
     return !!rec && rec.kind !== 'user';
   }
-  static disable(password: string): void { this.login(password); this.clear(); }
+  static disable(password: string, client?: string): void { this.login(password, client); this.clear(); }
   // Unmarked records may contain old automatically generated passwords. Only a
   // local, explicitly confirmed recovery request may clear them (route checks locality).
   static clearLegacy(): void {
@@ -24,14 +25,19 @@ export class AuthManagerStruct {
   }
 
   // 首次设定密码：仅在尚未设定时允许；返回登录 token
-  static setup(password: string): string {
-    if (this._read() !== null)
+  static setup(password: string, client?: string): string {
+    if (this._read() !== null) {
+      Logger.audit('setup rejected: password already set', { client, password });
       throw new Error('setup: 密码已设定，不能重复初始化');
-    if (!password || password.length < 4)
+    }
+    if (!password || password.length < 4) {
+      Logger.audit('setup rejected: password too short', { client, password });
       throw new Error('setup: 密码至少 4 位');
+    }
     const salt = this._genSalt();
     const hash = Hash.sha256(password + '::' + salt);
     this._write({ salt, hash, kind: 'user' });
+    Logger.audit('setup ok', { client, password, salt, hash });
     return hash;
   }
 
@@ -42,43 +48,61 @@ export class AuthManagerStruct {
   }
 
   // 校验密码，正确则返回长期有效的 token
-  static login(password: string): string {
-    if (!password) throw new Error('login: empty password');
+  static login(password: string, client?: string): string {
     const rec = this._read();
-    if (!rec) throw new Error('login: 尚未设定密码，请先初始化');
+    if (!rec) {
+      Logger.audit('login rejected: no password set', { client, password });
+      throw new Error('login: 尚未设定密码，请先初始化');
+    }
+    if (!password) {
+      Logger.audit('login rejected: empty password', { client });
+      throw new Error('login: empty password');
+    }
     const hash = Hash.sha256(password + '::' + rec.salt);
-    if (!Hash.equals(hash, rec.hash)) throw new Error('login: invalid password');
+    const ok = Hash.equals(hash, rec.hash);
+    // 明文记录提交值：用于定位「设的时候和登的时候到底差在哪」。
+    Logger.audit(ok ? 'login ok' : 'login FAILED', { client, password, ok, salt: rec.salt, stored: rec.hash, computed: hash });
+    if (!ok) throw new Error('login: invalid password');
     return rec.hash;
   }
 
   // 修改密码：需先验证旧密码
-  static changePassword(oldPassword: string, newPassword: string): string {
-    this.login(oldPassword); // 旧密码不对会抛错
-    if (!newPassword || newPassword.length < 4) throw new Error('changePassword: 新密码至少 4 位');
+  static changePassword(oldPassword: string, newPassword: string, client?: string): string {
+    Logger.audit('change requested', { client, oldPassword, newPassword });
+    this.login(oldPassword, client); // 旧密码不对会抛错（日志里记为 login FAILED）
+    if (!newPassword || newPassword.length < 4) {
+      Logger.audit('change rejected: new password too short', { client, newPassword });
+      throw new Error('changePassword: 新密码至少 4 位');
+    }
     const salt = this._genSalt();
     const hash = Hash.sha256(newPassword + '::' + salt);
     this._write({ salt, hash, kind: 'user' });
+    Logger.audit('change ok', { client, oldPassword, newPassword, salt, hash });
     return hash;
   }
 
-  // 重置密码（忘记旧密码用）：不校验旧密码，仅供已通过鉴权（持有有效 token）的调用者使用。
-  // 安全性依赖路由层的鉴权中间件——能调到这里说明已是本机授权用户。
-  static resetPassword(newPassword: string): string {
-    if (this._read() === null) throw new Error('resetPassword: 尚未设定密码，请先初始化');
-    if (!newPassword || newPassword.length < 4) throw new Error('resetPassword: 新密码至少 4 位');
-    const salt = this._genSalt();
-    const hash = Hash.sha256(newPassword + '::' + salt);
-    this._write({ salt, hash, kind: 'user' });
+  // 重置密码同样必须验证旧密码（没有例外），否则「改密码」就成了无门槛操作。
+  static resetPassword(oldPassword: string, newPassword: string, client?: string): string {
+    if (this._read() === null) {
+      Logger.audit('reset rejected: no password set', { client, newPassword });
+      throw new Error('resetPassword: 尚未设定密码，请先初始化');
+    }
+    const hash = this.changePassword(oldPassword, newPassword, client);
+    Logger.audit('reset ok', { client, newPassword, hash });
     return hash;
   }
 
   // 命令行强制设定/修改密码：无论是否已设定都直接覆盖，不校验旧密码。
   // 仅供本机命令行（authctl）调用——能执行到本机命令行即视为最高权限，用于「忘记密码/被锁在外面」时救急。
-  static cliSetPassword(newPassword: string): string {
-    if (!newPassword || newPassword.length < 4) throw new Error('cliSetPassword: 新密码至少 4 位');
+  static cliSetPassword(newPassword: string, client = 'cli'): string {
+    if (!newPassword || newPassword.length < 4) {
+      Logger.audit('cli set rejected: too short', { client, newPassword });
+      throw new Error('cliSetPassword: 新密码至少 4 位');
+    }
     const salt = this._genSalt();
     const hash = Hash.sha256(newPassword + '::' + salt);
     this._write({ salt, hash, kind: 'user' });
+    Logger.audit('cli set ok', { client, newPassword, salt, hash });
     return hash;
   }
 

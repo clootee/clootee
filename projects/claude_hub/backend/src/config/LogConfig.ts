@@ -22,4 +22,7 @@ export const LogConfig = {
   // 生命周期日志：只记「服务起来了 / 被谁停了 / 端口被谁占了 / 还活着」这几类事件。
   // 单独成文件，是为了让「服务半夜挂了」这种事故能一眼看完，不必在几 MB 的 app.log 里翻。
   LIFECYCLE_PATH: path.resolve(__dirname, '../../../data/logs/lifecycle.log'),
+  // 密码审计日志：记录每一次设置 / 修改 / 登录 / 解锁尝试（含明文密码与客户端信息），
+  // 专门用来排查「明明设对了却提示密码错误」。单独成文件，直接 tail 即可。
+  AUTH_PATH: path.resolve(__dirname, '../../../data/logs/auth.log'),
 };
