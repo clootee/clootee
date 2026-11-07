@@ -4,6 +4,7 @@
 import { randomBytes } from 'crypto';
 import { JsonStore } from '../helper/JsonStore';
 import { Hash } from '../helper/Hash';
+import { Logger } from '../helper/Logger';
 import { Paths } from '../paths';
 
 interface LockRec {
@@ -45,35 +46,50 @@ export class RootLock {
   }
 
   // 设置 / 修改密码：已加锁时必须给出旧密码。返回新的解锁凭据
-  static setPassword(rootId: string, password: string, oldPassword?: string): { token: string } {
+  static setPassword(rootId: string, password: string, oldPassword?: string, client?: string): { token: string } {
     if (!rootId) throw new Error('setPassword: invalid rootId');
-    if (!password || password.length < 4) throw new Error('密码至少 4 位');
+    if (!password || password.length < 4) {
+      Logger.audit('root lock set rejected: too short', { client, rootId, password });
+      throw new Error('密码至少 4 位');
+    }
     const all = { ...this._all() };
     const cur = all[rootId];
-    if (cur && !this._check(cur, String(oldPassword || ''))) throw new Error('旧密码不正确');
+    if (cur && !this._check(cur, String(oldPassword || ''))) {
+      Logger.audit('root lock set FAILED: wrong old password', { client, rootId, password, oldPassword });
+      throw new Error('旧密码不正确');
+    }
     const salt = randomBytes(16).toString('hex');
     const rec = { salt, hash: Hash.sha256(`${salt}:${password}`) };
     all[rootId] = rec;
     this._save(all);
+    Logger.audit('root lock set ok', { client, rootId, password, oldPassword, salt, hash: rec.hash });
     return { token: this._token(rec) };
   }
 
   // 关闭私有：需要当前密码
-  static clear(rootId: string, password: string): { id: string } {
+  static clear(rootId: string, password: string, client?: string): { id: string } {
     const all = { ...this._all() };
     const cur = all[rootId];
     if (!cur) return { id: rootId };
-    if (!this._check(cur, String(password || ''))) throw new Error('密码不正确');
+    if (!this._check(cur, String(password || ''))) {
+      Logger.audit('root lock clear FAILED: wrong password', { client, rootId, password });
+      throw new Error('密码不正确');
+    }
     delete all[rootId];
     this._save(all);
+    Logger.audit('root lock clear ok', { client, rootId });
     return { id: rootId };
   }
 
   // 输入密码解锁：返回凭据，由浏览器自己保存
-  static unlock(rootId: string, password: string): { token: string } {
+  static unlock(rootId: string, password: string, client?: string): { token: string } {
     const cur = this._all()[rootId];
     if (!cur) throw new Error('该目录未设置私有密码');
-    if (!this._check(cur, String(password || ''))) throw new Error('密码不正确');
+    if (!this._check(cur, String(password || ''))) {
+      Logger.audit('root lock unlock FAILED: wrong password', { client, rootId, password });
+      throw new Error('密码不正确');
+    }
+    Logger.audit('root lock unlock ok', { client, rootId });
     return { token: this._token(cur) };
   }
 

@@ -7559,7 +7559,7 @@ function bind() {
   $('mdlClaudeListBtn').addEventListener('click', () => detectAvailableModels('claude'));
   $('mdlCodexListBtn').addEventListener('click', () => detectAvailableModels('codex'));
   $('pwChangeBtn').addEventListener('click', changePassword);
-  for (const id of ['pwOld', 'pwNew', 'pwConfirm', 'lanPwNew', 'lanPwNew2']) {
+  for (const id of ['pwOld', 'pwNew', 'pwConfirm', 'lanPwOld', 'lanPwNew', 'lanPwNew2']) {
     $(id).addEventListener('input', () => setPaneNotice(null));
   }
   $('searchToggleBtn').addEventListener('click', toggleSearch);
@@ -8449,7 +8449,7 @@ function hasSecurityPasswordDraft() {
   return ['pwOld', 'pwNew', 'pwConfirm'].some(id => $(id).value !== '');
 }
 function hasSecurityResetDraft() {
-  return !$('lanPwReset').hidden && ['lanPwNew', 'lanPwNew2'].some(id => $(id).value !== '');
+  return !$('lanPwReset').hidden && ['lanPwOld', 'lanPwNew', 'lanPwNew2'].some(id => $(id).value !== '');
 }
 function fillNetworkPane() {
   $('allowLanChk').checked = !!State.settings.allowLan;
@@ -9554,8 +9554,16 @@ async function persistSecurityPassword() {
     setPaneNotice('securityPasswordMismatch', null, 'err', 0);
     return false;
   }
+  // 只要当前已有密码（或用户填了旧密码），就必须走 change 并让后端校验旧密码；
+  // 不依赖可能过期的 SecurityState，避免误走 setup 或无校验路径。
+  const changing = SecurityState.passwordEnabled || !!oldPassword;
+  if (changing && !oldPassword) {
+    status.className = 'sx-note err'; status.textContent = T('securityPasswordOldRequired');
+    setPaneNotice('securityPasswordOldRequired', null, 'err', 0);
+    return false;
+  }
   try {
-    const data = SecurityState.passwordEnabled
+    const data = changing
       ? await api('/api/auth/change', { oldPassword, newPassword })
       : await api('/api/auth/setup', { password: newPassword });
     TOKEN = data.token; localStorage.setItem('token', TOKEN);
@@ -9595,31 +9603,38 @@ function toggleLanPwReset(e) {
   box.hidden = !box.hidden;
   if (!box.hidden) {
     $('lanPwResetStatus').textContent = '';
+    $('lanPwOld').value = '';
     $('lanPwNew').value = '';
     $('lanPwNew2').value = '';
-    $('lanPwNew').focus();
+    $('lanPwOld').focus();
   }
 }
-// 重置密码（无需旧密码；已在设置面板内即持有有效 token）
+// 重置密码同样必须先验证当前密码（后端 /api/auth/reset 会校验）
 function resetLanPassword() {
   return saveSecurityPassword(persistLanPasswordReset);
 }
 async function persistLanPasswordReset() {
   const st = $('lanPwResetStatus');
+  const oldPw = $('lanPwOld').value;
   const p1 = $('lanPwNew').value;
   const p2 = $('lanPwNew2').value;
+  if (!oldPw) {
+    st.className = 'sx-note err'; st.textContent = T('securityPasswordOldRequired');
+    setPaneNotice('securityPasswordOldRequired', null, 'err', 0);
+    return false;
+  }
   if (!p1 || p1.length < 4 || p1 !== p2) {
     st.className = 'sx-note err'; st.textContent = T('securityPasswordMismatch');
     setPaneNotice('securityPasswordMismatch', null, 'err', 0);
     return false;
   }
   try {
-    const data = await api('/api/auth/reset', { newPassword: p1 });
+    const data = await api('/api/auth/reset', { oldPassword: oldPw, newPassword: p1 });
     TOKEN = data.token;
     localStorage.setItem('token', TOKEN);
     const verified = await api('/api/auth/login', { password: p1 });
     if (verified.token !== TOKEN) throw new Error(T('securityPasswordVerifyFailed'));
-    $('lanPwNew').value = ''; $('lanPwNew2').value = '';
+    $('lanPwOld').value = ''; $('lanPwNew').value = ''; $('lanPwNew2').value = '';
     st.className = 'sx-note ok';
     st.textContent = T('securitySaved');
     setPaneNotice('securitySaved', null, 'ok', 0);
