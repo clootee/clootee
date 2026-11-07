@@ -42,6 +42,13 @@ export const AUTO_COMPACT_MAX = 1000000;
 // 旧配置里已经落盘的 200000 不会被改写（用户显式存过就尊重），只影响「没填过」的情况。
 export const AUTO_COMPACT_DEFAULT_TOKENS = 1000000;
 
+// 同时运行中的任务数量上限：超过后新任务自动排队，任务结束时按顺序补位。
+// 一台机器同时跑太多构建/测试会把 CPU、内存、磁盘压满（8G 机器实测 load 冲到 288），
+// 连网页都打不开，所以默认给 5，并允许用户在设置里按机器性能调整。
+export const MAX_CONCURRENT_MIN = 1;
+export const MAX_CONCURRENT_MAX = 20;
+export const MAX_CONCURRENT_DEFAULT = 5;
+
 export interface AppSettings {
   costOptimization: CostPolicySettings;
   claudePromptCache: PromptCacheMode;
@@ -60,6 +67,8 @@ export interface AppSettings {
   templateCollectionPath: string;
   // 自动压缩上下文（仅 Claude Code 有对应 CLI 开关；Codex 由其自身机制处理）
   autoCompact: AutoCompactSetting;
+  // 同时运行中的任务数量（全局）。超过后新任务排队，等前面的任务结束再依次开始。
+  maxConcurrentTasks: number;
   // 新手引导是否已完成（旧字段，保留兼容；判定是否强制引导请用 setupDone）
   onboarded: boolean;
   // 初始设置是否已完成（语言/主题/引擎/服务商/模型都选好了）。
@@ -140,6 +149,7 @@ export class SettingsStruct {
       templateCollectionPath:
         raw && typeof raw.templateCollectionPath === 'string' ? raw.templateCollectionPath : '',
       autoCompact: this._sanitizeAutoCompact(raw && raw.autoCompact),
+      maxConcurrentTasks: this._sanitizeMaxConcurrent(raw && raw.maxConcurrentTasks),
       platform: process.platform,
       outEndReady: OutEnd.exists(),
       port: AppConfig.PORT,
@@ -210,6 +220,7 @@ export class SettingsStruct {
     if (typeof patch.templateCollectionPath === 'string')
       next.templateCollectionPath = patch.templateCollectionPath.trim();
     if (patch.autoCompact) next.autoCompact = this._sanitizeAutoCompact(patch.autoCompact);
+    if (patch.maxConcurrentTasks !== undefined) next.maxConcurrentTasks = this._sanitizeMaxConcurrent(patch.maxConcurrentTasks);
     if (typeof patch.runAsUserEnabled === 'boolean') next.runAsUserEnabled = patch.runAsUserEnabled;
     if (typeof patch.runAsUserName === 'string') {
       const name = patch.runAsUserName.trim();
@@ -242,6 +253,7 @@ export class SettingsStruct {
       quickGroups: patch.quickGroups ?? cur.quickGroups,
       templateCollectionPath: patch.templateCollectionPath ?? cur.templateCollectionPath,
       autoCompact: patch.autoCompact ?? cur.autoCompact,
+      maxConcurrentTasks: patch.maxConcurrentTasks ?? cur.maxConcurrentTasks,
       runAsUserEnabled: patch.runAsUserEnabled ?? cur.runAsUserEnabled,
       runAsUserName: patch.runAsUserName ?? cur.runAsUserName,
     };
@@ -274,6 +286,10 @@ export class SettingsStruct {
   }
   // 清洗自动压缩设置：模式只认 auto/custom，窗口夹到 100k–1M（CLI 只接受这个区间）
   protected static _sanitizeAutoCompact(_raw: unknown): AutoCompactSetting {
+    throw new Error('Not implemented');
+  }
+  // 清洗「同时运行中的任务数量」：正整数，夹到 1–20，缺省 5
+  protected static _sanitizeMaxConcurrent(_raw: unknown): number {
     throw new Error('Not implemented');
   }
 }

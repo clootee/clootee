@@ -3463,3 +3463,69 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 .server-health meter::-moz-meter-bar { background: var(--accent); border-radius: 2px; }
 .server-health .is-high meter::-webkit-meter-optimum-value { background: var(--red); }
 .server-health .is-high meter::-moz-meter-bar { background: var(--red); }
+
+/* ── 并发已满：任务自动排队说明弹窗（不点遮罩关闭；底部弹层在手机上） ── */
+.queue-wait-modal {
+  box-sizing: border-box;
+  width: min(430px, calc(100vw - 32px));
+  padding: 28px 28px 22px;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 22px;
+  background: linear-gradient(165deg, color-mix(in srgb, var(--accent) 7%, var(--panel)) 0%, var(--panel) 46%, var(--panel2) 100%);
+  color: var(--text);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, .42), inset 0 1px 0 color-mix(in srgb, var(--text) 6%, transparent);
+  text-align: left;
+}
+.queue-wait-modal::backdrop { background: var(--overlay); backdrop-filter: blur(6px); }
+.queue-wait-modal .qw-close {
+  position: absolute; top: 14px; right: 14px;
+  display: grid; place-items: center; width: 30px; height: 30px; padding: 0;
+  border: none; border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--muted); font-size: 15px; line-height: 1; cursor: pointer;
+  transition: background .15s, color .15s;
+}
+.queue-wait-modal .qw-close:hover { background: var(--hover); color: var(--text); }
+.queue-wait-modal .qw-icon {
+  display: grid; place-items: center; width: 54px; height: 54px; margin-bottom: 16px;
+  border-radius: 17px; font-size: 26px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.queue-wait-modal h3 { margin: 0 0 10px; font-size: 18px; line-height: 1.35; font-weight: 680; letter-spacing: .1px; }
+.queue-wait-modal p { margin: 0; color: var(--muted); font-size: 13.5px; line-height: 1.75; }
+.queue-wait-modal .qw-stats { display: flex; gap: 10px; margin: 20px 0 22px; }
+.queue-wait-modal .qw-stat {
+  flex: 1; min-width: 0; padding: 10px 14px; border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.queue-wait-modal .qw-stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.queue-wait-modal .qw-stat span { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
+.queue-wait-modal .qw-stat-limit b { color: var(--accent); }
+.queue-wait-modal .qw-actions { display: flex; gap: 10px; }
+.queue-wait-modal .qw-actions button {
+  flex: 1; min-height: 44px; padding: 10px 14px; border-radius: 11px;
+  border: 1px solid transparent; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: filter .15s, background .15s, transform .12s;
+}
+.queue-wait-modal .qw-actions button:active { transform: translateY(1px); }
+.queue-wait-modal .qw-primary {
+  background: var(--accent); color: #fff;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.queue-wait-modal .qw-primary:hover { filter: brightness(1.08); }
+.queue-wait-modal .qw-secondary {
+  background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text);
+  border-color: var(--border);
+}
+.queue-wait-modal .qw-secondary:hover { background: var(--hover); }
+@media (max-width: 600px) {
+  .queue-wait-modal {
+    width: 100%; max-width: 100%; max-height: calc(100dvh - 24px);
+    margin: auto 0 0; padding: 24px 20px calc(20px + env(safe-area-inset-bottom));
+    border-radius: 24px 24px 0 0; border-bottom: 0;
+  }
+  .queue-wait-modal .qw-actions { flex-direction: column-reverse; }
+  .queue-wait-modal .qw-actions button { width: 100%; min-height: 48px; }
+}

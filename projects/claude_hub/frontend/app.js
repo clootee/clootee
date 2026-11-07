@@ -6411,6 +6411,12 @@ function connectWs() {
     if (e.kind === 'notice') {
       if (e.message === 'cost_send_blocked') e.message = T('costBlockedNotice');
       if (e.message === 'session_message_limit_reached') { e.message = T('sessionLimitBatch').replace('{remaining}', '0'); SessionLimitUi.refresh(); }
+      // 并发已满：任务留在队列里，弹一个说明 + 可直接去调「同时运行中的任务数量」
+      if (e.message === 'task_queue_waiting') {
+        const max = Number(e.max) || taskConcurrency();
+        e.message = T('taskQueueWaitNotice').replace('{max}', max);
+        QueueWaitUi.show(max, Number(e.running) || max);
+      }
       pushNotice(e); return;
     }
     // Claude Code 把服务商的 402 原样写成一条助手消息（task.error 里反而没有）。额度是全局的，
@@ -7488,6 +7494,14 @@ function bind() {
   $('settingsPaneBack').addEventListener('click', backToSettingsNav);
   $('settingsPaneClose').addEventListener('click', closeSettingsPane);
   $('settingsPaneSave').addEventListener('click', saveSettings);
+  // 并发已满说明弹窗：不点遮罩关闭，只能点 ✕ / 知道了 / 去设置
+  $('queueWaitClose').addEventListener('click', () => QueueWaitUi.close());
+  $('queueWaitOk').addEventListener('click', () => QueueWaitUi.close());
+  $('queueWaitSettings').addEventListener('click', () => {
+    QueueWaitUi.close();
+    openSettings();
+    openSettingsPane('task');
+  });
   $('quickAddGroup').addEventListener('click', () => {
     QuickEdit.push({ name: '', prompt: '', tags: [{ label: '', prompt: '' }] });
     renderQuickEditor();
@@ -7806,6 +7820,7 @@ async function loadSettings() {
       State.settings.templateCollectionPath = typeof s.templateCollectionPath === 'string' ? s.templateCollectionPath : '';
       State.settings.quickGroups = Array.isArray(s.quickGroups) ? s.quickGroups : [];
       if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
+      if (Number.isInteger(s.maxConcurrentTasks)) State.settings.maxConcurrentTasks = s.maxConcurrentTasks;
       State.settings.claudePromptCache = s.claudePromptCache || '1h';
       State.settings.askClaudePromptCache = !!s.askClaudePromptCache;
       State.settings.costOptimization = s.costOptimization || CostUi.defaults;
@@ -7990,6 +8005,14 @@ const SETTINGS_PANES = [
     fill: () => CostUi.fill(), save: () => CostUi.save(),
   },
   {
+    id: 'task', icon: '🚦',
+    title: () => T('paneTask'),
+    desc: () => T('paneTaskDesc'),
+    summary: () => T('paneTaskSummary').replace('{n}', taskConcurrency()),
+    fill: fillTaskPane,
+    save: saveTaskPane,
+  },
+  {
     id: 'template',
     icon: '📁',
     title: () => T('paneTemplate'),
@@ -8015,6 +8038,47 @@ const SETTINGS_PANES = [
 function paneById(id) {
   return SETTINGS_PANES.find((p) => p.id === id) || null;
 }
+
+// 同时运行中的任务数量：后端默认 5，允许 1–20；改完立即生效，不用重启
+function taskConcurrency() {
+  const n = Math.round(Number(State.settings.maxConcurrentTasks));
+  return Number.isFinite(n) && n > 0 ? n : 5;
+}
+function fillTaskPane() {
+  $('maxConcurrentTasksLabel').textContent = T('taskConcurrencyLabel');
+  $('maxConcurrentTasksNote').textContent = T('taskConcurrencyNote');
+  $('maxConcurrentTasks').value = taskConcurrency();
+}
+async function saveTaskPane() {
+  const n = Math.round(Number($('maxConcurrentTasks').value));
+  if (!Number.isInteger(n) || n < 1 || n > 20) { alert(T('taskConcurrencyInvalid')); return false; }
+  const saved = await patchSettings({ maxConcurrentTasks: n });
+  if (!saved) { setPaneNotice('engSaveFailShort', null, 'err', 0); return false; }
+  setPaneNotice('engSavedToast', null, 'ok', 2500);
+  return true;
+}
+
+// 并发已满 → 任务自动排队时的说明弹窗（由后端 notice 事件触发）
+const QueueWaitUi = {
+  show(max, running) {
+    const dlg = $('queueWaitModal');
+    if (!dlg) return;
+    $('queueWaitTitle').textContent = T('taskQueueWaitTitle');
+    $('queueWaitBody').textContent = T('taskQueueWaitBody').replace('{max}', max);
+    $('queueWaitRunning').textContent = running;
+    $('queueWaitLimit').textContent = max;
+    $('queueWaitRunningLabel').textContent = T('taskQueueWaitStatRunning');
+    $('queueWaitLimitLabel').textContent = T('taskQueueWaitStatLimit');
+    $('queueWaitSettings').textContent = T('taskQueueGoSettings');
+    $('queueWaitOk').textContent = T('taskQueueOk');
+    $('queueWaitClose').setAttribute('aria-label', T('close'));
+    if (!dlg.open) dlg.showModal();
+  },
+  close() {
+    const dlg = $('queueWaitModal');
+    if (dlg && dlg.open) dlg.close();
+  },
+};
 
 let ServerHealthTimer = null;
 let ServerHealthGeneration = 0;
@@ -8224,7 +8288,8 @@ async function patchSettings(patch) {
       typeof s.templateCollectionPath === 'string' ? s.templateCollectionPath : '';
     State.settings.quickGroups = Array.isArray(s.quickGroups) ? s.quickGroups : [];
     if (s.autoCompact) State.settings.autoCompact = s.autoCompact;
-      State.settings.claudePromptCache = s.claudePromptCache || '1h';
+    if (Number.isInteger(s.maxConcurrentTasks)) State.settings.maxConcurrentTasks = s.maxConcurrentTasks;
+    State.settings.claudePromptCache = s.claudePromptCache || '1h';
       State.settings.askClaudePromptCache = !!s.askClaudePromptCache;
       State.settings.costOptimization = s.costOptimization || CostUi.defaults;
     renderQuick();

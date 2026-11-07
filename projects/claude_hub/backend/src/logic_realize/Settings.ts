@@ -7,6 +7,9 @@ import {
   AUTO_COMPACT_DEFAULT_TOKENS,
   AUTO_COMPACT_MAX,
   AUTO_COMPACT_MIN,
+  MAX_CONCURRENT_DEFAULT,
+  MAX_CONCURRENT_MAX,
+  MAX_CONCURRENT_MIN,
   QuickGroup,
   QuickTag,
   ToolPrefMap,
@@ -87,5 +90,13 @@ export class Settings extends SettingsStruct {
       ? Math.min(AUTO_COMPACT_MAX, Math.max(AUTO_COMPACT_MIN, n))
       : AUTO_COMPACT_DEFAULT_TOKENS;
     return { mode, tokens };
+  }
+
+  // 清洗「同时运行中的任务数量」：只接受正整数，夹到 1–20；没填过/非法值回落到默认 5。
+  // 不设 0：0 会让所有任务永远排队、看起来像「发消息没反应」。
+  protected static _sanitizeMaxConcurrent(raw: unknown): number {
+    const n = Math.round(Number(raw));
+    if (!Number.isFinite(n) || n <= 0) return MAX_CONCURRENT_DEFAULT;
+    return Math.min(MAX_CONCURRENT_MAX, Math.max(MAX_CONCURRENT_MIN, n));
   }
 }

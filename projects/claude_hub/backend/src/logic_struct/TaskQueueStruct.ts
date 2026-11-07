@@ -99,14 +99,54 @@ export class TaskQueueStruct {
   // 调度的唯一入口：当前空闲 且 有可执行 pending → 启动下一个任务
   // 暂停中：仅「补充任务」(supplement) 可越过暂停执行，其余 pending 冻结等待「继续任务流」
   // 暂定（held）的 pending 任务始终被跳过，保留在队列中等待恢复
+  // 全局并发上限：同时运行的任务数达到设置值后，其余任务留在 pending 排队，
+  // 等某个任务收尾时由 _tickCapped 按先来后到补位。
   static _tick(sessionId: string): void {
     const session = SessionManager.getSession(sessionId);
     if (this._isRunning(sessionId)) return;
     const next = session.tasks.find(
       (t) => t.status === 'pending' && !t.held && (!session.paused || t.supplement),
     );
-    if (!next) return;
+    if (!next) {
+      this._capped.delete(sessionId);
+      return;
+    }
+    const max = this.maxConcurrent();
+    const running = this._runningCount();
+    // 补充任务（会话暂停时用户追加的消息）不受上限限制：它本来就是用来打断/弥补冻结队列的
+    if (!next.supplement && running >= max) {
+      const firstTime = !this._capped.has(sessionId);
+      this._capped.add(sessionId);
+      // 只在「刚被挡下」时提醒一次，避免每个 tick 都弹
+      if (firstTime) {
+        EventBus.broadcast({
+          kind: 'notice', sessionId, taskId: next.id, level: 'warn',
+          message: 'task_queue_waiting', max, running,
+        });
+      }
+      return;
+    }
+    this._capped.delete(sessionId);
     this._startTask(session, next);
+  }
+
+  // 当前生效的「同时运行中的任务数量」：每次调度现读设置，改完不用重启
+  static maxConcurrent(): number {
+    return Settings.get().maxConcurrentTasks;
+  }
+
+  // 被并发上限挡住的会话：任务收尾腾出名额后逐个唤醒
+  private static _capped = new Set<string>();
+  private static _tickCapped(): void {
+    if (this._capped.size === 0) return;
+    for (const id of [...this._capped]) {
+      if (this._runningCount() >= this.maxConcurrent()) break;
+      try {
+        this._tick(id);
+      } catch {
+        this._capped.delete(id);
+      }
+    }
   }
 
   // ── 调度骨架：_startTask ───────────────────────────────────────────
@@ -199,10 +239,12 @@ export class TaskQueueStruct {
     if (success && !SessionManager.getSession(sessionId).claudeSessionId) {
       this._finishTask(sessionId, taskId, 'error', '引擎未返回 session_id，无法确定会话 id');
       this._tick(sessionId);
+      this._tickCapped();
       return;
     }
     this._finishTask(sessionId, taskId, success ? 'done' : 'error', error);
     this._tick(sessionId);
+    this._tickCapped();
   }
 
   // ── 调度骨架：removeTask ───────────────────────────────────────────
@@ -274,6 +316,7 @@ export class TaskQueueStruct {
     this._killHandle(sessionId, taskId);
     this._finishTask(sessionId, taskId, 'stopped');
     this._tick(sessionId);
+    this._tickCapped();
   }
 
   // ── 调度骨架：pauseFlow ────────────────────────────────────────────
@@ -284,6 +327,7 @@ export class TaskQueueStruct {
     if (taskId) {
       this._killHandle(sessionId, taskId);
       this._finishTask(sessionId, taskId, 'stopped');
+      this._tickCapped();
     }
   }
 
@@ -318,6 +362,8 @@ export class TaskQueueStruct {
 
   // 运行期状态查询
   static _isRunning(_sessionId: string): boolean { throw new Error('Not implemented'); }
+  // 当前全局正在运行的任务数（并发上限按它判断；由 Realize 提供）
+  protected static _runningCount(): number { throw new Error('Not implemented'); }
   static _runningTaskId(_sessionId: string): string | null { throw new Error('Not implemented'); }
   protected static _setHandle(_sessionId: string, _taskId: string, _handle: unknown): void { throw new Error('Not implemented'); }
   protected static _killHandle(_sessionId: string, _taskId: string): void { throw new Error('Not implemented'); }
