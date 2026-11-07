@@ -697,6 +697,12 @@ function syncSecurityUi() {
     $('legacySecurityReset').textContent = T('securityLegacyReset');
   }
   if ($('lanForgotLink')) $('lanForgotLink').hidden = !enabled;
+  // 登录页始终给出「忘记密码」的服务器自救命令，避免用户被彻底锁在门外。
+  if ($('loginRecovery')) {
+    const cmd = SecurityState.recoveryCommand || '';
+    $('loginRecovery').hidden = !(enabled && cmd);
+    $('loginRecovery').textContent = cmd ? T('loginForgotHint').replace('{cmd}', cmd) : '';
+  }
   if ($('securityPasswordStatus')) {
     $('securityPasswordStatus').textContent = T(enabled ? (SecurityState.legacyCredentials ? 'securityLegacyEnabled' : 'securityEnabled') : 'securityDisabled');
     $('pwOld').hidden = !enabled;

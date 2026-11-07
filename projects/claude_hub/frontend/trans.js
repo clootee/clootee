@@ -27,6 +27,7 @@ const DICT = {
   securityPasswordSaveFailed: {"en": "Security password was not saved: {error}", "zh": "安全密码未保存：{error}"},
   securityPasswordOneForm: {"en": "Use either Change password or Reset password, then save.", "zh": "请只填写修改密码或重置密码其中一组，再保存。"},
   securityPasswordOldRequired: {"en": "Enter the current password first. To recover a forgotten password, run passwd.bat / ./passwd.sh on the host machine.", "zh": "请先输入当前密码。确实忘记密码时，请在本机命令行运行 passwd.bat / ./passwd.sh 重置。"},
+  loginForgotHint: {"en": "Forgot the password? Run this command on the server to reset it: {cmd}", "zh": "忘记密码？请在服务器终端执行以下命令重置：{cmd}"},
   securityDisableConfirm: {"en": "Turn off the workspace security password? Enter the current password first. Local use will no longer need unlocking; remote access will be blocked.", "zh": "关闭工作台安全密码？请先在当前密码框中填写现有密码。关闭后本机无需解锁，远程访问将被阻止。"},
   securityLegacyReset: {"en": "Clear old access credentials on this computer", "zh": "在本机清除旧版访问凭据"},
   securityLegacyConfirm: {"en": "Old versions sometimes generated a hidden random password. Clear the old workspace access password on this computer? Provider accounts and project files will stay unchanged. You can enable a new security password later in Settings.", "zh": "旧版本可能曾自动生成随机密码。是否清除这台电脑上的旧版工作台访问密码？供应商账号和项目文件不受影响，之后可在设置中主动启用新的安全密码。"},

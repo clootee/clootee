@@ -1,6 +1,7 @@
 // HTTP + WebSocket 服务（入口层）：只接收请求、转发给 logic_realize，不写业务逻辑
 import express, { Request, Response } from 'express';
 import * as http from 'http';
+import * as path from 'path';
 import { WebSocketServer } from 'ws';
 import { AppConfig } from '../config/AppConfig';
 import { PackageInfo } from '../helper/PackageInfo';
@@ -62,7 +63,8 @@ export class Server {
     app.get('/api/auth/status', (req, res) =>
       this._wrap(res, 'auth.status', () => ({ needsSetup: false,
         passwordEnabled: AuthManager.passwordEnabled(), legacyCredentials: AuthManager.legacyCredentials(),
-        localAccess: this._isLocalRequest(req), version: PackageInfo.version(), instance: `${process.pid}:${SERVER_STARTED_AT}` })),
+        localAccess: this._isLocalRequest(req), recoveryCommand: this._recoveryCommand(),
+        version: PackageInfo.version(), instance: `${process.pid}:${SERVER_STARTED_AT}` })),
     );
     app.post('/api/auth/setup', (req, res) =>
       this._wrap(res, 'auth.setup', () => {
@@ -876,6 +878,13 @@ export class Server {
 
   private static _canAccess(req: Request, token: string | undefined): boolean {
     return AuthManager.passwordEnabled() ? AuthManager.verify(token) : this._isLocalRequest(req);
+  }
+
+  // 忘记密码时的服务器端自救命令：密码页会把这条命令展示给用户，
+  // 路径由后端按自身安装位置生成，换部署目录也不会指错。
+  private static _recoveryCommand(): string {
+    const script = path.join(Paths.PROJECT_ROOT, process.platform === 'win32' ? 'passwd.bat' : 'passwd.sh');
+    return `"${script}" set <new-password>`;
   }
 
   // 审计日志里的客户端标识：真实来源 IP（nginx 会写 X-Forwarded-For）+ 浏览器 UA 前 120 字。

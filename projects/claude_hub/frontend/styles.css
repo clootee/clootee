@@ -2069,6 +2069,7 @@ button.sm { padding: 6px 12px; font-size: 13px; border-radius: 7px; }
 .login-install-arrow { flex: 0 0 18px; margin-left: auto; }
 @media (prefers-reduced-motion: reduce) { .login-install-button { transition: none; } }
 .login-err { color: var(--red); font-size: 13px; min-height: 18px; margin-bottom: 8px; }
+.login-recovery { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel2); color: var(--muted); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; user-select: text; }
 
 /* ── 目录选择器 ── */
 .picker-card {
