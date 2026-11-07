@@ -54,7 +54,7 @@ export interface AppSettings {
   claudePromptCache: PromptCacheMode;
   askClaudePromptCache: boolean;
   defaultEngine: Engine;
-  allowLan: boolean;      // false=仅 localhost；true=允许局域网(0.0.0.0)访问（需重启生效）
+  allowLan: boolean;      // false=仅 localhost；true=允许局域网(0.0.0.0)访问（立即生效）
   preferBundled: boolean; // 旧字段：true=优先内置。新代码请用 toolPrefs，这里仅作迁移来源
   // 运行环境面板的选择：哪个工具用本机、哪个用内置
   toolPrefs: ToolPrefMap;

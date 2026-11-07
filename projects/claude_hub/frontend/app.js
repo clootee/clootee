@@ -7483,7 +7483,7 @@ function bind() {
     QuickEdit.push({ name: '', prompt: '', tags: [{ label: '', prompt: '' }] });
     renderQuickEditor();
   });
-  $('allowLanChk').addEventListener('change', renderLanGuide);
+  $('allowLanChk').addEventListener('change', saveLanAccess);
   $('autoCompactModeSelect').addEventListener('change', syncAutoCompactMode);
   $('lanForgotLink').addEventListener('click', toggleLanPwReset);
   $('lanPwResetBtn').addEventListener('click', resetLanPassword);
@@ -7891,12 +7891,9 @@ function renderLanGuide() {
       list.appendChild(item);
     });
   }
-  // 未保存/未重启时提示：更改需重启后局域网才真正可访问
-  const needRestart = !State.settings.allowLan;
+
   const multi = urls.length > 1 ? '优先用「推荐」那条；其余多为虚拟网卡/VPN 地址（如 172.*），其他设备一般连不上，可忽略。' : '';
-  const base = needRestart
-    ? '⚠️ 开启后需保存并重启服务，局域网访问才会生效。生效后在上面地址首次访问需输入本工作台的访问密码。'
-    : '首次访问需输入本工作台的访问密码；打开后可像本机一样使用。';
+  const base = T('lanAccessHint');
   hint.textContent = base + (multi ? ' ' + multi : '');
 }
 
@@ -8236,6 +8233,7 @@ function openSettingsPane(id) {
   for (const q of SETTINGS_PANES) $(`pane-${q.id}`).hidden = q.id !== id;
   $('settingsPaneTitle').textContent = `${p.icon} ${p.title()}`;
   $('settingsPaneSave').textContent = T('save');
+  $('settingsPaneSave').hidden = id === 'network';
   $('settingsPaneOverlay').hidden = false;
   $('settingsPaneOverlay').querySelector('.sx-body').scrollTop = 0;
   setPaneNotice(null); // 进入板块先清掉上一个板块残留的「已保存」
@@ -8467,21 +8465,29 @@ function fillNetworkPane() {
   $('pwNew').value = '';
 }
 async function saveNetworkPane() {
-  // The section Save/back/close actions must include its password fields.
-  if (hasSecurityPasswordDraft() && hasSecurityResetDraft()) {
-    setPaneNotice('securityPasswordOneForm', null, 'err', 0);
+  if (LanSavePending) await LanSavePending;
+  if (hasSecurityPasswordDraft() || hasSecurityResetDraft()) {
+    setPaneNotice('securityUsePasswordButton', null, 'warn', 0);
     return false;
   }
-  if (hasSecurityPasswordDraft() && !await changePassword()) return false;
-  if (hasSecurityResetDraft() && !await resetLanPassword()) return false;
-  const allowLan = $('allowLanChk').checked;
-  const wasLan = State.settings.allowLan;
-  if (!await patchSettings({ allowLan })) {
-    setPaneNotice('engSaveFailShort', null, 'err', 0);
-    return false;
-  }
-  if (wasLan !== State.settings.allowLan) alert(T('lanNeedRestart'));
   return true;
+}
+let LanSavePending = null;
+function saveLanAccess() {
+  if (LanSavePending) return LanSavePending;
+  const checkbox = $('allowLanChk');
+  const allowLan = checkbox.checked;
+  checkbox.disabled = true;
+  setPaneNotice('lanSaving', null, '', 0);
+  renderLanGuide();
+  LanSavePending = (async () => {
+    const saved = await patchSettings({ allowLan });
+    if (!saved) checkbox.checked = !!State.settings.allowLan;
+    renderLanGuide();
+    setPaneNotice(saved ? 'lanSaved' : 'engSaveFailShort', null, saved ? 'ok' : 'err', saved ? 2500 : 0);
+    return !!saved;
+  })().finally(() => { checkbox.disabled = false; LanSavePending = null; });
+  return LanSavePending;
 }
 
 function fillPromptPane() {

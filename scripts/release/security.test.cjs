@@ -132,6 +132,20 @@ test('real HTTP and WebSocket lifecycle: no password, enable, change, disable, l
   assert.equal(JSON.parse(fs.readFileSync(path.join(data,'auth.json'))).kind, 'user');
   assert.equal((await call('/api/auth/check')).status, 401);
   assert.equal((await call('/api/auth/check', undefined, token)).status, 200);
+  const localWs = await connect(token);
+  const remote = { 'x-clootee-remote': '1' };
+  assert.equal((await call('/api/auth/check', undefined, token, remote)).status, 401);
+  assert.equal((await call('/api/settings', { allowLan: true }, token)).success, true);
+  assert.equal((await call('/api/auth/check', undefined, token, remote)).status, 200);
+  const remoteWs = new WebSocket(`ws://127.0.0.1:${port}/ws?token=${token}`, { headers: remote });
+  await once(remoteWs, 'open');
+  const closedRemote = once(remoteWs, 'close');
+  assert.equal((await call('/api/settings', { allowLan: false }, token)).success, true);
+  assert.equal((await closedRemote)[0], 4001);
+  assert.equal(localWs.readyState, WebSocket.OPEN);
+  assert.equal((await call('/api/auth/check', undefined, token, remote)).status, 401);
+  localWs.close();
+
   assert.equal((await call('/api/auth/legacy/disable', { confirm: true })).success, false);
   const protectedWs = await connect(token); const closedProtected = once(protectedWs,'close');
   const changed = await call('/api/auth/change', { oldPassword: 'my-security-password', newPassword: 'updated-password' }, token);
@@ -171,7 +185,7 @@ function securityPaneFixture(enabled = true, failVerification = false) {
     $: element, SecurityState: { passwordEnabled: enabled }, TOKEN: f.Auth.token(), hubWs: null,
     State: { settings: { allowLan: false } }, T: key => key,
     localStorage: { setItem() {} }, hideLogin() {}, connectWs() {}, alert() {},
-    refreshSecurityState: async () => {},
+    renderLanGuide() {}, refreshSecurityState: async () => {},
     setPaneNotice: (...args) => notices.push(args),
     patchSettings: async patch => { calls.push('settings'); context.State.settings.allowLan = patch.allowLan; return patch; },
     api: async (url, body) => {
@@ -196,23 +210,23 @@ function securityPaneFixture(enabled = true, failVerification = false) {
   } };
 }
 
-test('network section Save persists and verifies a password before leaving, including first setup', async () => {
+test('password button persists and verifies credentials, including first setup', async () => {
   for (const enabled of [false, true]) {
     const f = securityPaneFixture(enabled); f.draft(enabled ? 'old-password' : '');
-    assert.equal(await f.context.save(), true);
+    assert.equal(await f.context.change(), true);
     assert.equal(f.Auth.login('saved-password'), f.context.TOKEN);
-    assert.deepEqual(f.calls, [enabled ? '/api/auth/change' : '/api/auth/setup', '/api/auth/login', 'settings']);
+    assert.deepEqual(f.calls, [enabled ? '/api/auth/change' : '/api/auth/setup', '/api/auth/login']);
     assert.equal(f.element('pwNew').value, '');
   }
 });
 
-test('network section Save includes the expanded reset-password form', async () => {
+test('leaving the network pane keeps reset-password drafts without submitting', async () => {
   const f = securityPaneFixture(); f.element('lanPwReset').hidden = false;
   f.element('lanPwOld').value = 'old-password';
   f.element('lanPwNew').value = 'reset-password'; f.element('lanPwNew2').value = 'reset-password';
-  assert.equal(await f.context.save(), true);
-  assert.equal(f.Auth.login('reset-password'), f.context.TOKEN);
-  assert.deepEqual(f.calls, ['/api/auth/reset', '/api/auth/login', 'settings']);
+  assert.equal(await f.context.save(), false);
+  assert.ok(f.Auth.login('old-password'));
+  assert.deepEqual(f.calls, []);
 });
 
 test('reset-password form refuses to save without the current password', async () => {
@@ -227,7 +241,7 @@ test('wrong old password or mismatched confirmation blocks Save and retains the 
   for (const badOld of [false, true]) {
     const f = securityPaneFixture(); f.draft(badOld ? 'wrong-password' : 'old-password');
     if (!badOld) f.element('pwConfirm').value = 'different-password';
-    assert.equal(await f.context.save(), false);
+    assert.equal(await f.context.change(), false);
     assert.ok(f.Auth.login('old-password'));
     assert.equal(f.element('pwNew').value, 'saved-password');
     assert.ok(!f.calls.includes('settings'));
@@ -237,7 +251,7 @@ test('wrong old password or mismatched confirmation blocks Save and retains the 
 
 test('password verification failure cannot report success or discard password inputs', async () => {
   const f = securityPaneFixture(true, true); f.draft();
-  assert.equal(await f.context.save(), false);
+  assert.equal(await f.context.change(), false);
   assert.equal(f.element('pwNew').value, 'saved-password');
   assert.ok(!f.calls.includes('settings'));
   assert.equal(f.notices.at(-1)[2], 'err');
@@ -252,7 +266,7 @@ test('duplicate saves share one password change and empty security fields preser
   assert.equal(f.element('pwChangeBtn').disabled, false);
   f.calls.length = 0;
   assert.equal(await f.context.save(), true);
-  assert.deepEqual(f.calls, ['settings']);
+  assert.deepEqual(f.calls, []);
   assert.ok(f.Auth.login('saved-password'));
 });
 
@@ -262,4 +276,18 @@ test('two simultaneously filled password forms must be resolved before Save', as
   assert.equal(await f.context.save(), false);
   assert.deepEqual(f.calls, []);
   assert.ok(f.Auth.login('old-password'));
+});
+
+test('LAN checkbox saves immediately without submitting password drafts and rolls back failures', async () => {
+  const f = securityPaneFixture(); f.draft();
+  f.element('allowLanChk').checked = true;
+  assert.equal(await f.context.saveLanAccess(), true);
+  assert.equal(f.context.State.settings.allowLan, true);
+  assert.deepEqual(f.calls, ['settings']);
+  assert.ok(f.Auth.login('old-password'));
+  f.context.patchSettings = async () => null;
+  f.element('allowLanChk').checked = false;
+  assert.equal(await f.context.saveLanAccess(), false);
+  assert.equal(f.element('allowLanChk').checked, true);
+  assert.equal(f.element('allowLanChk').disabled, false);
 });
