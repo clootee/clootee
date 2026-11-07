@@ -24,6 +24,8 @@
     "projects/claude_hub/ecosystem.config.js",
     "projects/claude_hub/restart.bat",
     "projects/claude_hub/restart.sh",
+    "projects/claude_hub/passwd.sh",
+    "projects/claude_hub/passwd.bat",
     "projects/claude_hub/backend/package.json",
     "projects/claude_hub/backend/package-lock.json",
     "projects/claude_hub/backend/tsconfig.json",

@@ -27,7 +27,7 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix projects/claude_hub/backend --include=dev --no-audit --no-fund
       - run: npm run build --prefix projects/claude_hub/backend
-      - run: node --test scripts/release/public-snapshot.test.mjs scripts/release/setup.test.cjs scripts/release/engine-recovery.test.cjs scripts/release/security.test.cjs scripts/release/git-runtime.test.cjs scripts/release/update.test.cjs
+      - run: node --test scripts/release/public-snapshot.test.mjs scripts/release/setup.test.cjs scripts/release/engine-recovery.test.cjs scripts/release/security.test.cjs scripts/release/git-runtime.test.cjs scripts/release/update.test.cjs scripts/release/web-assets.test.cjs scripts/release/session-list.test.cjs scripts/release/session-pagination.test.cjs scripts/release/launcher.test.cjs
       - run: python3 scripts/release/source.py
       - uses: actions/upload-artifact@v4
         with:

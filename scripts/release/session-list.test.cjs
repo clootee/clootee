@@ -92,31 +92,32 @@ test('request snapshots refresh additions and deletions and isolate concurrent h
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
-test('recovery waits for a busy worker, preserves its PID, reports busy and replaces only exited workers', async () => {
+test('recovery preserves transiently busy workers and replaces unresponsive or exited workers', async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-busy-'));
   const work = path.join(tmp, 'backend');
   fs.mkdirSync(path.join(work, 'dist'), { recursive: true });
-  fs.writeFileSync(path.join(work, 'dist/index.js'), `const fs=require('fs');require('http').createServer((q,s)=>{if(fs.existsSync('busy'))return; s.end(JSON.stringify({success:true,data:{passwordEnabled:false}}));}).listen(Number(process.env.PORT),'127.0.0.1');`);
+  fs.writeFileSync(path.join(work, 'dist/index.js'), `const fs=require('fs');require('http').createServer((q,s)=>{if(fs.existsSync('busy')&&fs.readFileSync('busy','utf8')===String(process.pid))return; s.end(JSON.stringify({success:true,data:{passwordEnabled:false}}));}).listen(Number(process.env.PORT),'127.0.0.1');`);
   const launcher = createSupervisor({ backend: work, port: 0, healthTimeout: 250, recoveryTimeout: 2000, startupTimeout: 10000, retryDelay: 30000 });
   try {
     const address = await launcher.listen(); await launcher.start();
     const base = `http://127.0.0.1:${address.port}`;
     const recover = () => fetch(base + '/api/launcher/start', { method: 'POST', headers: { Origin: base } });
     const pid = launcher.worker.pid;
-    fs.writeFileSync(path.join(work, 'busy'), '');
+    fs.writeFileSync(path.join(work, 'busy'), String(pid));
     const timer = setTimeout(() => fs.rmSync(path.join(work, 'busy')), 120);
     const responses = await Promise.all([recover(), recover()]); clearTimeout(timer);
     assert.deepEqual(responses.map(r => r.status), [200, 200]);
     assert.equal(launcher.worker.pid, pid);
-    fs.writeFileSync(path.join(work, 'busy'), '');
-    const busy = await recover(); assert.equal(busy.status, 503);
-    assert.equal((await busy.json()).code, 'WORKER_BUSY');
-    assert.equal(launcher.worker.pid, pid);
+    fs.writeFileSync(path.join(work, 'busy'), String(pid));
+    const recovered = await recover(); assert.equal(recovered.status, 200);
+    assert.notEqual(launcher.worker.pid, pid);
+    const replacementPid = launcher.worker.pid;
+    fs.writeFileSync(path.join(work, 'busy'), String(replacementPid));
     const waiting = recover();
     await pause(50); fs.rmSync(path.join(work, 'busy'));
     launcher.worker.kill('SIGKILL'); await once(launcher.worker, 'exit');
     assert.equal((await waiting).status, 200);
-    assert.notEqual(launcher.worker.pid, pid);
+    assert.notEqual(launcher.worker.pid, replacementPid);
   } finally { await launcher.close(); fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 test('recovery UI shows busy and startup errors without losing their cause', async () => {

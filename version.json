@@ -1,10 +1,10 @@
 {
-  "version": "3.1.38",
+  "version": "3.1.39",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-08",
   "notesI18n": {
-    "zh": "修复安全设置底部保存未保存密码的问题，增加保存后校验及错误提示。",
-    "en": "Fix section Save ignoring security passwords; verify saved passwords and keep failed edits visible."
+    "zh": "统一发布首屏按需加载、安全密码保存与验证、登录恢复指引和界面布局修复。",
+    "en": "Ship faster startup, verified password saving, login recovery guidance, and settings layout fixes across all packages."
   }
 }
