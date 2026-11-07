@@ -659,8 +659,8 @@ function closeGuide() {
 }
 
 // ── 登录 ──
-async function refreshSecurityState() {
-  const response = await fetch('/api/auth/status', { headers: { 'x-auth-token': TOKEN } });
+async function refreshSecurityState(timeoutMs = 15000) {
+  const response = await fetch('/api/auth/status', { headers: { 'x-auth-token': TOKEN }, signal: AbortSignal.timeout(timeoutMs), cache: 'no-store' });
   if (!response.ok) throw new Error(T('securityStatusFailed'));
   const json = await response.json();
   if (!json.success || typeof json.data?.passwordEnabled !== 'boolean') throw new Error(T('securityStatusFailed'));
@@ -695,10 +695,56 @@ function syncSecurityUi() {
   }
 }
 function showAccessError(message) {
-  $('accessErrorTitle').textContent = T('securityStatusFailed');
-  $('accessErrorNote').textContent = message || T('securityStatusFailed');
-  $('accessErrorRetry').textContent = T('hcRetry');
+  $('accessErrorTitle').textContent = T('workspaceOfflineTitle');
+  $('accessErrorNote').textContent = message && message !== T('securityStatusFailed') && !/fetch|network|timeout|abort/i.test(message)
+    ? message : T('workspaceOfflineNote');
+  $('accessErrorRetry').textContent = T('workspaceRecover');
+  $('accessErrorRetry').disabled = false;
   $('accessErrorOverlay').hidden = false;
+}
+let workspaceRecovering = false;
+async function recoverWorkspace() {
+  if (workspaceRecovering) return;
+  workspaceRecovering = true;
+  const button = $('accessErrorRetry');
+  button.disabled = true;
+  button.textContent = T('workspaceRecovering');
+  $('accessErrorNote').textContent = T('workspaceRecoveryProgress');
+  try {
+    // A transient network error must not restart a healthy workspace.
+    try { await refreshSecurityState(); location.reload(); return; } catch {}
+    if (window.clooteeDesktop?.recover) await window.clooteeDesktop.recover();
+    else {
+      let response, connectionError;
+      try { response = await fetch('/api/launcher/start', { method: 'POST', headers: { 'x-auth-token': TOKEN }, signal: AbortSignal.timeout(90000) }); }
+      catch (error) { connectionError = error; }
+      if (!response?.ok) {
+        if (response?.status === 403) throw new Error(T('workspaceRecoveryDenied'));
+        if ((!response || [404, 502, 504].includes(response.status)) && ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+          location.href = 'clootee://start';
+          const deadline = Date.now() + 60000;
+          while (Date.now() < deadline) {
+            try { await refreshSecurityState(Math.min(15000, Math.max(1, deadline - Date.now()))); location.reload(); return; } catch {}
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
+        let detail;
+        try { detail = await response?.json(); } catch {}
+        if (detail?.code === 'WORKER_BUSY') throw new Error(T('workspaceRecoveryBusy'));
+        if (detail?.error) throw new Error(T('workspaceRecoveryFailed').replace('{reason}', String(detail.error)));
+        if (/timeout|abort/i.test(connectionError?.name || '')) throw new Error(T('workspaceRecoveryTimedOut'));
+        throw new Error(T('workspaceRecoveryUnavailable'));
+      }
+    }
+    await refreshSecurityState();
+    location.reload();
+  } catch (error) {
+    $('accessErrorNote').textContent = /^(TypeError|AbortError|TimeoutError)$/.test(error.name) ? T('workspaceRecoveryTimedOut') : error.message;
+  } finally {
+    workspaceRecovering = false;
+    button.disabled = false;
+    button.textContent = T('workspaceRecover');
+  }
 }
 async function showLogin() {
   if (!securityKnown) await refreshSecurityState();
@@ -7371,7 +7417,7 @@ function bind() {
   $('logoutBtn').addEventListener('click', logout);
   $('legacyAccessReset').addEventListener('click', clearLegacyAccess);
   $('legacySecurityReset').addEventListener('click', clearLegacyAccess);
-  $('accessErrorRetry').addEventListener('click', () => location.reload());
+  $('accessErrorRetry').addEventListener('click', recoverWorkspace);
   $('pwDisableBtn').addEventListener('click', disableSecurityPassword);
   $('aiCollapseBtn').addEventListener('click', toggleAiCollapse);
   $('loginLangZh').onclick = () => setLang('zh');

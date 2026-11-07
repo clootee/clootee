@@ -6,7 +6,7 @@ const path = require('node:path');
 const net = require('node:net');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
-const home = fs.realpathSync(process.env.CLOOTEE_HOME || path.resolve(__dirname, '../../../..'));
+const home = fs.realpathSync(process.env.CLOOTEE_HOME || path.resolve(__dirname, '../..'));
 const state = path.join(home, 'run');
 const record = path.join(state, 'server.json');
 const lock = path.join(state, 'control.lock');
@@ -21,9 +21,9 @@ function identity(pid) {
 }
 function read() { try { return JSON.parse(fs.readFileSync(record)); } catch { return null; } }
 function owned(r) {
-  if (!r || !Number.isSafeInteger(r.pid) || !r.backend?.startsWith(home + '/releases/')) return false;
+  if (!r || !Number.isSafeInteger(r.pid) || !(r.backend?.startsWith(home + '/releases/') || r.backend === path.join(home, 'projects/claude_hub/backend'))) return false;
   const id = identity(r.pid);
-  return id && id.start === r.start && id.cwd === r.backend && id.args[1] === path.join(r.backend, 'dist/index.js');
+  return id && id.start === r.start && id.cwd === r.backend && [path.join(r.backend, 'dist/index.js'), path.resolve(r.backend, '../../../scripts/linux/supervisor.cjs')].includes(id.args[1]);
 }
 function health(port) {
   return new Promise(resolve => {
@@ -49,6 +49,7 @@ async function stop() {
   for (let i = 0; i < 50 && owned(r); i++) await sleep(100);
   if (owned(r)) throw new Error(`停止失败 / Stop failed. Log: ${log}`);
   fs.rmSync(record, { force: true });
+  fs.rmSync(path.join(state, 'server.pid'), { force: true });
   process.stdout.write('Clootee 已停止 / stopped\n');
 }
 async function start() {
@@ -57,11 +58,12 @@ async function start() {
   const port = Number(process.env.PORT || 8970);
   if (!Number.isInteger(port) || port < 1 || port > 65533) throw new Error('Invalid PORT');
   await free(port);
-  const backend = fs.realpathSync(path.join(home, 'current/projects/claude_hub/backend'));
+  const managed = fs.existsSync(path.join(home, 'current/runtime/bin/node'));
+  const backend = fs.realpathSync(path.join(home, managed ? 'current/projects/claude_hub/backend' : 'projects/claude_hub/backend'));
   fs.mkdirSync(path.dirname(log), { recursive: true, mode: 0o700 });
   const fd = fs.openSync(log, 'a', 0o600);
-  const runtime = path.join(home, 'current/runtime/bin/node');
-  const child = spawn(runtime, [path.join(backend, 'dist/index.js')], {
+  const runtime = managed ? path.join(home, 'current/runtime/bin/node') : process.execPath;
+  const child = spawn(runtime, [path.resolve(backend, '../../../scripts/linux/supervisor.cjs'), '--backend', backend], {
     cwd: backend, detached: true, stdio: ['ignore', fd, fd],
     env: { ...process.env, PORT: String(port), PATH: path.dirname(runtime) + path.delimiter + process.env.PATH }
   });
@@ -72,6 +74,7 @@ async function start() {
   if (!id) throw new Error(`启动失败 / Start failed. Log: ${log}`);
   const r = { pid: child.pid, start: id.start, backend, port };
   fs.writeFileSync(record, JSON.stringify(r), { mode: 0o600 });
+  fs.writeFileSync(path.join(state, 'server.pid'), String(child.pid), { mode: 0o600 });
   for (let i = 0; i < 60; i++) {
     if (!owned(r)) break;
     if (await health(port)) { process.stdout.write(`Clootee 已启动 / started: http://127.0.0.1:${port}\n${backend}\n日志 / Log: ${log}\n关闭终端后继续运行 / Continues running after closing this terminal.\n`); return; }
@@ -82,7 +85,7 @@ async function start() {
 }
 async function main() {
   const command = process.argv[2] || 'help';
-  if (command === 'version' || command === '--version') { process.stdout.write(JSON.parse(fs.readFileSync(path.join(home, 'current/version.json'))).version + '\n'); return; }
+  if (command === 'version' || command === '--version') { process.stdout.write(JSON.parse(fs.readFileSync(path.join(home, fs.existsSync(path.join(home, 'current')) ? 'current/version.json' : 'version.json'))).version + '\n'); return; }
   if (command === 'logs') { const p = spawn('tail', ['-n', '100', '-f', log], { stdio: 'inherit' }); p.on('error', e => { process.stderr.write(e.message + '\n'); process.exitCode = 1; }); return; }
   if (command === 'status') { const r = read(); const running = owned(r); process.stdout.write(running ? `Clootee running · PID ${r.pid} · http://127.0.0.1:${r.port}\n${r.backend}\n` : 'Clootee stopped\n'); process.exitCode = running ? 0 : 3; return; }
   if (!['start', 'stop', 'restart'].includes(command)) { process.stdout.write('Usage: clootee {start|stop|restart|status|logs|version}\n'); process.exitCode = command === 'help' ? 0 : 2; return; }

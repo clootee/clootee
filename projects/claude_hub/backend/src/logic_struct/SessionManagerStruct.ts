@@ -5,6 +5,7 @@
 import { Ids } from '../helper/Ids';
 import { Logger } from '../helper/Logger';
 import { EventBus } from '../helper/EventBus';
+import { CodexStoreHelper } from '../helper/CodexStoreHelper';
 import { SignatureCache } from '../helper/SignatureCache';
 import { AppConfig } from '../config/AppConfig';
 import { Settings } from '../logic_realize/Settings';
@@ -57,18 +58,21 @@ export class SessionManagerStruct {
 
   // 工作台模式：合并列出所有根目录下的会话（跨目录同时展示）。
   // 每个会话自带 rootId，前端据此显示所属目录名。排序：置顶优先、其后按更新时间倒序。
-  static listAllSessions(): Session[] {
-    const out: Session[] = [];
-    for (const rootId of this._rootIds()) {
-      try {
-        out.push(...this.listSessions(rootId));
-      } catch {
-        /* 单个根目录异常（已删等）跳过，不影响其余 */
+  static async listAllSessions(): Promise<Session[]> {
+    return CodexStoreHelper.withIndex(Settings.effectiveHomeDir(), async () => {
+      const out: Session[] = [];
+      for (const rootId of this._rootIds()) {
+        await new Promise<void>(resolve => setImmediate(resolve));
+        try {
+          out.push(...this.listSessions(rootId));
+        } catch {
+          /* 单个根目录异常（已删等）跳过，不影响其余 */
+        }
       }
-    }
-    return out.sort((a, b) => {
-      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-      return b.updatedAt - a.updatedAt;
+      return out.sort((a, b) => {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+        return b.updatedAt - a.updatedAt;
+      });
     });
   }
 
@@ -79,7 +83,7 @@ export class SessionManagerStruct {
   static async searchSessions(query: string, rootId?: string): Promise<SessionSearchHit[]> {
     const q = (query || '').trim().toLowerCase();
     if (!q) throw new Error(`searchSessions: invalid query=${query}`);
-    const candidates = rootId ? this.listSessions(rootId) : this.listAllSessions();
+    const candidates = rootId ? await CodexStoreHelper.withIndex(Settings.effectiveHomeDir(), () => this.listSessions(rootId)) : await this.listAllSessions();
     const CONCURRENCY = 8;
     const hits: SessionSearchHit[] = [];
     for (let i = 0; i < candidates.length; i += CONCURRENCY) {
@@ -92,8 +96,7 @@ export class SessionManagerStruct {
 
   // 叠加置顶/状态标记（hub 自己的标注，不属于 jsonl）
   // 读取键与写入键一致，都走「规范键」；`meta[s.id]` 只作历史遗留（草稿键上的旧标注）兜底。
-  private static _withMeta(sessions: Session[]): Session[] {
-    const meta = SessionMeta.getAll();
+  private static _withMeta(sessions: Session[], meta = SessionMeta.getAll()): Session[] {
     return sessions.map((s) => {
       const e = meta[this._canonicalKey(s)] || meta[s.id];
       return {
@@ -133,43 +136,50 @@ export class SessionManagerStruct {
   }
 
   // 收藏夹：遍历 meta 里被收藏的键（去重与排序细节见 _listMetaSessions）。
-  static listFavoriteSessions(): Session[] {
+  static listFavoriteSessions(): Promise<Session[]> {
     return this._listMetaSessions((e) => !!e.favorite, (e) => e.favoriteAt || 0);
   }
 
   // 「全部目录」视图：只列出带索引标记的会话（本版本起新建的会话在创建时打标）。
-  // 与收藏夹同一条路径 —— 读 meta 键即可，不必逐目录扫 jsonl，所以目录再多也不慢。
-  static listIndexedSessions(): Session[] {
+  // 与收藏夹共用一份异步文件索引和会话标记，避免每条会话重新扫描整个存储。
+  static listIndexedSessions(): Promise<Session[]> {
     return this._listMetaSessions((e) => !!e.indexed, (e) => e.indexedAt || 0);
   }
 
   // 按 meta 标记挑会话的公共路径（收藏夹 / 全部目录共用）。
   // 同一会话的草稿键与自然键可能都留有记录（历史数据），故按规范键去重，
   // 且优先保留自然 id 那条，避免同一个会话在列表里出现两遍。
-  private static _listMetaSessions(
+  private static async _listMetaSessions(
     pick: (e: SessionMetaEntry) => boolean,
     at: (e: SessionMetaEntry) => number,
-  ): Session[] {
-    const meta = SessionMeta.getAll();
-    const ids = Object.keys(meta)
-      .filter((k) => pick(meta[k]))
-      .sort((a, b) => Number(a.includes(':draft-')) - Number(b.includes(':draft-')));
-    const out: Session[] = [];
-    const seen = new Set<string>();
-    const markAt = new Map<string, number>(); // 行 id → 打标时间（行 id 可能被改写成草稿 id，不能再按 meta[s.id] 查）
-    for (const id of ids) {
-      const s = this._getSessionSafe(id); // 会话已删/根目录不可达 → 跳过这条陈旧标记
-      if (!s) continue;
-      const key = this._canonicalKey(s);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const row = { ...s, id: this._listId(s) };
-      markAt.set(row.id, at(meta[id]) || row.updatedAt);
-      out.push(row);
-    }
-    return out.sort((a, b) => {
-      if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
-      return (markAt.get(b.id) || b.updatedAt) - (markAt.get(a.id) || a.updatedAt);
+  ): Promise<Session[]> {
+    return CodexStoreHelper.withIndex(Settings.effectiveHomeDir(), async () => {
+      const meta = SessionMeta.getAll();
+      const ids = Object.keys(meta)
+        .filter((k) => pick(meta[k]))
+        .sort((a, b) => Number(a.includes(':draft-')) - Number(b.includes(':draft-')));
+      const out: Session[] = [];
+      const seen = new Set<string>();
+      const markAt = new Map<string, number>(); // 行 id → 打标时间（行 id 可能被改写成草稿 id，不能再按 meta[s.id] 查）
+      let yieldedAt = Date.now();
+      for (const id of ids) {
+        if (Date.now() - yieldedAt >= 8) {
+          await new Promise<void>(resolve => setImmediate(resolve));
+          yieldedAt = Date.now();
+        }
+        const s = this._getSessionSafe(id, meta); // 会话已删/根目录不可达 → 跳过这条陈旧标记
+        if (!s) continue;
+        const key = this._canonicalKey(s);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const row = { ...s, id: this._listId(s) };
+        markAt.set(row.id, at(meta[id]) || row.updatedAt);
+        out.push(row);
+      }
+      return out.sort((a, b) => {
+        if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+        return (markAt.get(b.id) || b.updatedAt) - (markAt.get(a.id) || a.updatedAt);
+      });
     });
   }
 
@@ -262,13 +272,13 @@ export class SessionManagerStruct {
     return this._get(id) || this._getLiveByNaturalId(id) || this.getSession(id);
   }
 
-  static getSession(id: string): Session {
+  static getSession(id: string, meta?: Record<string, SessionMetaEntry>): Session {
     if (!id) throw new Error(`getSession: invalid id=${id}`);
     // 先精确按运行期表键取；miss 再按自然 id 兜底（reconcile 后键与自然 id 分叉时仍能拿到任务队列）
     const live = this._get(id) || this._getLiveByNaturalId(id);
     const base = live ? this._hydrateLiveMeta(live, id) : this._buildMeta(id); // 从 claude jsonl 构造（无运行期状态）
     if (!base) throw new Error(`getSession: not found, id=${id}`);
-    return this._withMeta([base])[0];
+    return this._withMeta([base], meta)[0];
   }
 
   // wantId = 调用方索取的 id（收藏夹/单会话按自然 id 索取）。返回会话统一用 wantId，
@@ -386,7 +396,7 @@ export class SessionManagerStruct {
     throw new Error('Not implemented');
   }
   // getSession 的安全版：会话已删 / 根目录不可达时返回 null 而非抛错（收藏夹遍历、删除取规范键用）
-  protected static _getSessionSafe(_id: string): Session | null {
+  protected static _getSessionSafe(_id: string, _meta?: Record<string, SessionMetaEntry>): Session | null {
     throw new Error('Not implemented');
   }
   protected static _put(_session: Session): void {

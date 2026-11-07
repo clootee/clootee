@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
   <link rel="stylesheet" href="dog.css?v=20261026e" />
-  <link rel="stylesheet" href="styles.css?v=20261105metrics35" />
+  <link rel="stylesheet" href="styles.css?v=20261106recovery36" />
 </head>
 <body class="dark">
   <div id="gitInstallStatus" class="sx-note sx-pre" role="status" aria-live="polite" hidden style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(620px,90vw);max-height:35vh;overflow:auto;padding:16px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:12px;z-index:10050"></div>
@@ -38,8 +38,8 @@
     </form>
   </div>
 
-  <div class="login-overlay" id="accessErrorOverlay" hidden>
-    <div class="login-card"><h2 id="accessErrorTitle"></h2><p id="accessErrorNote"></p><button type="button" id="accessErrorRetry"></button></div>
+  <div class="login-overlay" id="accessErrorOverlay" role="dialog" aria-modal="true" aria-labelledby="accessErrorTitle" hidden>
+    <div class="login-card"><h2 id="accessErrorTitle"></h2><p id="accessErrorNote" role="status" aria-live="polite"></p><button type="button" id="accessErrorRetry"></button></div>
   </div>
   <!-- 首次安装：明确选语言 -> 选供应商 -> 原地登录或配置自己的供应商 -->
   <div class="login-overlay" id="onboardOverlay" hidden>
@@ -1211,7 +1211,7 @@
     </div>
   </dialog>
 
-  <script src="trans.js?v=20261105metrics35"></script>
+  <script src="trans.js?v=20261107responsive"></script>
   <script src="workspace.js?v=20261029sessionfix"></script>
   <script src="rootwizard.js?v=20261031quickstart"></script>
   <script src="health.js?v=20261104runtime"></script>
@@ -1233,6 +1233,6 @@
   <script src="cost-optimization.js?v=20261015a"></script>
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
-  <script src="app.js?v=20261105metrics35"></script>
+  <script src="app.js?v=20261107responsive"></script>
 </body>
 </html>

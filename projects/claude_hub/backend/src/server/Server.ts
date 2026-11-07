@@ -11,6 +11,7 @@ import { LifeGuard } from '../logic_realize/LifeGuard';
 import { ErrorHandler } from '../helper/ErrorHandler';
 import { EventBus } from '../helper/EventBus';
 import { RootManager } from '../logic_realize/RootManager';
+import { CodexStoreHelper } from '../helper/CodexStoreHelper';
 import { SessionManager } from '../logic_realize/SessionManager';
 import { TaskQueue } from '../logic_realize/TaskQueue';
 import { CostOptimizer } from '../logic_realize/CostOptimizer';
@@ -492,18 +493,18 @@ export class Server {
 
     // ── 会话 ──
     app.get('/api/session/list', (req, res) =>
-      this._wrap(res, 'session.list', () => this._redact(req, SessionManager.listSessions(String(req.query.rootId)))),
+      this._wrapAsync(res, 'session.list', () => CodexStoreHelper.withIndex(Settings.effectiveHomeDir(), () => this._redact(req, SessionManager.listSessions(String(req.query.rootId))))),
     );
     // 工作台模式：跨全部根目录合并列出会话
     app.get('/api/session/list-all', (req, res) =>
-      this._wrap(res, 'session.listAll', () => this._redact(req, SessionManager.listAllSessions())),
+      this._wrapAsync(res, 'session.listAll', async () => this._redact(req, await SessionManager.listAllSessions())),
     );
     app.get('/api/session/list-favorites', (req, res) =>
-      this._wrap(res, 'session.listFavorites', () => this._redact(req, SessionManager.listFavoriteSessions())),
+      this._wrapAsync(res, 'session.listFavorites', async () => this._redact(req, await SessionManager.listFavoriteSessions())),
     );
     // 「全部目录」视图：只取带索引标记的会话（本版本起新建即打标），不逐目录扫盘
     app.get('/api/session/list-indexed', (req, res) =>
-      this._wrap(res, 'session.listIndexed', () => this._redact(req, SessionManager.listIndexedSessions())),
+      this._wrapAsync(res, 'session.listIndexed', async () => this._redact(req, await SessionManager.listIndexedSessions())),
     );
     app.post('/api/session/create', (req, res) =>
       this._wrap(res, 'session.create', () =>
@@ -790,7 +791,7 @@ export class Server {
 
     // 安全：默认仅 localhost 可访问；设置里开启「允许局域网访问」后才绑定 0.0.0.0（需重启生效）。
     const allowLan = Settings.get().allowLan;
-    const host = allowLan ? '0.0.0.0' : '127.0.0.1';
+    const host = allowLan && process.env.CLOOTEE_SUPERVISED !== '1' ? '0.0.0.0' : '127.0.0.1';
     server.listen(AppConfig.PORT, host, () => {
       Logger.info(
         'Server',

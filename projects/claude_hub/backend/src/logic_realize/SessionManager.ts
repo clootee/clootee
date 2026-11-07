@@ -1,5 +1,6 @@
 // 会话管理（实现）。运行期会话表 = 纯内存 Map（草稿 + 带队列/暂停的会话），不落盘。
 // claude jsonl 相关钩子经 RootManager 定位根目录、NativeSession 解析。
+import { SessionMetaEntry } from '../logic_struct/SessionMetaStruct';
 import { SessionManagerStruct } from '../logic_struct/SessionManagerStruct';
 import { NativeSession } from './NativeSession';
 import { CodexSession } from './CodexSession';
@@ -26,9 +27,9 @@ export class SessionManager extends SessionManagerStruct {
     }
     return null;
   }
-  protected static _getSessionSafe(id: string): Session | null {
+  protected static _getSessionSafe(id: string, meta?: Record<string, SessionMetaEntry>): Session | null {
     try {
-      return this.getSession(id);
+      return this.getSession(id, meta);
     } catch {
       return null;
     }

@@ -1,6 +1,7 @@
 // Password-free access is local only, including WebSocket connections.
 export class LocalAccess {
-  static isLocal(req: { socket: { remoteAddress?: string }; headers: { host?: string; origin?: string; 'sec-fetch-site'?: string } }): boolean {
+  static isLocal(req: { socket: { remoteAddress?: string }; headers: { host?: string; origin?: string; 'sec-fetch-site'?: string; 'x-clootee-remote'?: string } }): boolean {
+    if (req.headers['x-clootee-remote'] === '1') return false;
     const ip = String(req.socket.remoteAddress || '');
     if (!['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip)) return false;
     const authority = String(req.headers.host || '').toLowerCase();
