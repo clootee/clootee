@@ -55,7 +55,7 @@ test('desktop checks the published package feed and does not consult GitHub sour
   assert.equal(replies[0].result.currentVersion, '3.1.30'); assert.equal(replies[0].result.latestVersion, '3.1.31'); assert.equal(replies[0].result.hasUpdate, true);
 });
 
-for (const mode of ['git', 'zip', 'legacy-unix', 'pm2']) test((mode === 'zip' ? 'ZIP without .git' : mode === 'git' ? 'Git checkout' : mode === 'pm2' ? 'Existing process manager' : 'Old Unix restart') + ' upgrade: real pull, build, IPC handoff, health and reopen without PM2; failed build keeps old server', { timeout: 90000 }, async t => {
+for (const mode of ['git', 'zip', 'legacy-unix', 'pm2', 'supervised']) test((mode === 'zip' ? 'ZIP without .git' : mode === 'git' ? 'Git checkout' : mode === 'supervised' ? 'Clootee launcher' : ['pm2','supervised'].includes(mode) ? 'Existing process manager' : 'Old Unix restart') + ' upgrade: real pull, build, IPC handoff, health and reopen without PM2; failed build keeps old server', { timeout: 90000 }, async t => {
   const zip = mode === 'zip';
   const legacy = mode === 'legacy-unix' && process.platform !== 'win32';
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee source update '));
@@ -99,8 +99,9 @@ for (const mode of ['git', 'zip', 'legacy-unix', 'pm2']) test((mode === 'zip' ? 
   const call = async route => (await fetch(url + route, { signal: AbortSignal.timeout(4000) })).json();
   const start = () => {
     const env = { ...process.env, PORT: String(port), GIT_CONFIG_GLOBAL: gitConfig }; delete env.pm_id; delete env.CLOOTEE_DESKTOP;
-    if (mode === 'pm2') {
-      env.pm_id = '0';
+    if (['pm2','supervised'].includes(mode)) {
+      if (mode === 'pm2') env.pm_id = '0';
+      else { env.CLOOTEE_SUPERVISED = '1'; env.CLOOTEE_PUBLIC_PORT = String(port); }
       const monitor = `const {spawn}=require('node:child_process');let stopping=false,child;function start(){child=spawn(process.execPath,['dist/index.js'],{cwd:process.cwd(),env:process.env,stdio:'ignore'});child.on('exit',()=>{if(stopping)process.exit(0);else start();});}process.on('SIGTERM',()=>{stopping=true;child.kill();});start();`;
       return spawn(process.execPath, ['-e', monitor], {cwd:installed,env,stdio:'ignore'});
     }
@@ -121,12 +122,12 @@ for (const mode of ['git', 'zip', 'legacy-unix', 'pm2']) test((mode === 'zip' ? 
   assert.equal(applied.ok, true);
   await until(async () => { try { const state = (await call('/api/auth/status')).data; if(state.version !== '3.1.31')return false; replacementPid = Number(state.instance.split(':')[0]); return true; } catch { return false; } }, 'Updated server did not become healthy');
   assert.notEqual(replacementPid, old.pid);
-  if(mode !== 'pm2') await until(() => fs.existsSync(path.join(data,'run/hub.pid')), 'Supervisor did not finish writing startup record');
+  if(!['pm2','supervised'].includes(mode)) await until(() => fs.existsSync(path.join(data,'run/hub.pid')), 'Supervisor did not finish writing startup record');
   assert.equal(fs.readFileSync(saved, 'utf8'), '{"keep":"security-password"}');
   assert.equal(fs.readFileSync(path.join(data,'console.json'), 'utf8'), '{"keep":"provider-session"}');
   assert.equal(fs.readFileSync(path.join(root,'user-project/prompt.txt'), 'utf8'), 'unchanged');
   await until(() => fs.readFileSync(path.join(data,'logs/update-restart.log'), 'utf8').includes('UPDATE COMPLETE'), 'Supervisor did not finish');
-  if(mode === 'pm2') { replacementPid = null; return; }
+  if(['pm2','supervised'].includes(mode)) { replacementPid = null; return; }
   process.kill(replacementPid); replacementPid = null;
   await until(async () => { try { await call('/api/auth/status'); return false; } catch { return true; } }, 'Replacement did not stop');
   old = start();

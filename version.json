@@ -1,10 +1,10 @@
 {
-  "version": "3.1.35",
+  "version": "3.1.36",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-05",
+  "releasedAt": "2026-11-06",
   "notesI18n": {
-    "zh": "设置顶部磁盘和负载改为百分比显示，磁盘小字显示已用与总容量。",
-    "en": "Show disk usage and load as percentages in Settings, with used and total disk capacity below."
+    "zh": "增加 Linux 开机自动启动和独立服务恢复入口，断连弹窗可启动服务并重连；桌面端支持登录自动启动和后台运行。",
+    "en": "Add Linux automatic startup and an independent service recovery launcher; reconnect from the offline dialog. Desktop supports login startup and background operation."
   }
 }

@@ -92,3 +92,6 @@ Thumbs.db
 desktop.ini
 .idea/
 .vscode/
+
+# Per-installation service PID and lifecycle lock
+/run/

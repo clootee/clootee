@@ -87,7 +87,11 @@
     "scripts/release/cdn/pnpm-lock.yaml",
     "scripts/release/cdn/.npmrc",
     "scripts/linux/supervisor.cjs",
-    "scripts/release/session-list.test.cjs"
+    "scripts/linux/autostart.cjs",
+    "scripts/release/desktop/preload.cjs",
+    "scripts/release/launcher.test.cjs",
+    "scripts/release/session-list.test.cjs",
+    "scripts/release/session-pagination.test.cjs"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [

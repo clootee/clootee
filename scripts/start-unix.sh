@@ -27,6 +27,20 @@ hold() {
 }
 die() { echo; echo "[ERROR] $*"; hold; exit 1; }
 
+# Linux uses an installation-scoped supervisor and systemd unit. Repeated starts
+# leave a healthy worker and its tasks running.
+if [ "$(uname -s)" = Linux ]; then
+  . "$ROOT/scripts/node-env.sh" || { hold; exit 1; }
+  "$NODE_EXE" "$HUB/backend/scripts/setup.js" --quiet || die "启动前自检未通过 / Preflight failed"
+  "$NODE_EXE" "$ROOT/scripts/linux/control.cjs" start || die "启动失败 / Startup failed"
+  if ! "$NODE_EXE" "$ROOT/scripts/linux/control.cjs" autostart enable; then
+    echo "[WARN] 开机启动未启用，请执行 node scripts/linux/control.cjs autostart enable 重试。"
+  fi
+  echo "http://localhost:$PORT — 关闭终端后服务继续运行 / Continues after closing this terminal"
+  if command -v xdg-open >/dev/null 2>&1; then xdg-open "http://localhost:$PORT" >/dev/null 2>&1 || true; fi
+  exit 0
+fi
+
 echo
 echo "==> 启动前先停止旧实例 / Stopping the previous instance before starting ..."
 bash "$SELF/stop-unix.sh" || die "旧实例未能停止，已取消启动 / Failed to stop the previous instance; startup aborted."

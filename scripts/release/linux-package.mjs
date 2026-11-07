@@ -23,7 +23,7 @@ try {
     return fs.statSync(source).isDirectory() ? !/(?:^|\/)(?:md|node_modules|data|test|knowledge_ai)$/.test(source) : checkFiles.has(rel);
   }});
   fs.mkdirSync(path.join(temp, 'scripts/linux'), { recursive: true });
-  for (const name of ['control.cjs', 'supervisor.cjs']) fs.copyFileSync('scripts/linux/' + name, path.join(temp, 'scripts/linux', name));
+  for (const name of ['control.cjs', 'supervisor.cjs', 'autostart.cjs']) fs.copyFileSync('scripts/linux/' + name, path.join(temp, 'scripts/linux', name));
   for (const file of ['version.json', 'LICENSE', 'NOTICE']) fs.copyFileSync(file, path.join(temp, file));
   const nodeVersion = '22.23.4';
   const name = `node-v${nodeVersion}-linux-${arch}`;
