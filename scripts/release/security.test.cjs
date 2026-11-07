@@ -40,6 +40,7 @@ test('password-free access checks peer, Host and Origin for both HTTP and WebSoc
   assert.equal(LocalAccess.isLocal(req), true);
   for (const bad of [
     { ...req, socket: { remoteAddress: '192.168.1.20' } },
+    { ...req, headers: { ...req.headers, 'x-clootee-remote': '1' } },
     { ...req, headers: { host: 'attacker.test' } },
     { ...req, headers: { ...req.headers, origin: 'http://attacker.test' } },
     { ...req, headers: { ...req.headers, 'sec-fetch-site': 'cross-site' } },
@@ -68,11 +69,11 @@ test('a failed status check shows a connection error instead of inventing a logi
 test('password-free state hides workspace lock and clears only workspace credentials', async () => {
   const storage = new Map([['token', 'old-workspace-token'], ['provider-account', 'provider-session']]);
   const elements = { logoutBtn: { parentElement: {} }, loginOverlay: { hidden: false } };
-  const context = { TOKEN: 'old-workspace-token', SecurityState: {}, securityKnown: false,
+  const context = { AbortSignal, TOKEN: 'old-workspace-token', SecurityState: {}, securityKnown: false,
     $: id => elements[id], T: key => key, localStorage: { removeItem: key => storage.delete(key) },
     fetch: async () => ({ ok: true, json: async () => ({ success: true, data: { passwordEnabled: false, localAccess: true } }) }),
     hideLogin: () => { elements.loginOverlay.hidden = true; } };
-  const start = appSource.indexOf('async function refreshSecurityState()');
+  const start = appSource.indexOf('async function refreshSecurityState(');
   const end = appSource.indexOf('function showAccessError', start);
   vm.runInNewContext(appSource.slice(start, end), context);
   await context.refreshSecurityState();

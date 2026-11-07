@@ -6,6 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { AsyncLocalStorage } from 'async_hooks';
 import { SignatureCache } from './SignatureCache';
 import { FsHelper } from './FsHelper';
 
@@ -21,6 +22,68 @@ export interface CodexSessionFile {
 export class CodexStoreHelper {
   // 首行元信息缓存：键=rollout 文件路径，签名=mtime+大小（见 index）
   private static _metaCache = new SignatureCache<{ id: string; cwd: string; createdAt: number } | null>(1000);
+
+  // A list request shares one asynchronously built filesystem snapshot. Contexts
+  // remain separate across concurrent requests and different Codex homes.
+  private static _indexes = new AsyncLocalStorage<{ root: string; files: CodexSessionFile[]; byId: Map<string, CodexSessionFile> }>();
+  private static _building = new Map<string, Promise<CodexSessionFile[]>>();
+
+  static async withIndex<T>(homeDir: string | undefined, run: () => T | Promise<T>): Promise<T> {
+    const root = this.sessionsRoot(homeDir);
+    if (this._indexes.getStore()?.root === root) return run();
+    let building = this._building.get(root);
+    if (!building) {
+      building = this._indexAsync(root).finally(() => { this._building.delete(root); });
+      this._building.set(root, building);
+    }
+    const files = await building;
+    const byId = new Map<string, CodexSessionFile>();
+    for (const file of files) if (!byId.has(file.sessionId)) byId.set(file.sessionId, file);
+    return this._indexes.run({ root, files, byId }, run);
+  }
+
+  private static async _indexAsync(root: string): Promise<CodexSessionFile[]> {
+    const files: string[] = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries: fs.Dirent[];
+      try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
+      for (const entry of entries) {
+        const file = path.join(dir, entry.name);
+        if (entry.isDirectory()) await walk(file);
+        else if (entry.isFile() && entry.name.startsWith('rollout-') && entry.name.endsWith('.jsonl')) files.push(file);
+      }
+    };
+    await walk(root);
+    const out: CodexSessionFile[] = [];
+    // Bound open descriptors and yield to HTTP/WS while reading cold metadata.
+    for (let i = 0; i < files.length; i += 16) {
+      await Promise.all(files.slice(i, i + 16).map(async file => {
+        try {
+          const st = await fs.promises.stat(file);
+          const sig = `${st.mtimeMs}:${st.size}`;
+          let meta = this._metaCache.get(file, sig);
+          if (meta === undefined) {
+            const handle = await fs.promises.open(file, 'r');
+            try {
+              const chunks: Buffer[] = [];
+              for (let pos = 0; pos < 4 * 1024 * 1024;) {
+                const buffer = Buffer.alloc(64 * 1024);
+                const { bytesRead } = await handle.read(buffer, 0, buffer.length, pos);
+                if (!bytesRead) break;
+                pos += bytesRead;
+                const end = buffer.subarray(0, bytesRead).indexOf(10);
+                chunks.push(buffer.subarray(0, end < 0 ? bytesRead : end));
+                if (end >= 0) break;
+              }
+              meta = this._metaCache.set(file, sig, this._parseMeta(Buffer.concat(chunks).toString('utf8')));
+            } finally { await handle.close(); }
+          }
+          if (meta) out.push({ sessionId: meta.id, file, cwd: meta.cwd, mtimeMs: st.mtimeMs, size: st.size, createdAt: meta.createdAt || st.mtimeMs });
+        } catch { /* Deleted or unreadable files do not invalidate the list. */ }
+      }));
+    }
+    return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  }
 
   // ~/.codex（可用 CODEX_HOME 覆盖）
   // homeDir：调用方按「真正跑 codex 的用户身份」传入的家目录覆盖值（如 RunAsUser 切了用户）。
@@ -80,6 +143,14 @@ export class CodexStoreHelper {
     try {
       const first = this._readFirstLine(file);
       if (!first) return null;
+      return this._parseMeta(first);
+    } catch {
+      return null;
+    }
+  }
+
+  private static _parseMeta(first: string): { id: string; cwd: string; createdAt: number } | null {
+    try {
       const o = JSON.parse(first);
       const p = o && o.payload ? o.payload : {};
       if (!p.id) return null;
@@ -95,6 +166,8 @@ export class CodexStoreHelper {
   // 首行元信息按「文件签名（mtime+大小）」缓存：rollout 文件不再写就完全不变，
   // 而 index 会被每个根目录、每个会话反复调用（findFile 也走它）——不缓存时会话列表/打开会话都要几秒。
   static index(homeDir?: string): CodexSessionFile[] {
+    const snapshot = this._indexes.getStore();
+    if (snapshot?.root === this.sessionsRoot(homeDir)) return snapshot.files;
     const files: string[] = [];
     this._walkFiles(this.sessionsRoot(homeDir), files);
     const out: CodexSessionFile[] = [];
@@ -131,6 +204,8 @@ export class CodexStoreHelper {
   // 按 uuid 定位文件（全量索引里查）
   static findFile(uuid: string, homeDir?: string): CodexSessionFile | null {
     if (!uuid) return null;
+    const snapshot = this._indexes.getStore();
+    if (snapshot?.root === this.sessionsRoot(homeDir)) return snapshot.byId.get(uuid) || null;
     return this.index(homeDir).find((f) => f.sessionId === uuid) || null;
   }
 

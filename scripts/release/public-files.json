@@ -85,7 +85,9 @@
     "scripts/release/linux-publish.cjs",
     "scripts/release/linux.test.cjs",
     "scripts/release/cdn/pnpm-lock.yaml",
-    "scripts/release/cdn/.npmrc"
+    "scripts/release/cdn/.npmrc",
+    "scripts/linux/supervisor.cjs",
+    "scripts/release/session-list.test.cjs"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [
