@@ -8027,10 +8027,10 @@ function paneById(id) {
   return SETTINGS_PANES.find((p) => p.id === id) || null;
 }
 
-// 同时运行中的任务数量：后端默认 5，允许 1–20；改完立即生效，不用重启
+// 同时运行中的任务数量：后端默认 10，允许 1–20；改完立即生效，不用重启
 function taskConcurrency() {
   const n = Math.round(Number(State.settings.maxConcurrentTasks));
-  return Number.isFinite(n) && n > 0 ? n : 5;
+  return Number.isFinite(n) && n > 0 ? n : 10;
 }
 function fillTaskPane() {
   $('maxConcurrentTasksLabel').textContent = T('taskConcurrencyLabel');
