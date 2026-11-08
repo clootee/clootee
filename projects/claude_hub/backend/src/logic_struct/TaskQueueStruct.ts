@@ -141,9 +141,16 @@ export class TaskQueueStruct {
   // Limit pauses remain paused when another task finishes.
   private static _capped = new Set<string>();
 
-  static onConcurrencyIncreased(previous: number): void {
+  static onConcurrencyIncreased(previous: number, preferredSessionId?: string): void {
     if (this.maxConcurrent() <= previous) return;
-    for (const id of [...this._capped]) {
+    const ids = [...this._capped];
+    if (preferredSessionId) {
+      try {
+        const preferred = SessionManager.getRuntimeSession(preferredSessionId).id;
+        ids.sort((a, b) => Number(b === preferred) - Number(a === preferred));
+      } catch { /* The selected session may have been removed. */ }
+    }
+    for (const id of ids) {
       if (this._runningCount() >= this.maxConcurrent()) break;
       try {
         const session = SessionManager.getSession(id);

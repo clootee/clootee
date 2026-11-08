@@ -54,6 +54,11 @@ test('limit pauses persist, resume once on increase, and respect manual pauses',
     assert.equal(sessions.get('restored').concurrencyPaused, true);
     max = 4; TaskQueue.onConcurrencyIncreased(3);
     assert.equal(starts.at(-1)[0], 'restored');
+    add('older'); TaskQueue._tick('older');
+    add('selected'); TaskQueue._tick('selected');
+    max = 5; TaskQueue.onConcurrencyIncreased(4, 'selected');
+    assert.equal(starts.at(-1)[0], 'selected');
+    assert.equal(sessions.get('older').paused, true);
     assert.ok(events.some(e => e.kind === 'session' && e.session.concurrencyPaused));
   } finally { originals.reverse().forEach(restore => restore()); }
 });
