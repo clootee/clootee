@@ -217,9 +217,10 @@ export class TaskQueue extends TaskQueueStruct {
     EventBus.broadcast({ kind: 'session', session });
   }
 
-  protected static _setPaused(sessionId: string, paused: boolean): void {
+  protected static _setPaused(sessionId: string, paused: boolean, concurrencyPaused = false): void {
     const session = SessionManager.getSession(sessionId);
     session.paused = paused;
+    session.concurrencyPaused = concurrencyPaused;
     SessionManager.saveSession(session);
     EventBus.broadcast({ kind: 'session', session });
   }
