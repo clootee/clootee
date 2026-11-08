@@ -8040,7 +8040,7 @@ function fillTaskPane() {
 async function saveTaskPane() {
   const n = Math.round(Number($('maxConcurrentTasks').value));
   if (!Number.isInteger(n) || n < 1 || n > 20) { alert(T('taskConcurrencyInvalid')); return false; }
-  const saved = await patchSettings({ maxConcurrentTasks: n });
+  const saved = await patchSettings({ maxConcurrentTasks: n, resumeSessionId: State.sessionId });
   if (!saved) { setPaneNotice('engSaveFailShort', null, 'err', 0); return false; }
   setPaneNotice('engSavedToast', null, 'ok', 2500);
   return true;

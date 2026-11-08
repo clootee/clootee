@@ -198,7 +198,7 @@ export class Server {
           }
           EventBus.revalidate();
         }
-        TaskQueue.onConcurrencyIncreased(previousConcurrency);
+        TaskQueue.onConcurrencyIncreased(previousConcurrency, typeof req.body.resumeSessionId === 'string' ? req.body.resumeSessionId : undefined);
         return settings;
       }),
     );
