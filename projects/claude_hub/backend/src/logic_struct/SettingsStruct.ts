@@ -44,10 +44,10 @@ export const AUTO_COMPACT_DEFAULT_TOKENS = 1000000;
 
 // 同时运行中的任务数量上限：超过后新任务自动排队，任务结束时按顺序补位。
 // 一台机器同时跑太多构建/测试会把 CPU、内存、磁盘压满（8G 机器实测 load 冲到 288），
-// 连网页都打不开，所以默认给 5，并允许用户在设置里按机器性能调整。
+// 连网页都打不开，所以默认给 10，并允许用户在设置里按机器性能调整。
 export const MAX_CONCURRENT_MIN = 1;
 export const MAX_CONCURRENT_MAX = 20;
-export const MAX_CONCURRENT_DEFAULT = 5;
+export const MAX_CONCURRENT_DEFAULT = 10;
 
 export interface AppSettings {
   costOptimization: CostPolicySettings;
@@ -288,7 +288,7 @@ export class SettingsStruct {
   protected static _sanitizeAutoCompact(_raw: unknown): AutoCompactSetting {
     throw new Error('Not implemented');
   }
-  // 清洗「同时运行中的任务数量」：正整数，夹到 1–20，缺省 5
+  // 清洗「同时运行中的任务数量」：正整数，夹到 1–20，缺省 10
   protected static _sanitizeMaxConcurrent(_raw: unknown): number {
     throw new Error('Not implemented');
   }
