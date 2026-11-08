@@ -95,7 +95,8 @@
     "scripts/release/desktop/preload.cjs",
     "scripts/release/launcher.test.cjs",
     "scripts/release/session-list.test.cjs",
-    "scripts/release/session-pagination.test.cjs"
+    "scripts/release/session-pagination.test.cjs",
+    "scripts/release/task-concurrency.test.cjs"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [
