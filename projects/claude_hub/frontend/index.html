@@ -155,7 +155,7 @@
       </div>
       <div class="rw-body">
         <label class="fld-label" id="npNameLabel"></label>
-        <input id="npName" spellcheck="false" autocomplete="off" />
+        <input id="npName" spellcheck="false" autocomplete="off" maxlength="22" pattern="[A-Za-z0-9_\-]{1,22}" aria-describedby="npNameHint npErr" />
         <div class="rw-hint" id="npNameHint"></div>
         <label class="fld-label" id="npParentLabel" style="margin-top:12px;display:block"></label>
         <div style="display:flex;gap:8px">

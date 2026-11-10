@@ -101,12 +101,12 @@ const DICT = {
   npTitle: { en: 'Create a new project', zh: '新建项目' },
   npNameLabel: { en: 'Project name', zh: '项目名称' },
   npNameHint: {
-    en: 'Letters, digits and underscore only (no spaces or Chinese) — it becomes the folder name.',
-    zh: '只能是英文字母、数字和下划线（不能有空格或中文）——它就是文件夹名。',
+    en: '1–22 characters: English letters, digits, _ and - only. This is the folder name.',
+    zh: '1–22 个字符，仅允许英文字母、数字、下划线（_）和连字符（-），不能有中文、空格或其他符号。这就是文件夹名。',
   },
   npParentLabel: { en: 'Create inside', zh: '创建到' },
   npCreate: { en: 'Create project', zh: '创建项目' },
-  npNameInvalid: { en: 'Invalid name: only A–Z a–z 0–9 _ allowed', zh: '名称非法：只允许英文字母、数字和下划线' },
+  npNameInvalid: { en: 'Use 1–22 characters: English letters, digits, _ and - only.', zh: '名称须为 1–22 个字符，仅允许英文字母、数字、_ 和 -，不能有中文、空格或其他符号。' },
   npParentRequired: { en: 'Please choose a directory to create in', zh: '请选择创建到的目录' },
   npWillCreate: { en: 'Will create: ', zh: '将创建：' },
   npFolderExists: {
