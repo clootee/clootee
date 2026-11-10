@@ -61,7 +61,7 @@ export class TaskQueueStruct {
     SessionLimit.assertCapacity(SessionLimit.status(full, full.messages, Settings.get().costOptimization), cleaned.length);
 
     // 暂停整条序列期间新增 = 「补充任务」：插到冻结队列最前，并可越过暂停立即执行（视为对被暂停任务的补充）
-    const supplement = SessionManager.getSession(sessionId).paused === true;
+    const supplement = SessionManager.getSession(sessionId).paused === true && !SessionManager.getSession(sessionId).concurrencyPaused;
     const tasks = cleaned.map<Task>((prompt, index) => ({
       costApproval: approvals[index],
       id: Ids.short('task'),
@@ -87,6 +87,7 @@ export class TaskQueueStruct {
       // 每个会话独立恢复：某个会话根目录已删/异常时只跳过它，
       // 不能连累其余会话的 pending 任务无法续跑。
       try {
+        if (s.concurrencyPaused) { this._capped.add(s.id); continue; }
         // _tick 自身按暂停态过滤：未暂停会续跑下一个 pending；暂停中仅补充任务(supplement)会续跑
         if (s.tasks.some((t) => t.status === 'pending' && !t.held)) this._tick(s.id);
       } catch (e) {
@@ -99,11 +100,10 @@ export class TaskQueueStruct {
   // 调度的唯一入口：当前空闲 且 有可执行 pending → 启动下一个任务
   // 暂停中：仅「补充任务」(supplement) 可越过暂停执行，其余 pending 冻结等待「继续任务流」
   // 暂定（held）的 pending 任务始终被跳过，保留在队列中等待恢复
-  // 全局并发上限：同时运行的任务数达到设置值后，其余任务留在 pending 排队，
-  // 等某个任务收尾时由 _tickCapped 按先来后到补位。
+  // 全局并发上限：达到设置值后暂停会话；调大上限或手动继续后再尝试派发。
   static _tick(sessionId: string): void {
     const session = SessionManager.getSession(sessionId);
-    if (this._isRunning(sessionId)) return;
+    if (this._isRunning(sessionId) || session.concurrencyPaused) return;
     const next = session.tasks.find(
       (t) => t.status === 'pending' && !t.held && (!session.paused || t.supplement),
     );
@@ -117,6 +117,7 @@ export class TaskQueueStruct {
     if (!next.supplement && running >= max) {
       const firstTime = !this._capped.has(sessionId);
       this._capped.add(sessionId);
+      this._setPaused(sessionId, true, true);
       // 只在「刚被挡下」时提醒一次，避免每个 tick 都弹。
       // 带上正在执行的任务清单：上限是全局的，用户当前可能只看到自己的项目，
       // 不列出来会误以为「明明没人在跑」。
@@ -137,16 +138,26 @@ export class TaskQueueStruct {
     return Settings.get().maxConcurrentTasks;
   }
 
-  // 被并发上限挡住的会话：任务收尾腾出名额后逐个唤醒
+  // Limit pauses remain paused when another task finishes.
   private static _capped = new Set<string>();
-  private static _tickCapped(): void {
-    if (this._capped.size === 0) return;
-    for (const id of [...this._capped]) {
+
+  static onConcurrencyIncreased(previous: number, preferredSessionId?: string): void {
+    if (this.maxConcurrent() <= previous) return;
+    const ids = [...this._capped];
+    if (preferredSessionId) {
+      try {
+        const preferred = SessionManager.getRuntimeSession(preferredSessionId).id;
+        ids.sort((a, b) => Number(b === preferred) - Number(a === preferred));
+      } catch { /* The selected session may have been removed. */ }
+    }
+    for (const id of ids) {
       if (this._runningCount() >= this.maxConcurrent()) break;
       try {
-        this._tick(id);
-      } catch {
-        this._capped.delete(id);
+        const session = SessionManager.getSession(id);
+        if (session.concurrencyPaused) this.resumeFlow(id);
+        else this._capped.delete(id);
+      } catch (error) {
+        Logger.warn('TaskQueue', `resume after concurrency increase: session=${id}`, error);
       }
     }
   }
@@ -241,12 +252,10 @@ export class TaskQueueStruct {
     if (success && !SessionManager.getSession(sessionId).claudeSessionId) {
       this._finishTask(sessionId, taskId, 'error', '引擎未返回 session_id，无法确定会话 id');
       this._tick(sessionId);
-      this._tickCapped();
       return;
     }
     this._finishTask(sessionId, taskId, success ? 'done' : 'error', error);
     this._tick(sessionId);
-    this._tickCapped();
   }
 
   // ── 调度骨架：removeTask ───────────────────────────────────────────
@@ -318,18 +327,17 @@ export class TaskQueueStruct {
     this._killHandle(sessionId, taskId);
     this._finishTask(sessionId, taskId, 'stopped');
     this._tick(sessionId);
-    this._tickCapped();
   }
 
   // ── 调度骨架：pauseFlow ────────────────────────────────────────────
   // 暂停任务流：停止当前任务且不再执行后续（保留 pending 等待继续）
   static pauseFlow(sessionId: string): void {
+    this._capped.delete(sessionId);
     this._setPaused(sessionId, true);
     const taskId = this._currentRunningTaskId(sessionId);
     if (taskId) {
       this._killHandle(sessionId, taskId);
       this._finishTask(sessionId, taskId, 'stopped');
-      this._tickCapped();
     }
   }
 
@@ -347,6 +355,7 @@ export class TaskQueueStruct {
   // ── 调度骨架：resumeFlow ───────────────────────────────────────────
   // 继续任务流：解除暂停并触发调度
   static resumeFlow(sessionId: string): void {
+    this._capped.delete(sessionId);
     this._setPaused(sessionId, false);
     this._tick(sessionId);
   }
@@ -386,7 +395,7 @@ export class TaskQueueStruct {
   protected static _recordAssistantMessage(_sessionId: string, _taskId: string, _text: string): void { throw new Error('Not implemented'); }
   // 把 claude 实际使用的 session_id 回写到会话（与传入不同则校正并落盘）
   protected static _reconcileSessionId(_sessionId: string, _realId: string): void { throw new Error('Not implemented'); }
-  protected static _setPaused(_sessionId: string, _paused: boolean): void { throw new Error('Not implemented'); }
+  protected static _setPaused(_sessionId: string, _paused: boolean, _concurrencyPaused = false): void { throw new Error('Not implemented'); }
 
   // 轨迹落盘用的会话 id：草稿首跑中途 claude 会回报真实 uuid，之后事件必须写进真实 id 的文件
   protected static _traceSessionId(_sessionId: string): string { throw new Error('Not implemented'); }

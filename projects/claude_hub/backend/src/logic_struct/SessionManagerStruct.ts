@@ -39,7 +39,7 @@ export class SessionManagerStruct {
       // 否则一旦 claudeSessionId 被 reconcile 改写（如 SDK 会话 resume 产生新 id），
       // 两个 meta 会共用一个 id → 列表"分裂"（点一个两个都高亮）。
       const useLiveId = !!l && l.id.includes(':draft-');
-      const row = l ? { ...m, id: useLiveId ? l.id : m.id, tasks: l.tasks, paused: l.paused } : m;
+      const row = l ? { ...m, id: useLiveId ? l.id : m.id, tasks: l.tasks, paused: l.paused, concurrencyPaused: l.concurrencyPaused } : m;
       out.push(row);
       usedIds.add(row.id);
     }
@@ -294,6 +294,7 @@ export class SessionManagerStruct {
       engine: live.engine || meta.engine,
       claudeSessionId: live.claudeSessionId,
       paused: live.paused,
+      concurrencyPaused: live.concurrencyPaused,
       tasks: live.tasks,
       messages: live.messages || [],
     };
