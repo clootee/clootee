@@ -41,3 +41,21 @@ test('PEM format labels in runtime code are allowed, encoded private keys are bl
   assert.doesNotThrow(() => auditBytes('runtime.js', Buffer.from(label)));
   for (const newline of ['\n', '\\n']) assert.throws(() => auditBytes('secret.txt', Buffer.from(label + newline + 'A'.repeat(64))), /private key/);
 });
+
+test('only explicitly reviewed cost tests are public; other test content remains private', () => {
+  for (const name of ['projects/claude_hub/backend/test/api_cost.js',
+    'projects/claude_hub/backend/test/api_cost_frontend.js']) {
+    assert.equal(publicPath(name), true, name);
+    assert.equal(privatePath(name), false, name);
+  }
+  for (const name of ['projects/claude_hub/backend/test/unreviewed.js',
+    'projects/claude_hub/backend/test/api_cost.js.bak',
+    'projects/claude_hub/backend/test/.env',
+    'projects/claude_hub/backend/test/AGENTS.md',
+    'projects/claude_hub/backend/test/mem.md',
+    'node_modules/example/test/api_cost.js',
+    'projects/claude_hub/backend/test/nested/api_cost.js']) {
+    assert.equal(publicPath(name), false, name);
+    assert.equal(privatePath(name), true, name);
+  }
+});

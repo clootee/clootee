@@ -5,10 +5,14 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const policy = JSON.parse(fs.readFileSync(path.join(root, 'scripts/release/public-files.json')));
+// Only individually reviewed source tests may override the generic test-folder exclusion.
+const publicTests = new Set(policy.files.filter(name => /^projects\/claude_hub\/backend\/test\/[a-z_]+\.js$/.test(name)));
 const privateName = /(?:^|\.)(?:special|speical|claude|agents|mem|struct|memory)\.md$/i;
 const privateParts = new Set(['.git', '.claude', '.codex', '.secrets', '.state', 'data', 'logs', 'traces', 'deploy', 'test', 'e2e', 'test-results', 'playwright-report', 'knowledge_ai']);
 export function privatePath(name) {
-  const parts = name.replaceAll('\\', '/').split('/');
+  const normalized = name.replaceAll('\\', '/');
+  if (publicTests.has(normalized)) return false;
+  const parts = normalized.split('/');
   return parts.some(p => privateParts.has(p.toLowerCase()) || p.startsWith('.env') || privateName.test(p)
     || /\.(?:bak(?:-.*)?|log|tmp|pem|key|pfx|gpg|sqlite|db)$/i.test(p));
 }
@@ -53,12 +57,14 @@ export function checkHistory(ref) {
   for (const entry of entries) {
     const name = entry.slice(entry.indexOf(' ') + 1);
     if (!entry.includes(' ')) continue;
+    // Git also lists trees: allow the parent of explicitly approved tests, never its other files.
+    if (name === 'projects/claude_hub/backend/test' && publicTests.size) continue;
     if (privatePath(name) || (path.posix.extname(name) && !publicPath(name))) throw Error(`Publication blocked: non-public historical path ${name}`);
   }
 }
 export function archive(target, desktop = false) {
   const files = check();
-  const selected = desktop ? files.filter(name => !name.startsWith('.github/') && !name.startsWith('scripts/release/')) : files;
+  const selected = desktop ? files.filter(name => !name.startsWith('.github/') && !name.startsWith('scripts/release/') && !publicTests.has(name)) : files;
   execFileSync('git', ['archive', '--format=tar', '-o', target, 'HEAD', '--', ...selected], { cwd: root });
   return selected.length;
 }

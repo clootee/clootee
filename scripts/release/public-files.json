@@ -97,7 +97,9 @@
     "scripts/release/session-list.test.cjs",
     "scripts/release/session-pagination.test.cjs",
     "scripts/release/task-concurrency.test.cjs",
-    "scripts/release/root-template-failure.test.cjs"
+    "scripts/release/root-template-failure.test.cjs",
+    "projects/claude_hub/backend/test/api_cost.js",
+    "projects/claude_hub/backend/test/api_cost_frontend.js"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [
