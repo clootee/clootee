@@ -3091,6 +3091,18 @@ const ApiBill = {
     const n = Number(v) || 0;
     return `$${n < 1 ? n.toFixed(6) : n.toFixed(4)}`;
   },
+  cny(v) {
+    const n = Number(v) || 0;
+    return `¥${n < 1 ? n.toFixed(6) : n.toFixed(4)}`;
+  },
+  money(t) {
+    const usd = Number(t && t.usd) || 0;
+    const cny = Number(t && t.cny) || 0;
+    const parts = [];
+    if (usd > 0 || cny <= 0) parts.push(this.usd(usd));
+    if (cny > 0) parts.push(this.cny(cny));
+    return parts.join(' + ');
+  },
   tok(n) { return fmtNum(Number(n) || 0); },
   // 轮次性质：订阅登录（等价估价）/ OpenRouter / DeepSeek / 其它按量服务商
   kind(turn) {
@@ -3109,7 +3121,7 @@ const ApiBill = {
     api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
       .then((r) => {
         this.bySession[sid] = r;
-        if (r.turns.length) { this.totals[sid] = { usd: r.totalUsd, sub: r.subscriptionUsd }; this.paintListTag(sid); this.paintSelection(); }
+        if (r.turns.length) { this.totals[sid] = { usd: r.totalUsd, cny: r.totalCny, sub: r.subscriptionUsd }; this.paintListTag(sid); this.paintSelection(); }
         if (State.session && State.session.id === sid) renderElapsedNotes();
       })
       .catch(() => { delete this.bySession[sid]; });
@@ -3128,7 +3140,7 @@ const ApiBill = {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `api-cost-toggle${kind === 'sub' ? ' sub' : ''}`;
-    btn.textContent = `${T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.usd(turn.totalUsd))} ${isOpen ? '▾' : '▸'}`;
+    btn.textContent = `${T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.money({ usd: turn.totalUsd, cny: turn.totalCny }))} ${isOpen ? '▾' : '▸'}`;
     btn.title = T(kind === 'sub' ? 'apiCostTipSub' : 'apiCostTip');
     btn.onclick = (ev) => {
       ev.stopPropagation();
@@ -3151,32 +3163,38 @@ const ApiBill = {
       ['apiWebSearch', 'webSearches', 'webSearch'],
     ];
     const blocks = turn.lines.map((l) => {
+      const isCny = l.currency === 'CNY';
+      const breakdown = isCny ? l.cny : l.usd;
+      const money = (v) => isCny ? this.cny(v) : this.usd(v);
       const rows = items
         .filter(([, tk]) => l[tk] > 0)
         .map(([k, tk, uk]) => `<tr><td>${escapeHtml(T(k))}</td><td class="num">${this.tok(l[tk])}</td>` +
-          `<td class="num">${l.priced || uk === 'webSearch' ? this.usd(l.usd[uk]) : '?'}</td></tr>`)
+          `<td class="num">${l.priced || uk === 'webSearch' ? money(breakdown[uk]) : '?'}</td></tr>`)
         .join('');
       const actual = l.requests > 0 && l.reportedRequests === l.requests;
       const tags = [l.extra ? T('apiExtra') : '', actual ? T('apiActual') : '', l.priced || actual ? '' : T('apiUnpriced')].filter(Boolean).join(' · ');
       const reqs = l.requests ? ` · ${T('apiRequests').replace('{n}', l.requests)}` : '';
       return `<div class="api-cost-model"><b>${escapeHtml(l.model)}</b>${reqs}${tags ? ` · <em>${escapeHtml(tags)}</em>` : ''}` +
-        `<span class="api-cost-sum">${this.usd(l.totalUsd)}</span></div>` +
+        `<span class="api-cost-sum">${money(isCny ? l.totalCny : l.totalUsd)}</span></div>` +
         `<table class="api-cost-table"><tr><th>${escapeHtml(T('apiItem'))}</th><th class="num">${escapeHtml(T('apiTokens'))}</th>` +
-        `<th class="num">${escapeHtml(T('apiUsd'))}</th></tr>${rows}</table>`;
+        `<th class="num">${escapeHtml(T(isCny ? 'apiCny' : 'apiUsd'))}</th></tr>${rows}</table>`;
     }).join('');
     const sub = turn.billing === 'subscription'
       ? `<div class="api-cost-note sub">${escapeHtml(T('apiSubscription'))}</div>` : '';
     const cli = turn.cliUsd !== null && turn.cliUsd !== undefined
       ? `<div class="api-cost-note">${escapeHtml(T('apiCliRef').replace('{c}', this.usd(turn.cliUsd)))}</div>` : '';
-    box.innerHTML = blocks + sub +
-      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${this.usd(turn.totalUsd)}</b> · ` +
-      `${escapeHtml(T('apiSessionTotal'))} <b>${this.usd(this.runningTotal(turn, data))}</b></div>${cli}`;
+    const ark = turn.lines.some((l) => l.currency === 'CNY')
+      ? `<div class="api-cost-note">${escapeHtml(T('apiArkNote'))}</div>` : '';
+    box.innerHTML = blocks + sub + ark +
+      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${this.money({ usd: turn.totalUsd, cny: turn.totalCny })}</b> · ` +
+      `${escapeHtml(T('apiSessionTotal'))} <b>${this.money(this.runningTotal(turn, data))}</b></div>${cli}`;
     box.addEventListener('click', (ev) => ev.stopPropagation());
     return box;
   },
   // 截至这一轮（含）的累计：每条消息显示的是它当时的累计，而不是会话现在的总额（总额在左侧会话列表）
   runningTotal(turn, data) {
-    return data.turns.filter((t) => t.startedAt <= turn.startedAt).reduce((n, t) => n + t.totalUsd, 0);
+    return data.turns.filter((t) => t.startedAt <= turn.startedAt)
+      .reduce((n, t) => ({ usd: n.usd + t.totalUsd, cny: n.cny + t.totalCny }), { usd: 0, cny: 0 });
   },
   // 会话列表：已知合计就出徽章；有订阅轮次的话额外用黄色标出其中「订阅」的那部分
   listTag(s) {
@@ -3186,7 +3204,7 @@ const ApiBill = {
   },
   tagHtml(t) {
     const sub = t.sub > 0 ? `<span class="api-cost-sub">${escapeHtml(T('apiSubBadge').replace('{c}', this.usd(t.sub)))}</span>` : '';
-    return `${this.usd(t.usd)}${sub}`;
+    return `${this.money(t)}${sub}`;
   },
   paintListTag(sid) {
     document.querySelectorAll('.api-cost-tag').forEach((tag) => {
@@ -3217,42 +3235,51 @@ const ApiBill = {
         .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); this.paintSelection(); })
         .catch(() => { miss.forEach((id) => this.asked.delete(id)); });
     }
-    const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.sub += t.sub || 0; } return a; }, { usd: 0, sub: 0 });
-    el.hidden = sum.usd <= 0;
-    el.innerHTML = sum.usd > 0 ? this.tagHtml(sum) : '';
+    const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.cny += t.cny || 0; a.sub += t.sub || 0; } return a; }, { usd: 0, cny: 0, sub: 0 });
+    el.hidden = sum.usd <= 0 && sum.cny <= 0;
+    el.innerHTML = sum.usd > 0 || sum.cny > 0 ? this.tagHtml(sum) : '';
   },
   selectionStats(data) {
-    const stats = { sessions: 0, messages: 0, usd: 0, sub: 0,
+    const stats = { sessions: 0, messages: 0, usd: 0, cny: 0, sub: 0,
       costs: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, webSearch: 0 },
+      costsCny: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, webSearch: 0 },
       tokens: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } };
     for (const t of Object.values(data)) {
-      if (!(t.usd > 0)) continue;
-      if (!t.breakdown || !t.tokens || !Number.isFinite(t.consumedMessages)) throw new Error(T('apiBatchUnavailable'));
+      if (!(t.usd > 0) && !(t.cny > 0)) continue;
+      if (!t.breakdown || (t.cny > 0 && !t.breakdownCny) || !t.tokens || !Number.isFinite(t.consumedMessages)) throw new Error(T('apiBatchUnavailable'));
       stats.sessions++;
       stats.messages += t.consumedMessages;
       stats.usd += t.usd;
+      stats.cny += t.cny || 0;
       stats.sub += t.sub || 0;
-      for (const key of Object.keys(stats.costs)) stats.costs[key] += key === 'cacheWrite'
-        ? t.breakdown.cacheWrite5m + t.breakdown.cacheWrite1h : t.breakdown[key];
+      for (const key of Object.keys(stats.costs)) {
+        stats.costs[key] += key === 'cacheWrite' ? t.breakdown.cacheWrite5m + t.breakdown.cacheWrite1h : t.breakdown[key];
+        if (t.cny > 0) stats.costsCny[key] += key === 'cacheWrite' ? t.breakdownCny.cacheWrite5m + t.breakdownCny.cacheWrite1h : t.breakdownCny[key];
+      }
       for (const key of Object.keys(stats.tokens)) stats.tokens[key] += t.tokens[key];
     }
     return stats;
   },
   selectionHtml(s) {
     const text = (key) => escapeHtml(T(key));
-    const average = (v, n) => n > 0 ? this.usd(v / n) : '—';
-    const items = [['apiCacheRead', 'cacheRead'], ['apiCacheWrite', 'cacheWrite'], ['apiInput', 'input'], ['apiOutput', 'output']];
-    if (s.costs.webSearch > 0) items.push(['apiWebSearch', 'webSearch']);
-    const cells = (cost, tokens) => `<td class="num">${tokens === undefined ? '—' : this.tok(tokens)}</td>` +
-      `<td class="num">${this.usd(cost)}</td><td class="num">${average(cost, s.sessions)}</td><td class="num">${average(cost, s.messages)}</td>`;
-    const rows = items.map(([label, key]) => `<tr><td>${text(label)}</td>${cells(s.costs[key], s.tokens[key])}</tr>`).join('');
-    const categoryTotal = Object.values(s.costs).reduce((n, v) => n + v, 0);
-    const adjustment = s.usd - categoryTotal;
-    const extra = Math.abs(adjustment) > 1e-8 ? `<tr><td>${text('apiBatchAdjustment')}</td>${cells(adjustment)}</tr>` : '';
+    const table = (currency, total, costs) => {
+      const money = (v) => currency === 'CNY' ? this.cny(v) : this.usd(v);
+      const average = (v, n) => n > 0 ? money(v / n) : '—';
+      const items = [['apiCacheRead', 'cacheRead'], ['apiCacheWrite', 'cacheWrite'], ['apiInput', 'input'], ['apiOutput', 'output']];
+      if (costs.webSearch > 0) items.push(['apiWebSearch', 'webSearch']);
+      const cells = (cost, tokens) => `<td class="num">${tokens === undefined ? '—' : this.tok(tokens)}</td>` +
+        `<td class="num">${money(cost)}</td><td class="num">${average(cost, s.sessions)}</td><td class="num">${average(cost, s.messages)}</td>`;
+      const rows = items.map(([label, key]) => `<tr><td>${text(label)}</td>${cells(costs[key], s.tokens[key])}</tr>`).join('');
+      const categoryTotal = Object.values(costs).reduce((n, v) => n + v, 0);
+      const adjustment = total - categoryTotal;
+      const extra = Math.abs(adjustment) > 1e-8 ? `<tr><td>${text('apiBatchAdjustment')}</td>${cells(adjustment)}</tr>` : '';
+      return `<div class="batch-cost-scroll"><table class="api-cost-table"><thead><tr><th>${text('apiItem')}</th><th class="num">${text('apiTokens')}</th>` +
+        `<th class="num">${text('apiBatchTotal')} (${currency})</th><th class="num">${text('apiBatchSessionAvg')}</th><th class="num">${text('apiBatchMessageAvg')}</th></tr></thead>` +
+        `<tbody>${rows}${extra}<tr class="batch-cost-total"><td>${text('apiBatchTotal')}</td>${cells(total)}</tr></tbody></table></div>`;
+    };
     return `<p>${text('apiBatchSessions')}: <b>${s.sessions}</b> · ${text('apiBatchMessages')}: <b>${s.messages}</b></p>` +
-      `<div class="batch-cost-scroll"><table class="api-cost-table"><thead><tr><th>${text('apiItem')}</th><th class="num">${text('apiTokens')}</th>` +
-      `<th class="num">${text('apiBatchTotal')}</th><th class="num">${text('apiBatchSessionAvg')}</th><th class="num">${text('apiBatchMessageAvg')}</th></tr></thead>` +
-      `<tbody>${rows}${extra}<tr class="batch-cost-total"><td>${text('apiBatchTotal')}</td>${cells(s.usd)}</tr></tbody></table></div>` +
+      (s.usd > 0 || s.cny <= 0 ? table('USD', s.usd, s.costs) : '') +
+      (s.cny > 0 ? table('CNY', s.cny, s.costsCny) : '') +
       (s.sub > 0 ? `<p class="api-cost-note sub">${text('apiSubBadge').replace('{c}', this.usd(s.sub))} · ${text('apiSubscription')}</p>` : '') +
       `<p class="api-cost-note batch-cost-help">${text('apiBatchRule')}</p>`;
   },

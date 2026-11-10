@@ -203,8 +203,10 @@ export class TraceStore extends TraceStoreStruct {
     }
 
     const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 };
+    // Ark Kimi 的 CLI costUSD 可能错用 Claude 美元价目；真实费用由 ApiCost 以 CNY 统计。
+    const cliUsdReliable = !events.some((e) => String(e.model || '').toLowerCase().startsWith('kimi-'));
     for (const e of events) {
-      if (e.costUsd) usage.costUsd += e.costUsd;
+      if (cliUsdReliable && e.costUsd) usage.costUsd += e.costUsd;
       const u = e.usage as Record<string, number> | undefined;
       if (!u) continue;
       usage.inputTokens += Number(u.input_tokens || 0);

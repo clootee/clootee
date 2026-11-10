@@ -384,9 +384,13 @@ export type WsEvent =
   // 过程轨迹事件（完整不截断）：前端"全过程"视图实时追加用
   | { kind: 'trace'; sessionId: string; taskId: string; event: TraceEvent };
 
-// ── Claude 官方 API 按量计费明细（仅服务商 = anthropic 的任务）──
+// ── API 按量计费明细（USD / CNY 原币分列，不做未经确认的汇率换算）──
+export type ApiCurrency = 'USD' | 'CNY';
+export interface ApiCostBreakdown { input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number; webSearch: number }
+
 export interface ApiCostLine {
   model: string;
+  currency: ApiCurrency;    // 原始结算币种；不把 CNY 换算后混入 USD
   priced: boolean;          // 价目表里找到了该模型
   extra: boolean;           // 来自 result.modelUsage 的补差（CLI 后台调用，未出现在消息流里）
   requests: number;
@@ -398,8 +402,10 @@ export interface ApiCostLine {
   cacheWrite5mTokens: number;
   cacheWrite1hTokens: number;
   webSearches: number;
-  usd: { input: number; output: number; cacheRead: number; cacheWrite5m: number; cacheWrite1h: number; webSearch: number };
+  usd: ApiCostBreakdown;
+  cny: ApiCostBreakdown;
   totalUsd: number;
+  totalCny: number;
 }
 // 计费性质：subscription = 订阅登录跑的轮次（不实扣，按 API 价目给等价估价，前端标「订阅」）；
 // apikey = 按量服务商跑的轮次（真金白银）。老轨迹没记服务商时按模型推断（见 ApiCost._billing）。
@@ -413,19 +419,23 @@ export interface ApiTurnCost {
   startedAt: number;
   lines: ApiCostLine[];
   totalUsd: number;
+  totalCny: number;
   cliUsd: number | null;    // Claude CLI 自报的 total_cost_usd，仅供对照
 }
 export interface ApiSessionCost {
   sessionId: string;
   turns: ApiTurnCost[];
-  totalUsd: number;         // 全部轮次合计（订阅轮次算估价在内）
+  totalUsd: number;         // 全部轮次美元合计（订阅轮次算估价在内）
+  totalCny: number;         // 全部轮次人民币合计；与 USD 分开，不做汇率换算
   subscriptionUsd: number;  // 其中「订阅轮次」的等价估价，便于和真实支出区分
 }
 // 会话列表徽章：总估价 + 其中订阅部分
 export interface ApiSessionTotals {
   usd: number;
+  cny: number;
   sub: number;
   consumedMessages: number;
-  breakdown: ApiCostLine['usd'];
+  breakdown: ApiCostBreakdown;
+  breakdownCny: ApiCostBreakdown;
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
 }

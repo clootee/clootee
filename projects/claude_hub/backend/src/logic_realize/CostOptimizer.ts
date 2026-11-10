@@ -154,7 +154,7 @@ export class CostOptimizer {
             // Helper CLI runs have independent cumulative counters. Keep them out of the resumed conversation's delta baseline.
             TraceStore.record(this.key(s), { ...ev, kind: !compact && ev.kind === 'result' ? 'raw' : ev.kind, taskId });
             if (ev.kind === 'system' && ev.name === 'compact_boundary') { boundary = true; onBoundary?.(); }
-            if (ev.kind === 'result' && ev.costUsd !== undefined) usd = ev.costUsd;
+            if (ev.kind === 'result' && ev.costUsd !== undefined && ApiCost.estimate(cfg.provider, cfg.model, 0, 'off')) usd = ev.costUsd;
           },
           onDone: (ok, error) => finish(!ok ? new Error(error || 'cost_ai_failed') : compact && !boundary ? new Error('cost_compact_not_confirmed') : undefined),
         });

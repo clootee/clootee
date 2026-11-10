@@ -6,14 +6,14 @@ import {
   CLAUDE_PRICES, ModelPrice, DEEPSEEK_PRICES, DeepSeekPrice, DEEPSEEK_OFFPEAK_MULT, isDeepSeekPeak,
   CACHE_WRITE_5M_MULT, CACHE_WRITE_1H_MULT, CACHE_READ_DEFAULT_MULT,
   LONG_CONTEXT_THRESHOLD, LONG_CONTEXT_INPUT_MULT, LONG_CONTEXT_OUTPUT_MULT, WEB_SEARCH_USD,
-  SUBSCRIPTION_PROVIDERS, CLOOTEE_PROVIDER, OPENAI_PRICES, OpenAiPrice,
+  SUBSCRIPTION_PROVIDERS, CLOOTEE_PROVIDER, OPENAI_PRICES, OpenAiPrice, ARK_PRICES,
 } from '../config/ClaudePricing';
 import { OpenRouterPrices } from './OpenRouterPrices';
 import { CodexRunner } from './CodexRunner';
 import { ApiBilling, ApiCostLine, ApiSessionCost, ApiSessionTotals, ApiTurnCost, TraceEvent } from '../models/Types';
 
-// 价目来源：Claude 官方 / OpenRouter 公开价目 / DeepSeek 官方价目
-type Source = 'official' | 'openrouter' | 'deepseek' | 'openai';
+// 价目来源：Claude 官方 / OpenRouter 公开价目 / DeepSeek 官方价目 / 火山方舟 Kimi 人民币价目
+type Source = 'official' | 'openrouter' | 'deepseek' | 'openai' | 'ark';
 
 interface Req {
   model: string;
@@ -45,6 +45,8 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 
 export class ApiCost extends ApiCostStruct {
   static estimate(provider: string, model: string, tokens: number, mode: '1h' | '5m' | 'off') {
+    // 成本预警的阈值和返回字段都是 USD；人民币价目不能塞进 coldUsd/warmUsd。
+    if (this._source(provider, model) === 'ark') return null;
     const rates = this._rates(provider, { model, ts: Date.now(), input: tokens, output: 0,
       cacheRead: 0, cw5m: 0, cw1h: 0, web: 0, fast: false, reported: null });
     return rates ? { warmUsd: this._round(tokens * rates.cacheRead),
@@ -67,15 +69,19 @@ export class ApiCost extends ApiCostStruct {
         const s = this.session(String(id));
         if (s.turns.length) {
           const breakdown: ApiCostLine['usd'] = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 };
+          const breakdownCny: ApiCostLine['cny'] = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 };
           const tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
           for (const turn of s.turns) for (const line of turn.lines) {
-            for (const key of Object.keys(breakdown) as (keyof typeof breakdown)[]) breakdown[key] += line.usd[key];
+            for (const key of Object.keys(breakdown) as (keyof typeof breakdown)[]) {
+              breakdown[key] += line.usd[key];
+              breakdownCny[key] += line.cny[key];
+            }
             tokens.input += line.inputTokens;
             tokens.output += line.outputTokens;
             tokens.cacheRead += line.cacheReadTokens;
             tokens.cacheWrite += line.cacheWrite5mTokens + line.cacheWrite1hTokens;
           }
-          out[id] = { usd: s.totalUsd, sub: s.subscriptionUsd, breakdown, tokens,
+          out[id] = { usd: s.totalUsd, cny: s.totalCny, sub: s.subscriptionUsd, breakdown, breakdownCny, tokens,
             consumedMessages: s.turns.reduce((n, t) => n + t.consumedMessages, 0) };
         }
       } catch (e) {
@@ -112,6 +118,7 @@ export class ApiCost extends ApiCostStruct {
       sessionId,
       turns,
       totalUsd: this._round(turns.reduce((n, t) => n + t.totalUsd, 0)),
+      totalCny: this._round(turns.reduce((n, t) => n + t.totalCny, 0)),
       subscriptionUsd: this._round(turns.filter((t) => t.billing === 'subscription').reduce((n, t) => n + t.totalUsd, 0)),
     };
   }
@@ -137,7 +144,7 @@ export class ApiCost extends ApiCostStruct {
     const billing: ApiBilling = provider === 'official' && meta.codexAuth !== 'apikey' ? 'subscription' : 'apikey';
     return {
       taskId, provider, billing, startedAt, consumedMessages,
-      lines: list, totalUsd: this._round(list.reduce((n, l) => n + l.totalUsd, 0)), cliUsd: null,
+      lines: list, totalUsd: this._round(list.reduce((n, l) => n + l.totalUsd, 0)), totalCny: 0, cliUsd: null,
     };
   }
 
@@ -155,6 +162,7 @@ export class ApiCost extends ApiCostStruct {
     const id = String(model || '').toLowerCase();
     if (id.includes('/')) return 'openrouter'; // 带命名空间的 id（anthropic/…）只有 OpenRouter 会这么报
     if (id.startsWith('deepseek')) return 'deepseek';
+    if (id.startsWith('kimi-')) return 'ark';
     if (/^(gpt-|o\d)/.test(id)) return 'openai';
     return 'official';
   }
@@ -220,14 +228,18 @@ export class ApiCost extends ApiCostStruct {
     for (const r of byMsg.values()) {
       const single = new Map<string, ApiCostLine>();
       this._add(single, provider, false, r, 1);
-      if ([...single.values()].some((l) => this._finish(l).totalUsd > 0)) consumedMessages++;
+      if ([...single.values()].some((l) => { const f = this._finish(l); return f.totalUsd > 0 || f.totalCny > 0; })) consumedMessages++;
     }
     for (const r of byMsg.values()) this._add(lines, provider, false, r, 1);
     if (modelUsage) this._addMissing(lines, provider, modelUsage, startedAt);
     const list = [...lines.values()].map((l) => this._finish(l));
     return {
       taskId, provider, billing: this._billing(provider, events), startedAt, consumedMessages,
-      lines: list, totalUsd: this._round(list.reduce((n, l) => n + l.totalUsd, 0)), cliUsd,
+      lines: list,
+      totalUsd: this._round(list.reduce((n, l) => n + l.totalUsd, 0)),
+      totalCny: this._round(list.reduce((n, l) => n + l.totalCny, 0)),
+      // Kimi 经 Claude Code 跑时，CLI 可能按 Claude 美元价目误算 costUSD，不能展示为真实费用参照。
+      cliUsd: list.some((l) => l.currency === 'CNY') ? null : cliUsd,
     };
   }
 
@@ -254,10 +266,12 @@ export class ApiCost extends ApiCostStruct {
 
   private static _blank(provider: string, model: string, extra: boolean): ApiCostLine {
     return {
-      model, priced: this._isPriced(provider, model), extra, requests: 0, reportedUsd: 0, reportedRequests: 0,
+      model, currency: this._source(provider, model) === 'ark' ? 'CNY' : 'USD',
+      priced: this._isPriced(provider, model), extra, requests: 0, reportedUsd: 0, reportedRequests: 0,
       inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0, cacheWrite1hTokens: 0, webSearches: 0,
       usd: { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 },
-      totalUsd: 0,
+      cny: { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 },
+      totalUsd: 0, totalCny: 0,
     };
   }
 
@@ -291,6 +305,7 @@ export class ApiCost extends ApiCostStruct {
     switch (this._source(provider, model)) {
       case 'openrouter': return !!OpenRouterPrices.lookup(model);
       case 'deepseek': return !!this._dsPrice(model);
+      case 'ark': return !!this._arkPrice(model);
       case 'openai': return !!this._oaPrice(model) || !!OpenRouterPrices.lookup(`openai/${model}`);
       default: return !!this._price(model);
     }
@@ -300,6 +315,7 @@ export class ApiCost extends ApiCostStruct {
     switch (this._source(provider, r.model)) {
       case 'openrouter': return this._orRates(r);
       case 'deepseek': return this._dsRates(r);
+      case 'ark': return this._arkRates(r);
       case 'openai': return this._oaRates(r);
       default: return this._officialRates(r);
     }
@@ -337,6 +353,15 @@ export class ApiCost extends ApiCostStruct {
       cw1h: input,
       web: 0,
     };
+  }
+
+  // 火山方舟 Kimi：缓存命中使用独立人民币价；缓存创建 token 按普通输入计。
+  // 按小时结算的缓存存储费不在响应 usage 中，不在此估算或混入推理费。
+  private static _arkRates(r: Req): Rates | null {
+    const p = this._arkPrice(r.model);
+    if (!p) return null;
+    const input = p.input / MTOK;
+    return { input, output: p.output / MTOK, cacheRead: p.cacheRead / MTOK, cw5m: input, cw1h: input, web: 0 };
   }
 
   // OpenAI 官方价目：无缓存写加价，写入按输入价计
@@ -381,10 +406,14 @@ export class ApiCost extends ApiCostStruct {
   // CLI 的 result.modelUsage 含后台调用（如 Haiku 生成标题），消息流里看不到 → 按差额补一行
   private static _addMissing(lines: Map<string, ApiCostLine>, provider: string, mu: ModelUsage, ts: number): void {
     for (const [model, m] of Object.entries(mu)) {
-      const seen = [...lines.values()].filter((l) => !l.extra && this._norm(l.model) === this._norm(model));
+      const visible = [...lines.values()].filter((l) => !l.extra);
+      const matched = visible.filter((l) => this._norm(l.model) === this._norm(model));
+      // 自定义 Ark 接入点的 modelUsage 键可能是 ep-*，消息流则返回 kimi-* 基础模型名。
+      // 单模型轮次中二者是同一调用，不能把累计用量当成一笔额外后台调用再计一次。
+      const seen = matched.length || provider !== 'custom' || Object.keys(mu).length !== 1 || visible.length !== 1 ? matched : visible;
       const sum = (f: (l: ApiCostLine) => number) => seen.reduce((s, l) => s + f(l), 0);
       const diff: Req = {
-        model,
+        model: seen.length ? seen[0].model : model,
         ts,
         input: Math.max(0, num(m.inputTokens) - sum((l) => l.inputTokens)),
         output: Math.max(0, num(m.outputTokens) - sum((l) => l.outputTokens)),
@@ -401,9 +430,10 @@ export class ApiCost extends ApiCostStruct {
   }
 
   private static _finish(l: ApiCostLine): ApiCostLine {
+    // _add 先把原始结算币种的金额累计在 usd 工作区，这里再分流到正式 USD/CNY 字段。
     const u = l.usd;
     const total = u.input + u.output + u.cacheRead + u.cacheWrite5m + u.cacheWrite1h + u.webSearch;
-    const usd = {
+    const costs = {
       input: this._round(u.input),
       output: this._round(u.output),
       cacheRead: this._round(u.cacheRead),
@@ -411,9 +441,14 @@ export class ApiCost extends ApiCostStruct {
       cacheWrite1h: this._round(u.cacheWrite1h),
       webSearch: this._round(u.webSearch),
     };
+    const zero = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 };
     // 每个请求都有服务商实扣金额时以它为准（含渠道附加费等价目表看不到的部分），分项仍按价目给出
     const allReported = l.requests > 0 && l.reportedRequests === l.requests;
-    return { ...l, usd, totalUsd: this._round(allReported ? l.reportedUsd || 0 : total), reportedUsd: this._round(l.reportedUsd || 0) };
+    const reported = this._round(allReported ? l.reportedUsd || 0 : total);
+    if (l.currency === 'CNY') {
+      return { ...l, usd: zero, cny: costs, totalUsd: 0, totalCny: reported, reportedUsd: 0 };
+    }
+    return { ...l, usd: costs, cny: zero, totalUsd: reported, totalCny: 0, reportedUsd: this._round(l.reportedUsd || 0) };
   }
 
   // 模型 id 归一：去掉区域/anthropic. 前缀、[1m] 标记、@版本、日期后缀
@@ -447,7 +482,17 @@ export class ApiCost extends ApiCostStruct {
     return best ? DEEPSEEK_PRICES[best] : null;
   }
 
-  // 保留到 1e-9 美元，去掉浮点尾巴
+  // 火山方舟返回带日期后缀的基础模型名（如 kimi-k3-1-pro-261024），按最长前缀匹配价目。
+  private static _arkPrice(model: string): DeepSeekPrice | null {
+    const id = String(model || '').toLowerCase().trim();
+    let best = '';
+    for (const k of Object.keys(ARK_PRICES)) {
+      if ((id === k || id.startsWith(`${k}-`)) && k.length > best.length) best = k;
+    }
+    return best ? ARK_PRICES[best] : null;
+  }
+
+  // 金额保留到 1e-9 原币单位，去掉浮点尾巴
   private static _round(v: number): number {
     return Math.round(v * 1e9) / 1e9;
   }
