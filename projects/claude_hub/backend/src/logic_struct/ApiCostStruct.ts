@@ -2,7 +2,8 @@
 // 职责：对会话里每个 claude 轮次按每条 assistant 消息的 usage 精确计价：
 // 输入 / 输出 / 缓存读 / 缓存写(5m、1h 分开) / web search / fast 倍率，按模型分行给出明细。
 // 价目按服务商分派：订阅登录 → Claude 官方价目给等价估价（billing=subscription，前端标「订阅」）；
-// OpenRouter → 它自己的公开价目；DeepSeek → DeepSeek 官方价目（含峰谷）。Clootee 自有服务商另行记账，不在此列。
+// OpenRouter → 它自己的公开价目；DeepSeek → DeepSeek 官方价目（含峰谷）；Ark Kimi → 人民币价目独立汇总。
+// Clootee 自有服务商另行记账，不在此列。
 // 数据源：TraceStore 实时捕获的事件（task_start 里记了服务商，assistant 帧带 msgId 去重）。
 import { TraceStore } from '../logic_realize/TraceStore';
 import { API_COST_MAX_BATCH } from '../config/ClaudePricing';

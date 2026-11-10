@@ -64,6 +64,13 @@ export const DEEPSEEK_PRICES: Record<string, DeepSeekPrice> = {
 
 export const DEEPSEEK_OFFPEAK_MULT = 0.5; // 非高峰时段半价
 
+// 火山方舟官方价目（人民币 / 百万 token），核对日期 2026-11-10。
+// https://docs.volcengine.com/docs/82379/1544106 —— kimi-k3.1-pro 在线推理（常规）。
+// 缓存存储 0.017 元/百万 token/小时不在单次响应 usage 中，不能在这里逐请求精确计入。
+export const ARK_PRICES: Record<string, DeepSeekPrice> = {
+  'kimi-k3-1-pro': { input: 13, cacheRead: 1.3, output: 68 },
+};
+
 // 高峰时段：周一至周五 UTC 01:00-04:00 与 06:00-10:00（北京时间 09:00-12:00、14:00-18:00）；
 // 其余时段与整个周末半价。
 export function isDeepSeekPeak(ts: number): boolean {
