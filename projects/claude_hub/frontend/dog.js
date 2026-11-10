@@ -1,8 +1,15 @@
-﻿// Quiet autonomous companion, driven by one decision timer.
+// Quiet autonomous companion, driven by one decision timer.
 (function () {
   let layer, pet, timer = 0, active = false, x = 0;
   let state = 'rest', lastReaction = -2000, stroke = 0, previous = null;
-  let drag = null, suppressClick = false;
+  let drag = null, suppressClick = false, lastTrick = '';
+  // Keep only gestures that read naturally with this side-view drawing.
+  const tricks = ['pant', 'wag', 'tilt', 'listen', 'shake'];
+  function pick(items) {
+    const choices = items.filter(item => item !== lastTrick);
+    lastTrick = choices[Math.floor(Math.random() * choices.length)];
+    return lastTrick;
+  }
   let renderer = 'code';
   const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const rand = (a, b) => a + Math.random() * (b - a);
@@ -20,12 +27,22 @@
     layer.style.setProperty('--dog-travel', duration + 'ms');
     layer.style.transform = `translate3d(${x}px, 0, 0)`;
   }
-  function stay(next, min, max) { pose(next); later(decide, rand(min, max)); }
-  function move(next, hiding) {
+  function stay(next, min, max) {
+    pose(next);
+    const duration = { pant:3600, wag:3400, tilt:3200, listen:2400, shake:1200 }[next];
+    later(() => {
+      if (tricks.includes(next)) {
+        // Let the paws settle before choosing another performance or travelling.
+        pose('notice');
+        later(decide, rand(900, 1600));
+      } else decide();
+    }, duration || rand(min, max));
+  }
+  function move(next, hiding, excited = false) {
     const from = layer.getBoundingClientRect().left;
     const distance = Math.abs(next - from);
     if (distance < 24) { stay('sniff', 1500, 3000); return; }
-    const running = Math.random() < .35;
+    const running = excited || Math.random() < .4;
     const duration = Math.max(1400, distance / (running ? rand(110, 160) : rand(45, 80)) * 1000);
     const speed = distance / duration * 1000;
     layer.style.setProperty('--dog-gait', Math.max(.28, Math.min(1.1, (running ? 48 : 34) * size() / 164 / speed)) + 's');
@@ -37,7 +54,7 @@
         pose('hidden');
         layer.inert = true;
         later(appear, rand(12000, 25000));
-      } else stay(Math.random() < .5 ? 'sniff' : 'rest', 1600, 3800);
+      } else stay(running ? 'pant' : 'sniff', 2200, 3800);
     }, duration);
   }
   function appear() {
@@ -50,13 +67,14 @@
     if (motion.matches) { stay(Math.random() < .5 ? 'sleep' : 'rest', 20000, 40000); return; }
     const roll = Math.random();
     if (state === 'sleep') { move(rand(8, Math.max(8, limit() - 8)), false); return; }
-    if (roll < .13) stay('sleep', 14000, 28000);
-    else if (roll < .23) stay('rest', 2500, 5000);
+    if (roll < .10) stay('sleep', 10000, 20000);
+    else if (roll < .23) stay('rest', 2500, 4500);
     else if (roll < .34) stay('sniff', 1800, 3500);
-    else if (roll < .96) {
+    else if (roll < .62) stay(pick(tricks), 3000, 5200);
+    else if (roll < .98) {
       let target = rand(8, Math.max(8, limit() - 8));
       if (Math.abs(target - x) < Math.min(140, limit() / 3)) target = x < limit() / 2 ? limit() - 8 : 8;
-      move(clamp(target), false);
+      move(clamp(target), false, roll > .86);
     }
     else move(x < limit() / 2 ? -size() - 12 : window.innerWidth + 12, true);
   }
@@ -96,6 +114,7 @@
           <ellipse cx="55" cy="129" rx="23" ry="14" fill="url(#dogFace)"/>${fur(55,129,22,13,50)}
           <path d="M33 129q7-5 13 0q1 7-6 8q-8-1-7-8" fill="#30251e"/><path d="M35 129q3-1 5 0" stroke="#786655" stroke-width="1.2" fill="none"/>
           <path d="M42 138q9 3 17-1" fill="none" stroke="#613d26" stroke-width="1"/>
+          <path class="dog-tongue" d="M49 139v4q4 5 8 0v-4" fill="#d88e89"/>
         </g>
       </g></svg>`;
   }

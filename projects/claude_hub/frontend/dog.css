@@ -1,4 +1,4 @@
-﻿body.dog {
+body.dog {
   --bg:#f7f3ee; --panel:#fdfbf8; --panel2:#eee5dc; --border:#d8c9bb;
   --text:#48392f; --muted:#857364; --accent:#956849; --green:#287747;
   --yellow:#966614; --red:#b34c5a; --gray:#99816f; --overlay:rgba(55,40,29,.32);
@@ -33,9 +33,9 @@ body.dog .plog.output { color:#287747; }
 .dog-vector { width:100%; height:100%; overflow:visible; }
 .dog-animal { transform-origin:130px 178px; }
 .dog-body { transform-origin:145px 151px; animation:dog-chest 4s ease-in-out infinite; }
-.dog-head-vector { transform-origin:93px 125px; transition:transform 700ms ease-in-out; }
+.dog-head-vector { transform-origin:93px 125px; transition:transform 280ms ease-in-out; }
 .dog-ear-vector { transform-origin:100px 89px; }
-.dog-leg,.dog-lower-leg { transform-box:view-box; transition:transform 450ms ease-in-out; }
+.dog-leg,.dog-lower-leg { transform-box:view-box; transition:transform 280ms ease-in-out; }
 .dog-closed-eyes { opacity:0; }
 .dog-open-eyes { animation:dog-vector-blink 7s infinite; transform-origin:62px 111px; }
 .dog-tail-vector { transform-origin:195px 109px; }
@@ -71,4 +71,24 @@ body.dog .plog.output { color:#287747; }
 @keyframes dog-tail-sway { 50% { transform:rotate(9deg); } }
 @keyframes dog-vector-sniff { 0%,100% { transform:translateY(9px) rotate(-10deg); } 40%,65% { transform:translate(-2px,15px) rotate(-14deg); } }
 @keyframes dog-vector-blink { 0%,44%,48%,100% { transform:scaleY(1); } 46% { transform:scaleY(.1); } }
+@media (prefers-reduced-motion:reduce) { #dogFx .dog-vector * { animation:none !important; transition:none !important; } }
+
+/* Five quiet side-view gestures. Original resting and interaction poses stay intact. */
+.dog-animal { transition:transform .28s ease-in-out; }
+.dog-tongue { opacity:0; transform-origin:53px 139px; transition:opacity .18s ease; }
+#dogFx:is([data-state=pant],[data-state=run]) .dog-tongue { opacity:1; }
+#dogFx[data-state=pant] .dog-tongue { animation:dog-pant-tongue 1.2s ease-in-out infinite; }
+#dogFx[data-state=pant] .dog-body { animation:dog-chest 1.8s ease-in-out infinite; }
+#dogFx[data-state=wag] .dog-tail-vector { animation:dog-quiet-tail .9s ease-in-out infinite; }
+#dogFx[data-state=tilt] .dog-head-vector { animation:dog-side-tilt 3.2s ease-in-out; }
+#dogFx[data-state=listen] .dog-ear-vector { animation:dog-listen-ear 2.4s ease-in-out; }
+#dogFx[data-state=shake] .dog-animal { animation:dog-shake .4s ease-in-out 3; }
+#dogFx[data-state=shake] .dog-ear-vector { animation:dog-ear-sway .2s ease-in-out 6; }
+#dogFx[data-state=run] .dog-animal { animation:dog-run-bounce var(--dog-gait) ease-in-out infinite; }
+@keyframes dog-pant-tongue { 0%,100% { transform:scaleY(.9); } 50% { transform:scaleY(1); } }
+@keyframes dog-quiet-tail { 0%,100% { transform:rotate(0); } 25% { transform:rotate(-4deg); } 75% { transform:rotate(7deg); } }
+@keyframes dog-side-tilt { 0%,100% { transform:rotate(0); } 30%,65% { transform:rotate(4deg); } }
+@keyframes dog-listen-ear { 0%,15%,50%,80%,100% { transform:rotate(0); } 30%,65% { transform:rotate(-5deg); } }
+@keyframes dog-shake { 0%,100% { transform:none; } 25% { transform:rotate(-1.3deg) translateX(-1px); } 75% { transform:rotate(1.3deg) translateX(1px); } }
+@keyframes dog-run-bounce { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-2px); } }
 @media (prefers-reduced-motion:reduce) { #dogFx .dog-vector * { animation:none !important; transition:none !important; } }
