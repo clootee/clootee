@@ -126,6 +126,7 @@ const DICT = {
   rwStepList: { en: 'Refreshing workspace…', zh: '正在刷新工作区…' },
   rwStepTpl: { en: 'Writing template files…', zh: '正在写入模板文件…' },
   rwStepDone: { en: 'Done', zh: '完成' },
+  rwTemplateFailed: { en: 'Could not write template files (CLAUDE.md / AGENTS.md or custom files). The directory can still be added.\n\n{error}\n\nOK: continue adding without the template.\nCancel: abandon adding (only a newly added registration is removed; project files are kept). Any template files already written are kept.', zh: '无法写入模板文件（CLAUDE.md / AGENTS.md 或自定义文件），但仍可继续添加目录。\n\n{error}\n\n确定：跳过模板，继续添加。\n取消：放弃添加（只撤销本次新增的目录登记，保留项目文件）。已写入的部分模板文件会保留。' },
   tpApplying: { en: 'Applying template…', zh: '正在写入模板…' },
   tpDone: { en: 'Template applied', zh: '模板已写入' },
   browse: { en: 'Browse…', zh: '浏览…' },

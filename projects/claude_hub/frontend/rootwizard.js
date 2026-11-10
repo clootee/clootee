@@ -200,9 +200,12 @@ async function maybePickTemplate(dirPath) {
 // onRootReady(rootId)：流程（含模板选择）全部完成后的回调，供调用方接着做后续绑定动作。
 async function runRootFlow(pre, makeRoot, onRootReady) {
   let rootId = '';
+  const previousRootId = State.rootId;
+  let existingIds;
   rwProgressOpen();
   try {
     rwProgressStep(T('rwStepDir'), 20);
+    existingIds = new Set((await api('/api/root/list')).map((r) => r.id));
     const root = await makeRoot();
     if (!root || !root.id) throw new Error('runRootFlow: invalid root');
     rootId = root.id;
@@ -211,21 +214,43 @@ async function runRootFlow(pre, makeRoot, onRootReady) {
     await loadRoots();
     if (pre && pre !== 'skip' && pre !== 'unknown') {
       rwProgressStep(T('rwStepTpl'), 80);
-      await api('/api/template/apply', { rootId: root.id, kind: pre.kind, templateId: pre.id });
-      markTemplateAsked(root.id);
+      if (!await applyRootTemplate(root.id, pre)) throw new Error('__cancelled__');
     } else if (pre === 'skip') {
       await rememberTemplateSkip(root.id);
     }
+    if (pre === 'unknown' && !await offerTemplateForRoot(rootId)) throw new Error('__cancelled__');
     rwProgressStep(T('rwStepDone'), 100);
     await new Promise((r) => setTimeout(r, 300));
   } catch (e) {
     rwProgressClose();
+    if (e.message === '__cancelled__' && rootId) {
+      try {
+        if (!existingIds.has(rootId)) await api('/api/root/remove', { id: rootId });
+        setTabRootId(previousRootId);
+        await loadRoots();
+      } catch (cleanupError) {
+        alert(cleanupError.message);
+      }
+    }
     if (e.message !== '__cancelled__') alert(e.message); // 用户主动取消（目录已存在时不继续）不弹错
     return;
   }
   rwProgressClose();
-  if (pre === 'unknown' && rootId) await offerTemplateForRoot(rootId); // 进度条收起后再补问
   if (onRootReady && rootId) await onRootReady(rootId);
+}
+
+// A template failure must not decide whether the directory is added.
+async function applyRootTemplate(rootId, choice) {
+  try {
+    await api('/api/template/apply', { rootId, kind: choice.kind, templateId: choice.id });
+    markTemplateAsked(rootId);
+    return true;
+  } catch (error) {
+    rwProgressClose();
+    if (!confirm(T('rwTemplateFailed').replace('{error}', error.message || String(error)))) return false;
+    await rememberTemplateSkip(rootId);
+    return true;
+  }
 }
 
 // ── 任何时候选用某个工作目录：缺 CLAUDE.md/AGENTS.md 就至少问一次模板 ──
@@ -246,15 +271,14 @@ async function rememberTemplateSkip(rootId) {
 }
 
 async function offerTemplateForRoot(rootId) {
-  if (!rootId || TemplateAsk.busy || TemplateAsk.asked.has(rootId)) return;
+  if (!rootId || TemplateAsk.busy || TemplateAsk.asked.has(rootId)) return true;
   TemplateAsk.busy = true;
   try {
     const r = await api('/api/template/need?rootId=' + encodeURIComponent(rootId));
-    if (!r || !r.needed) return;
+    if (!r || !r.needed) return true;
     const choice = await pickTemplate();
     if (choice) {
-      await api('/api/template/apply', { rootId, kind: choice.kind, templateId: choice.id });
-      markTemplateAsked(rootId);
+      return await applyRootTemplate(rootId, choice);
     } else {
       await rememberTemplateSkip(rootId);
     }
@@ -263,6 +287,7 @@ async function offerTemplateForRoot(rootId) {
   } finally {
     TemplateAsk.busy = false;
   }
+  return true;
 }
 
 function rwProgressOpen() {
