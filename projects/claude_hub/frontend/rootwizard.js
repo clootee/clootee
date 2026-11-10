@@ -116,9 +116,9 @@ function fallbackProjectParent() {
   return '';
 }
 
-// 项目名合法性：仅英文字母/数字/下划线（作为文件夹名）
+// 项目名合法性：1–22 个英文字母、数字、下划线或连字符（作为文件夹名）
 function npNameValid(name) {
-  return /^[A-Za-z0-9_]+$/.test(name);
+  return /^[A-Za-z0-9_-]{1,22}$/.test(name);
 }
 
 // 父目录 + 项目名 → 完整路径（按父目录风格选择分隔符）
@@ -131,10 +131,11 @@ function npFullPath() {
 }
 
 function updateNpPreview() {
-  const name = ($('npName').value || '').trim();
+  const name = $('npName').value || '';
   const full = npFullPath();
   const nameBad = name && !npNameValid(name);
   $('npName').classList.toggle('rw-bad', !!nameBad);
+  $('npCreate').disabled = !npNameValid(name) || !$('npParent').value.trim();
   if (nameBad) {
     $('npErr').textContent = T('npNameInvalid');
     $('npErr').hidden = false;
@@ -145,7 +146,7 @@ function updateNpPreview() {
 }
 
 async function createNewProject(onRootReady) {
-  const name = ($('npName').value || '').trim();
+  const name = $('npName').value || '';
   const parentDir = ($('npParent').value || '').trim();
   if (!npNameValid(name)) {
     $('npErr').textContent = T('npNameInvalid');

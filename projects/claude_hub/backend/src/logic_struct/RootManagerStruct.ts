@@ -60,14 +60,14 @@ export class RootManagerStruct {
   }
 
   // 新建项目：在 parentDir 下创建以 name 命名的项目文件夹并登记为根目录。
-  // name 只允许英文字母/数字/下划线（作为文件夹名，须符合命名规范，禁止中文）。
+  // name 限 1–22 个英文字母、数字、下划线或连字符，禁止中文、空格及其他符号。
   // parentDir 不存在则递归创建（含默认的 projects 目录）；项目目录已存在时：
   // allowExisting=false → 抛 PROJECT_EXISTS（前端据此询问用户「是否直接使用该目录」）；
   // allowExisting=true  → 直接复用该目录（已登记过同路径的根则返回原根，不重复登记）。
   static createProject(name: string, parentDir: string, allowExisting = false): Root {
-    const clean = (name || '').trim();
-    if (!/^[A-Za-z0-9_]+$/.test(clean))
-      throw new Error(`createProject: invalid name=${name} (only A-Z a-z 0-9 _ allowed)`);
+    const clean = name || '';
+    if (!/^[A-Za-z0-9_-]{1,22}$/.test(clean))
+      throw new Error(`createProject: invalid name=${name} (1-22 characters; only A-Z a-z 0-9 _ - allowed)`);
     if (!parentDir || !parentDir.trim()) throw new Error(`createProject: invalid parentDir=${parentDir}`);
     const parent = parentDir.trim();
     const target = path.join(parent, clean);
