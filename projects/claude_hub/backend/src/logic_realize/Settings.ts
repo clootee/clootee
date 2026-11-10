@@ -92,7 +92,7 @@ export class Settings extends SettingsStruct {
     return { mode, tokens };
   }
 
-  // 清洗「同时运行中的任务数量」：只接受正整数，夹到 1–20；没填过/非法值回落到默认 5。
+  // 清洗「同时运行中的任务数量」：只接受正整数，夹到 1–20；没填过/非法值回落到默认 10。
   // 不设 0：0 会让所有任务永远排队、看起来像「发消息没反应」。
   protected static _sanitizeMaxConcurrent(raw: unknown): number {
     const n = Math.round(Number(raw));

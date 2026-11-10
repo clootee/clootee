@@ -213,6 +213,7 @@ export interface Session {
   // claude 会话 uuid（jsonl 文件名）。唯一来源 = claude code 生成并经 stream-json 回报；我们绝不自造。
   // 空 = 草稿尚未开始（首条任务不传 --session-id，让 claude 生成后回写）；有值 = --resume 它。
   claudeSessionId: string;
+  concurrencyPaused?: boolean; // Paused by the task limit; resume on a limit increase.
   paused: boolean;            // 任务流是否暂停（运行期状态，不落盘）
   createdAt: number;
   updatedAt: number;

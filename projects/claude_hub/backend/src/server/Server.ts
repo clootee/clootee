@@ -185,6 +185,7 @@ export class Server {
     app.post('/api/settings', (req, res) =>
       this._wrapAsync(res, 'settings.set', async () => {
         const previous = Settings.get().allowLan;
+        const previousConcurrency = Settings.get().maxConcurrentTasks;
         const settings = Settings.update(req.body);
         if (previous !== settings.allowLan) {
           if (process.env.CLOOTEE_SUPERVISED !== '1') {
@@ -197,6 +198,7 @@ export class Server {
           }
           EventBus.revalidate();
         }
+        TaskQueue.onConcurrencyIncreased(previousConcurrency, typeof req.body.resumeSessionId === 'string' ? req.body.resumeSessionId : undefined);
         return settings;
       }),
     );

@@ -469,7 +469,7 @@ function applyText() {
   $('stopChoicePauseDesc').textContent = T('stopChoicePauseDesc');
   $('stopChoiceNextTitle').textContent = T('stopChoiceNext');
   $('stopChoiceNextDesc').textContent = T('stopChoiceNextDesc');
-  $('pauseHint').textContent = T('pauseHint');
+  $('pauseHintText').textContent = T('pauseHint');
   refreshComposerControls();
   $('uploadBtn').title = T('uploadFile');
   $('attachPvClose').textContent = T('attachClose');
@@ -3915,7 +3915,7 @@ function taskEl(t, i) {
     `<span class="dot ${t.status}"></span>` +
     holdMark +
     `<span class="qtext">${text}</span>` +
-    `<span style="color:var(--muted)">${t.held ? T('held') : T(t.status)}</span>` +
+    `<span style="color:var(--muted)">${t.status === 'pending' && State.session?.paused && !t.supplement ? T('paused') : t.held ? T('held') : T(t.status)}</span>` +
     del;
   const delBtn = el.querySelector('.qdel');
   if (delBtn) delBtn.addEventListener('click', (ev) => { ev.stopPropagation(); removeTask(t.id); });
@@ -4034,7 +4034,7 @@ function qmRow(t, i) {
   head.innerHTML =
     `<span class="qm-idx">${i + 1}</span>` +
     `<span class="dot ${t.status}"></span>` +
-    `<span class="qm-status">${t.held ? T('held') : T(t.status)}</span>`;
+    `<span class="qm-status">${t.status === 'pending' && State.session?.paused && !t.supplement ? T('paused') : t.held ? T('held') : T(t.status)}</span>`;
   row.appendChild(head);
 
   // 正文 / 编辑区
@@ -6025,8 +6025,12 @@ function refreshComposerControls() {
   pauseBtn.style.display = paused ? '' : 'none';
   pauseBtn.textContent = T('resumeFlow');
   pauseBtn.className = 'primary sm';
-  $('addTaskBtn').textContent = paused ? T('supplementSubmit') : T('addTask');
-  $('taskInput').placeholder = paused ? T('supplementPlaceholder') : T('inputPlaceholder');
+  const limitPaused = !!State.session?.concurrencyPaused;
+  $('concurrencySettingsBtn').style.display = limitPaused ? '' : 'none';
+  $('concurrencySettingsBtn').textContent = T('taskQueueGoSettings');
+  $('pauseHintText').textContent = limitPaused ? T('taskQueueWaitBody').replace('{max}', taskConcurrency()) : T('pauseHint');
+  $('addTaskBtn').textContent = paused && !limitPaused ? T('supplementSubmit') : T('addTask');
+  $('taskInput').placeholder = paused && !limitPaused ? T('supplementPlaceholder') : T('inputPlaceholder');
   $('pauseHint').style.display = paused ? '' : 'none';
 }
 
@@ -6372,6 +6376,8 @@ function connectWs() {
       // 影响会话列表排序/暂停态
       if (State.session && e.session.id === State.session.id) {
         State.session.paused = e.session.paused;
+        State.session.concurrencyPaused = e.session.concurrencyPaused;
+        renderQueue();
         State.session.claudeSessionId = e.session.claudeSessionId; // 草稿首跑后拿到真实 uuid
         if (e.session.engine) State.session.engine = e.session.engine;
         refreshPauseBtn();
@@ -6415,7 +6421,7 @@ function connectWs() {
       if (e.message === 'task_queue_waiting') {
         const max = Number(e.max) || taskConcurrency();
         e.message = T('taskQueueWaitNotice').replace('{max}', max);
-        QueueWaitUi.show(max, Number(e.running) || max, e.runningTasks);
+        // The paused composer exposes a persistent settings button.
       }
       pushNotice(e); return;
     }
@@ -7501,6 +7507,10 @@ function bind() {
   // 并发已满说明弹窗：不点遮罩关闭，只能点 ✕ / 知道了 / 去设置
   $('queueWaitClose').addEventListener('click', () => QueueWaitUi.close());
   $('queueWaitOk').addEventListener('click', () => QueueWaitUi.close());
+  $('concurrencySettingsBtn').addEventListener('click', () => {
+    openSettings();
+    openSettingsPane('task');
+  });
   $('queueWaitSettings').addEventListener('click', () => {
     QueueWaitUi.close();
     openSettings();
@@ -8044,10 +8054,10 @@ function paneById(id) {
   return SETTINGS_PANES.find((p) => p.id === id) || null;
 }
 
-// 同时运行中的任务数量：后端默认 5，允许 1–20；改完立即生效，不用重启
+// 同时运行中的任务数量：后端默认 10，允许 1–20；改完立即生效，不用重启
 function taskConcurrency() {
   const n = Math.round(Number(State.settings.maxConcurrentTasks));
-  return Number.isFinite(n) && n > 0 ? n : 5;
+  return Number.isFinite(n) && n > 0 ? n : 10;
 }
 function fillTaskPane() {
   $('maxConcurrentTasksLabel').textContent = T('taskConcurrencyLabel');
@@ -8057,7 +8067,7 @@ function fillTaskPane() {
 async function saveTaskPane() {
   const n = Math.round(Number($('maxConcurrentTasks').value));
   if (!Number.isInteger(n) || n < 1 || n > 20) { alert(T('taskConcurrencyInvalid')); return false; }
-  const saved = await patchSettings({ maxConcurrentTasks: n });
+  const saved = await patchSettings({ maxConcurrentTasks: n, resumeSessionId: State.sessionId });
   if (!saved) { setPaneNotice('engSaveFailShort', null, 'err', 0); return false; }
   setPaneNotice('engSavedToast', null, 'ok', 2500);
   return true;
