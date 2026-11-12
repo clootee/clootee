@@ -265,7 +265,8 @@ async function runQuickStart() {
       stageDone();
     }
     // ④ 记下默认引擎、引导完成，进主界面
-    await api('/api/settings', { defaultEngine: 'claude', onboarded: true, setupDone: true });
+    if (!saveBrowserDefaultEngine('claude')) throw new Error(T('engSaveFailShort'));
+    await api('/api/settings', { onboarded: true, setupDone: true });
     q.stage = QUICK_STAGES.length;
     renderOnboard();
     Onboard.busy = false;
@@ -639,7 +640,8 @@ async function onboardFinish(key) {
       apiKey: key,
       model: Onboard.model || '',
     });
-    await api('/api/settings', { defaultEngine: Onboard.engine, onboarded: true, setupDone: true });
+    if (!saveBrowserDefaultEngine(Onboard.engine)) throw new Error(T('engSaveFailShort'));
+    await api('/api/settings', { onboarded: true, setupDone: true });
     hideOnboard();
     applyText();
     // 完成服务商引导即可使用；安全密码只能在设置里主动开启。
