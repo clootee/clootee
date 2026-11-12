@@ -17,7 +17,7 @@ const State = {
   sessions: [],
   sessionId: '',
   session: null,
-  settings: { defaultEngine: 'claude', engineAvail: null, platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0, version: '', runAsUserEnabled: false, runAsUserName: 'claudeuser' }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址 + 软件版本号 + 以系统用户运行（从后端 /api/settings 加载）
+  settings: { defaultEngine: readBrowserDefaultEngine(), engineAvail: null, platform: '', allowLan: false, preferBundled: false, outEndReady: false, systemPrompt: '', templateCollectionPath: '', quickGroups: [], autoCompact: { mode: 'auto', tokens: 200000 }, lanUrls: [], port: 0, version: '', runAsUserEnabled: false, runAsUserName: 'claudeuser' }, // 默认引擎 + 服务器平台 + 访问/运行时 + 局域网地址 + 软件版本号 + 以系统用户运行（默认引擎存浏览器，其余从后端 /api/settings 加载）
   running: new Set(),                     // 正在执行任务的会话 id 集合（驱动侧栏"执行中"标识）
   runningTasks: new Map(),                // 会话 id → 该会话正在跑的任务 id 集合；running 即它的非空键集（排队新消息不会误清执行中）
   justFinished: new Set(),                // 刚从执行中变为停止、且用户尚未点开查看的会话 id（驱动侧栏"刚执行"醒目标识，区别于状态"已完成"）
@@ -7818,15 +7818,35 @@ async function startApp() {
   checkAppUpdateSilently(); // 不 await：每次启动静默检测一次，有更新才在齿轮按钮上提示，不打断使用
 }
 
-// ── 设置：默认引擎 ──
+// ── 设置：默认引擎（仅保存在当前浏览器，不采用后端全局偏好） ──
+function readBrowserDefaultEngine(avail) {
+  let wanted = 'claude';
+  try {
+    const saved = localStorage.getItem('defaultEngine');
+    if (saved === 'claude' || saved === 'codex') wanted = saved;
+  } catch { /* 禁用本地存储时仍可打开页面 */ }
+  const other = wanted === 'claude' ? 'codex' : 'claude';
+  return avail && !avail[wanted] && avail[other] ? other : wanted;
+}
+function saveBrowserDefaultEngine(engine) {
+  if (engine !== 'claude' && engine !== 'codex') return false;
+  try {
+    localStorage.setItem('defaultEngine', engine);
+  } catch { return false; }
+  State.settings.defaultEngine = readBrowserDefaultEngine(State.settings.engineAvail);
+  return true;
+}
+window.addEventListener('storage', (event) => {
+  if (event.storageArea === localStorage && (event.key === 'defaultEngine' || event.key === null)) {
+    State.settings.defaultEngine = readBrowserDefaultEngine(State.settings.engineAvail);
+  }
+});
 async function loadSettings() {
   try {
     const s = await api('/api/settings');
-    if (s && (s.defaultEngine === 'claude' || s.defaultEngine === 'codex')) {
-      State.settings.defaultEngine = s.defaultEngine;
-    }
     if (s && s.platform) State.settings.platform = s.platform;
     if (s && s.engineAvail) State.settings.engineAvail = s.engineAvail;
+    State.settings.defaultEngine = readBrowserDefaultEngine(State.settings.engineAvail);
     if (s) {
       State.settings.allowLan = !!s.allowLan;
       State.settings.preferBundled = !!s.preferBundled;
@@ -8321,8 +8341,8 @@ async function patchSettings(patch) {
   if (!patch || !Object.keys(patch).length) return null;
   try {
     const s = await api('/api/settings', patch);
-    State.settings.defaultEngine = s.defaultEngine;
     if (s.engineAvail) State.settings.engineAvail = s.engineAvail;
+    State.settings.defaultEngine = readBrowserDefaultEngine(State.settings.engineAvail);
     State.settings.allowLan = !!s.allowLan;
     State.settings.preferBundled = !!s.preferBundled;
     State.settings.systemPrompt = typeof s.systemPrompt === 'string' ? s.systemPrompt : '';
@@ -8474,7 +8494,7 @@ async function saveEnginePane() {
     const err = await saveEngineProvider(e);
     if (err) fails.push({ engine: e, label, msg: err.msg });
   }
-  const savedDefault = await patchSettings({ defaultEngine: eng });
+  const savedDefault = saveBrowserDefaultEngine(eng);
   if (fails.length) {
     const f = fails[0];
     setPaneNotice('engBlockSaveFail', { block: f.label, msg: f.msg }, 'err', 0);

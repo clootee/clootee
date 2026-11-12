@@ -1076,8 +1076,8 @@ const DICT = {
   settingsTitle: { en: 'Settings', zh: '设置' },
   defaultEngine: { en: 'Default engine (for new sessions)', zh: '默认引擎（新建会话用）' },
   defaultEngineNote: {
-    en: 'Which engine a brand-new session uses. You can still switch it per session before it starts.',
-    zh: '新建会话默认用哪个引擎。会话开始前仍可在会话标题旁单独切换。',
+    en: 'Saved only in this browser; other browsers can choose independently. You can still switch engines before a session starts.',
+    zh: '仅保存在当前浏览器，其他浏览器可分别设置。会话开始前仍可在会话标题旁单独切换。',
   },
   // 只装了一个引擎时的提示：默认引擎自动跟着那个装了的走
   defaultEngineOnlyInstalled: {
