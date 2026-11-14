@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'async_hooks';
 // 引擎服务商配置（调度骨架）：claude / codex 各自选择「原版 / minimax / kimi」，
 // 第三方需填 apiKey 并选 model（模型列表实时从服务商拉取）。
 // - claude：第三方走 Anthropic 兼容端点，托管环境变量（MANAGED_ENV_KEYS）同时注入本进程
@@ -237,14 +238,18 @@ function emptySlot(): ProviderSlot {
 }
 
 export class EngineConfigStruct {
+  private static _context = new AsyncLocalStorage<Partial<EnginesConfig>>();
+  static withConfig<T>(config: Partial<EnginesConfig>, run: () => T): T {
+    return this._context.run(config, run);
+  }
   // 读取配置：把「当前选中服务商」那一槽投影成扁平视图。
   // 所有下游（ClaudeRunner / CodexRunner / ModelManager / 前端）都读这个投影，
   // 因此换服务商后绝不可能看到别的服务商的 Key / 模型 / 候选列表。
   static get(): EnginesConfig {
     const file = this._readFile();
     return {
-      claude: this._project(file.claude),
-      codex: this._project(file.codex),
+      claude: this._context.getStore()?.claude || this._project(file.claude),
+      codex: this._context.getStore()?.codex || this._project(file.codex),
     };
   }
 

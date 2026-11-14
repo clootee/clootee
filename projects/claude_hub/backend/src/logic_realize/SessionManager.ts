@@ -60,7 +60,7 @@ export class SessionManager extends SessionManagerStruct {
   private static _persist(): void {
     try {
       const snap = [...this._live.values()]
-        .filter((s) => (s.tasks && s.tasks.length > 0) || s.paused)
+        .filter((s) => s.multiGroup || (s.tasks && s.tasks.length > 0) || s.paused)
         .map((s) => ({ ...s, messages: [] }));
       JsonStore.write(Paths.QUEUE_STATE_FILE, snap);
     } catch {

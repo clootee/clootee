@@ -1,3 +1,4 @@
+import { MultiEngine } from './MultiEngine';
 // Claude 执行器（实现）：填充参数组装与 stream-json 解析细节
 import { ClaudeRunnerStruct, RunCallbacks } from '../logic_struct/ClaudeRunnerStruct';
 import { AppConfig } from '../config/AppConfig';
@@ -8,6 +9,7 @@ import { Session } from '../models/Types';
 import { Settings } from './Settings';
 import { PromptCache } from '../helper/PromptCache';
 import { CostPolicy } from '../helper/CostPolicy';
+import { MANAGED_ENV_KEYS } from '../logic_struct/EngineConfigStruct';
 import { SUBSCRIPTION_PROVIDERS } from '../config/ClaudePricing';
 
 export class ClaudeRunner extends ClaudeRunnerStruct {
@@ -27,7 +29,7 @@ export class ClaudeRunner extends ClaudeRunnerStruct {
     // 所以切回原版绝不会把第三方的模型 id 传给 CLI。
     const cfg = EngineConfig.get().claude;
     const cacheMode = session.costHelper?.cache || CostPolicy.cache(Settings.get(), session.promptCache, SUBSCRIPTION_PROVIDERS.includes(cfg.provider));
-    args.push('--settings', JSON.stringify(PromptCache.settings(cacheMode)));
+    args.push('--settings', session.multiGroup ? MultiEngine.claudeSettings(session, { ...PromptCache.settings(cacheMode), env: { ...Object.fromEntries(MANAGED_ENV_KEYS.map(k => [k, ''])), ...EngineConfig.claudeEnv() } }) : JSON.stringify(PromptCache.settings(cacheMode)));
     const model = (session.costHelper?.model || cfg.model || '').trim();
     if (model) args.push('--model', model);
     const effort = (cfg.effort || '').trim();

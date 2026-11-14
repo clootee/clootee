@@ -84,6 +84,7 @@ const CostUi = {
     this.pending = true;
     this.applyText();
     this.renderCheck(initial);
+    $('costNew').hidden = !!State.session?.multiGroup;
     $('costProgress').hidden = true;
     $('costPrepared').hidden = true;
     $('costGuardError').textContent = '';

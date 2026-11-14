@@ -6,6 +6,7 @@ import { Settings } from './Settings';
 import { Logger } from '../helper/Logger';
 import { Session } from '../models/Types';
 import { EngineConfig } from './EngineConfig';
+import { AppConfig } from '../config/AppConfig';
 import { CODEX_DEFAULT_MODEL } from '../config/ClaudePricing';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -38,11 +39,21 @@ export class CodexRunner extends CodexRunnerStruct {
     ];
     // 模型与思考强度：设置里选定则覆盖；为空=自动（沿用 codex config.toml）
     const cfg = EngineConfig.get().codex;
-    const model = (cfg.model || '').trim();
+    if (session.multiGroup) {
+      if (cfg.provider === 'official') common.push('-c', 'model_provider="openai"');
+      else {
+        common.push('-c', 'model_provider="divide"', '-c', 'model_providers.divide.name="Multi engine"',
+          '-c', `model_providers.divide.base_url="http://127.0.0.1:${AppConfig.KIMI_PROXY_PORT}/v1"`,
+          '-c', `model_providers.divide.env_key="CLOOTEE_DIVIDE_KEY"`,
+          '-c', 'model_providers.divide.wire_api="responses"', '-c', 'model_providers.divide.requires_openai_auth=false');
+        // Token is passed only through the child environment, never through CLI arguments.
+      }
+    }
+    const model = (cfg.model || (session.multiGroup && cfg.provider === 'official' ? CODEX_DEFAULT_MODEL : '')).trim();
     if (model) common.push('-m', model);
     // codex 没有 --effort，走 `-c model_reasoning_effort=<level>` 覆盖 config.toml。
     // 它只认 low/medium/high，故 xhigh/max 按 EFFORT_LEVELS 的映射降级到 high。
-    const effort = EngineConfig.codexEffort();
+    const effort = EngineConfig.codexEffort() || (session.multiGroup ? 'medium' : '');
     if (effort) common.push('-c', `model_reasoning_effort=${effort}`);
     // 续接：仅当已有 codex 会话 id 且其 rollout 文件真实存在时才 resume；
     // 否则首跑（不 resume），codex 生成新 id 并经 thread.started 回报，再由 _reconcileSessionId 校正。

@@ -1,3 +1,4 @@
+import { MultiEngine } from '../logic_realize/MultiEngine';
 // 会话管理（调度骨架）。
 // 核心原则：hub 不再持久化任何会话/消息——唯一数据源是 Claude Code 自己的 jsonl（~/.claude/projects）。
 // 列表 = 扫描 jsonl 得到的会话；运行期状态（任务队列 / 暂停）只活在内存里（_live，由 realize 持有），后端重启即清空。
@@ -101,6 +102,7 @@ export class SessionManagerStruct {
       const e = meta[this._canonicalKey(s)] || meta[s.id];
       return {
         ...s,
+        ...MultiEngine.decorate(s),
         promptCache: e?.promptCache || s.promptCache,
         promptCacheConfirmed: e?.promptCacheConfirmed ?? s.promptCacheConfirmed,
         pinned: !!e?.pinned,
@@ -258,6 +260,7 @@ export class SessionManagerStruct {
     if (!id) throw new Error(`setEngine: invalid id=${id}`);
     if (engine !== 'claude' && engine !== 'codex') throw new Error(`setEngine: invalid engine=${engine}`);
     const session = this.getSession(id);
+    if (session.multiGroup) throw new Error('多引擎会话的引擎已固定 / Multi-engine session engine is fixed');
     if (session.claudeSessionId || (session.tasks && session.tasks.length > 0))
       throw new Error('setEngine: session already started, engine locked');
     session.engine = engine;
@@ -289,6 +292,8 @@ export class SessionManagerStruct {
     if (!meta) return { ...live, id: wantId };
     return {
       ...meta,
+      multiGroup: live.multiGroup,
+      multiName: live.multiName,
       id: wantId,
       rootId: live.rootId,
       engine: live.engine || meta.engine,
@@ -323,6 +328,7 @@ export class SessionManagerStruct {
   // 保存会话 = 写入内存运行期表（不落盘）。任何获得运行期状态（入队/暂停/回写 uuid）的会话都经此进入 _live。
   static saveSession(session: Session): void {
     if (!session || !session.id) throw new Error('saveSession: invalid session');
+    MultiEngine.reconcile(session);
     session.updatedAt = Date.now();
     this._put(session);
   }

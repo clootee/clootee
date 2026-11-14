@@ -3541,3 +3541,16 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 .queue-wait-modal .qw-running li b { flex: none; max-width: 42%; overflow: hidden; color: var(--text); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .queue-wait-modal .qw-running li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue-wait-modal .qw-running .qw-running-more { font-size: 11.5px; }
+
+.multi-engine-card { min-width: 0; margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
+.multi-engine-card label { display: block; margin-top: 8px; }
+#multiEngineSettings { margin: 18px 0; }
+#multiEngineSettings .btn { margin: 6px 6px 0 0; }
+.multi-engine-tabs { display: flex; gap: 8px; padding: 8px 12px; overflow-x: auto; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.multi-engine-tabs[hidden] { display: none; }
+.multi-engine-tab { display: flex; flex-direction: column; gap: 4px; flex: 1 0 120px; text-align: left; min-height: 56px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--panel); cursor: pointer; }
+.multi-engine-tab span { font-size: 12px; opacity: .75; }
+.multi-engine-tab[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft, var(--panel)); box-shadow: inset 0 -3px var(--accent); }
+
+#multiEngineSettings .multi-engine-toggle { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+#multiEngineSettings .multi-engine-toggle input { width: 18px; height: 18px; margin: 0; flex: 0 0 18px; }

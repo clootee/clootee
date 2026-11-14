@@ -200,7 +200,15 @@ export interface Message {
 
 // 会话 = Claude Code 自己的会话（~/.claude/projects 下的 jsonl）。hub 不再持久化任何会话/消息，
 // 唯一数据源就是 claude 的 jsonl。这里的 Session 只是把 jsonl 元信息 + 运行期队列状态拼到一起的"视图"。
+export interface MultiEngineEntry {
+  name: string;
+  engine: Engine;
+  config: EngineProviderConfig;
+}
+
 export interface Session {
+  multiGroup?: string;
+  multiName?: string;
   costHelper?: { model: string; cache: '1h' | '5m' | 'off' };
   promptCache?: '1h' | '5m' | 'off';
   promptCacheConfirmed?: boolean;
