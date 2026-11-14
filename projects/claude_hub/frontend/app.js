@@ -271,6 +271,7 @@ async function api(path, body, authRetried = false, signal) {
     }
     throw new Error(message);
   }
+  if (path === '/api/session/create' && json.data?.multiGroup) await loadRoots();
   return json.data;
 }
 
@@ -2435,7 +2436,7 @@ async function newSession() {
   }
   // 当前已是空的新会话（未发起、无任务）则不再重复创建，直接复用并聚焦输入框
   const cur = State.session;
-  if (cur && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
+  if (cur && !State.settings.multiEngine?.enabled && !cur.multiGroup && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
     showMiniToast(T('alreadyNewSession'));
     flashSessionRow(cur.id);
     selectSession(cur.id);
@@ -2574,6 +2575,7 @@ async function selectSession(id) {
 
 // ── 渲染：最终消息 ──
 function renderMessages() {
+  MultiUi.schedule();
   const box = $('messages');
   const keepScroll = box.dataset.sessionId === State.sessionId && box.scrollTop + box.clientHeight < box.scrollHeight - 40;
   const scrollTop = box.scrollTop;
@@ -2893,7 +2895,7 @@ async function bindFavoriteDraftRoot(rootId, controls = null) {
     if (selection !== sessionSelectionVersion || State.sessionId !== draftId) { renderSessions(); return; }
     activateSession(real.id);
     State.session = real;
-    setTabRootId(rootId);
+    setTabRootId(real.rootId);
     $('sessionTitle').textContent = sessionTitle(real);
     renderMessages();
     renderQueue();
@@ -3848,6 +3850,7 @@ function toggleQueue() {
 }
 
 function renderQueue() {
+  MultiUi.schedule();
   const box = $('queue');
   const tasks = State.session?.tasks || [];
   box.innerHTML = '';
@@ -5887,7 +5890,7 @@ async function addTask() {
   if (initialId && !isFavoriteDraftId(initialId) && initialSelection !== sessionSelectionVersion) return;
   const selection = sessionSelectionVersion;
   const target = State.sessionId;
-  if (!(await EngineRecovery.ensure(State.session?.engine || State.settings.defaultEngine)) || selection !== sessionSelectionVersion) return;
+  if (!(await MultiUi.ensureEngines()) || selection !== sessionSelectionVersion) return;
   if (!(await SessionLimitUi.prepare(1)) || selection !== sessionSelectionVersion) return;
   if (!(await PromptCacheUi.ensure()) || selection !== sessionSelectionVersion) return;
   const prepared = await CostUi.prepare([applyQuickPrefix(applySlashPrefix(raw))]);
@@ -5954,7 +5957,7 @@ async function submitTasks() {
   const selection = sessionSelectionVersion;
   const target = State.sessionId;
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
-  if (!(await EngineRecovery.ensure(State.session?.engine || State.settings.defaultEngine)) || selection !== sessionSelectionVersion) return;
+  if (!(await MultiUi.ensureEngines()) || selection !== sessionSelectionVersion) return;
   if (!(await SessionLimitUi.prepare(prompts.length)) || selection !== sessionSelectionVersion) return;
   if (!(await PromptCacheUi.ensure()) || selection !== sessionSelectionVersion) return;
   const prepared = await CostUi.prepare(prompts.map(applyQuickPrefix));
@@ -6370,8 +6373,10 @@ function connectWs() {
     if (e.kind === 'claudeLogin') { onClaudeLoginEvent(e); return; }
     // Codex 登录进度：同上，没有 sessionId
     if (e.kind === 'codexLogin') { onCodexLoginEvent(e); return; }
+    if (State.session?.multiGroup && ['session', 'task', 'taskDone'].includes(e.kind)) MultiUi.schedule();
     // 后端级异常：同样没有 sessionId，顶部横幅直接显示，别只写进服务器日志
     if (e.kind === 'serverError') { showServerError(e.message); return; }
+    if (State.session?.multiGroup && ['session', 'task', 'taskDone'].includes(e.kind)) MultiUi.schedule();
     if (e.kind === 'session') {
       // 影响会话列表排序/暂停态
       if (State.session && e.session.id === State.session.id) {
@@ -7848,6 +7853,7 @@ async function loadSettings() {
     if (s && s.engineAvail) State.settings.engineAvail = s.engineAvail;
     State.settings.defaultEngine = readBrowserDefaultEngine(State.settings.engineAvail);
     if (s) {
+      State.settings.multiEngine = s.multiEngine || { enabled: false, engines: [] };
       State.settings.allowLan = !!s.allowLan;
       State.settings.preferBundled = !!s.preferBundled;
       State.settings.outEndReady = !!s.outEndReady;
@@ -8450,6 +8456,7 @@ function renderEngineDirty() {
 }
 
 function fillEnginePane() {
+  MultiUi.fill();
   EngineDirty.claude = false;
   EngineDirty.codex = false;
   EngineLoaded.claude = false;
@@ -8483,6 +8490,11 @@ function defaultEngineNoteText() {
 // 不连累另一块，也不连累默认引擎；失败的那块展开并滚动到可视区，原因同时写到 footer。
 // 返回 false ＝ 有块没存上，调用方（leavePane）据此决定先别关弹窗。
 async function saveEnginePane() {
+  try {
+    const saved = await api('/api/settings', { multiEngine: MultiUi.collect() });
+    State.settings.multiEngine = saved.multiEngine;
+    State.settings.maxConcurrentTasks = saved.maxConcurrentTasks;
+  } catch (e) { setPaneNotice('engBlockSaveFail', { block: MultiUi.text('title'), msg: e.message }, 'err', 0); return false; }
   const eng = $('defaultEngineSelect').value === 'codex' ? 'codex' : 'claude';
   const targets = ['claude', 'codex'].filter((e) => EngineDirty[e]);
   if (targets.length) setPaneNotice('engSaving', null, '', 0);
@@ -9781,7 +9793,7 @@ function refreshEngineControl() {
   }
   // 会话顶部不再显示 CC/CD 引擎徽章；草稿仍可用下拉选择引擎
   badge.style.display = 'none';
-  if (isDraftSession(s)) {
+  if (isDraftSession(s) && !s.multiGroup) {
     sel.style.display = '';
     sel.value = s.engine || State.settings.defaultEngine;
     sel.title = T('engine');
@@ -9793,7 +9805,7 @@ function refreshEngineControl() {
 // 用户在草稿上切换引擎 → 通知后端更新草稿引擎
 async function onEngineChange() {
   const s = State.session;
-  if (!s || !isDraftSession(s)) return;
+  if (!s || s.multiGroup || !isDraftSession(s)) return;
   const eng = $('engineSelect').value === 'codex' ? 'codex' : 'claude';
   // 收藏夹草稿只在前端存在，后端没有这个会话；直接改本地，等绑定目录时带过去
   if (isFavoriteDraftId(s.id)) {

@@ -1,7 +1,8 @@
 // 全局设置（调度骨架）：默认引擎 / 是否允许局域网访问 / 是否优先使用内置(out_end)引擎。
 // 持久化到 data/settings.json。
 import { AppConfig } from '../config/AppConfig';
-import { Engine } from '../models/Types';
+import { MultiEngineSettings } from '../helper/MultiEngineSettings';
+import { MultiEngineEntry, Engine } from '../models/Types';
 import { OutEnd } from '../helper/OutEnd';
 import { NetHelper } from '../helper/NetHelper';
 import { PackageInfo } from '../helper/PackageInfo';
@@ -50,6 +51,7 @@ export const MAX_CONCURRENT_MAX = 20;
 export const MAX_CONCURRENT_DEFAULT = 10;
 
 export interface AppSettings {
+  multiEngine: { enabled: boolean; engines: MultiEngineEntry[] };
   costOptimization: CostPolicySettings;
   claudePromptCache: PromptCacheMode;
   askClaudePromptCache: boolean;
@@ -133,6 +135,7 @@ export class SettingsStruct {
         ? raw.runAsUserName.trim()
         : DEFAULT_RUN_AS_USER_NAME;
     return {
+      multiEngine: raw?.multiEngine || { enabled: false, engines: [] },
       claudePromptCache: PromptCache.valid(raw?.claudePromptCache) ? raw!.claudePromptCache : '1h',
       costOptimization: CostPolicy.sanitize(raw?.costOptimization),
       askClaudePromptCache: !!raw?.askClaudePromptCache,
@@ -201,6 +204,7 @@ export class SettingsStruct {
   // 批量更新（前端设置面板）；只接受已知字段
   static update(patch: Partial<AppSettings>): AppSettings {
     const next: Partial<AppSettings> = {};
+    if (patch.multiEngine !== undefined) next.multiEngine = MultiEngineSettings.validate(patch.multiEngine);
     if (patch.costOptimization !== undefined) next.costOptimization = CostPolicy.sanitize(patch.costOptimization);
     if (patch.claudePromptCache !== undefined) {
       if (!PromptCache.valid(patch.claudePromptCache)) throw new Error('Invalid Claude prompt cache mode');
@@ -221,6 +225,7 @@ export class SettingsStruct {
       next.templateCollectionPath = patch.templateCollectionPath.trim();
     if (patch.autoCompact) next.autoCompact = this._sanitizeAutoCompact(patch.autoCompact);
     if (patch.maxConcurrentTasks !== undefined) next.maxConcurrentTasks = this._sanitizeMaxConcurrent(patch.maxConcurrentTasks);
+    if (next.multiEngine?.enabled) next.maxConcurrentTasks = Math.max(next.maxConcurrentTasks ?? this.get().maxConcurrentTasks, next.multiEngine.engines.length);
     if (typeof patch.runAsUserEnabled === 'boolean') next.runAsUserEnabled = patch.runAsUserEnabled;
     if (typeof patch.runAsUserName === 'string') {
       const name = patch.runAsUserName.trim();
@@ -240,6 +245,7 @@ export class SettingsStruct {
         ? raw.defaultEngine
         : cur.defaultEngine;
     const merged: AppSettings = {
+      multiEngine: patch.multiEngine ?? cur.multiEngine,
       claudePromptCache: patch.claudePromptCache ?? cur.claudePromptCache,
       costOptimization: patch.costOptimization ?? cur.costOptimization,
       askClaudePromptCache: patch.askClaudePromptCache ?? cur.askClaudePromptCache,

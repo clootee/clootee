@@ -1,3 +1,6 @@
+import { EngineConfig } from '../logic_realize/EngineConfig';
+import { KimiProxy } from '../logic_realize/KimiProxy';
+import { MultiEngine } from '../logic_realize/MultiEngine';
 // Codex 执行器（调度骨架）：对单个任务调用本地 codex CLI（codex exec --json），流式解析事件。
 // 与 ClaudeRunnerStruct 对称：只负责"运行一个任务并把事件吐出去"，不负责排队/调度。
 import { ProcessSpawner, SpawnHandle } from '../helper/ProcessSpawner';
@@ -28,6 +31,9 @@ export class CodexRunnerStruct {
     prompt: string,
     cb: RunCallbacks,
   ): SpawnHandle {
+    return MultiEngine.withSession(session, () => this._executeConfigured(session, rootPath, prompt, cb));
+  }
+  private static _executeConfigured(session: Session, rootPath: string, prompt: string, cb: RunCallbacks): SpawnHandle {
     if (!session || !session.id) throw new Error('execute: invalid session');
     if (!rootPath) throw new Error(`execute: invalid rootPath=${rootPath}`);
     // 切用户跑时先确认引擎进得去这个工作目录（首次检查后进程内缓存，几乎无开销）：
@@ -195,7 +201,8 @@ export class CodexRunnerStruct {
       prompt,
       useShell,
       AppConfig.ENGINE_SILENCE_WARN_MS,
-      ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
+      { ...ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
+        ...(session.multiGroup && EngineConfig.get().codex.provider !== 'official' ? { CLOOTEE_DIVIDE_KEY: KimiProxy.registerEngine(EngineConfig.get().codex) } : {}) },
     );
     return handle;
   }

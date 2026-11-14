@@ -1,3 +1,4 @@
+import { MultiEngine } from '../logic_realize/MultiEngine';
 // Claude 执行器（调度骨架）：对单个任务调用本地 claude CLI，流式解析事件
 // 不负责排队/调度，只负责"运行一个任务并把事件吐出去"
 import { ProcessSpawner, SpawnHandle } from '../helper/ProcessSpawner';
@@ -15,6 +16,7 @@ import { RootManager } from '../logic_realize/RootManager';
 import { ExternalEnv } from '../helper/ExternalEnv';
 import { PromptCache } from '../helper/PromptCache';
 import { CostPolicy } from '../helper/CostPolicy';
+import { MANAGED_ENV_KEYS } from './EngineConfigStruct';
 import { EngineConfig } from '../logic_realize/EngineConfig';
 import { SUBSCRIPTION_PROVIDERS } from '../config/ClaudePricing';
 import { TraceInput } from './TraceStoreStruct';
@@ -52,6 +54,9 @@ export class ClaudeRunnerStruct {
     prompt: string,
     cb: RunCallbacks,
   ): SpawnHandle {
+    return MultiEngine.withSession(session, () => this._executeConfigured(session, rootPath, prompt, cb));
+  }
+  private static _executeConfigured(session: Session, rootPath: string, prompt: string, cb: RunCallbacks): SpawnHandle {
     if (!session || !session.id) throw new Error('execute: invalid session');
     if (!rootPath) throw new Error(`execute: invalid rootPath=${rootPath}`);
     // 切用户跑时先确认引擎进得去这个工作目录（首次检查后进程内缓存，几乎无开销）：
@@ -176,6 +181,8 @@ export class ClaudeRunnerStruct {
       useShell,
       AppConfig.ENGINE_SILENCE_WARN_MS,
       {
+        ...Object.fromEntries(MANAGED_ENV_KEYS.map(k => [k, ''])),
+        ...EngineConfig.claudeEnv(),
         ...ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id),
         // 默认服务商 clootee：给请求带上本轮任务的标签，供「本次花了多少」精确汇总（别家服务商时为空）
         ...ConsoleAccount.runEnv(session),

@@ -1,3 +1,5 @@
+import { randomUUID, createHash } from 'crypto';
+import { EngineProviderConfig } from '../models/Types';
 // Kimi 转译代理（实现）：http 服务器 + 上游 https 请求 + SSE 写出等 IO。
 // 监听 127.0.0.1:<port>，对外暴露 OpenAI Responses 兼容面（供 codex 的 kimi provider 指向），
 // 内部转译到 Kimi(Moonshot) 的 Chat Completions。跨平台：纯 Node 内置模块，无平台差异。
@@ -9,6 +11,14 @@ import { Logger } from '../helper/Logger';
 import { EngineConfig } from './EngineConfig';
 
 export class KimiProxy extends KimiProxyStruct {
+  private static _engineTokens = new Map<string, EngineProviderConfig>();
+  private static _engineHashes = new Map<string, string>();
+  static registerEngine(config: EngineProviderConfig): string {
+    const hash = createHash('sha256').update(JSON.stringify(config)).digest('hex');
+    let token = this._engineHashes.get(hash);
+    if (!token) { token = randomUUID(); this._engineHashes.set(hash, token); this._engineTokens.set(token, config); }
+    return token;
+  }
   private static _seq = 0;
   private static _started = false;
 
@@ -86,7 +96,8 @@ export class KimiProxy extends KimiProxyStruct {
         res.write(`data: ${JSON.stringify(data)}\n\n`);
       };
       try {
-        await this.dispatchResponses(body, key, emit);
+        const config = this._engineTokens.get(forwarded);
+        await EngineConfig.withConfig(config ? { codex: config } : {}, () => this.dispatchResponses(body, config?.apiKey || key, emit));
         res.end();
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);

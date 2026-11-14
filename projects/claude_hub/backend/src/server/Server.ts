@@ -1,3 +1,4 @@
+import { MultiEngine } from '../logic_realize/MultiEngine';
 // HTTP + WebSocket 服务（入口层）：只接收请求、转发给 logic_realize，不写业务逻辑
 import express, { Request, Response } from 'express';
 import * as http from 'http';
@@ -545,7 +546,7 @@ export class Server {
     );
     app.post('/api/session/create', (req, res) =>
       this._wrap(res, 'session.create', () =>
-        SessionManager.createSession(req.body.rootId, req.body.name, req.body.engine),
+        MultiEngine.create(req.body.rootId, req.body.name, req.body.engine),
       ),
     );
     app.post('/api/session/engine', (req, res) =>
@@ -571,7 +572,7 @@ export class Server {
         SessionManager.searchSessions(String(req.query.q || ''), String(req.query.rootId || '') || undefined).then(
           (hits) => {
             const keys = RootLock.keysFromCookie(req.headers.cookie);
-            return hits.filter((h) => RootLock.canAccess(this._rootOf(h.id), keys));
+            return hits.filter((h) => RootLock.canAccess(this._rootOf(h.id), keys) && RootLock.canAccess(MultiEngine.parentRoot(this._rootOf(h.id)), keys));
           },
         ),
       ),
@@ -733,11 +734,11 @@ export class Server {
 
     // ── 任务 / 任务流 ──
     app.post('/api/cost/check', (req, res) =>
-      this._wrap(res, 'cost.check', () => CostOptimizer.check(String(req.body.sessionId || ''), String(req.body.prompt || ''))),
+      this._wrap(res, 'cost.check', () => MultiEngine.withSession(SessionManager.getSession(String(req.body.sessionId || '')), () => CostOptimizer.check(String(req.body.sessionId || ''), String(req.body.prompt || '')))),
     );
     app.post('/api/cost/approve', (req, res) =>
       this._wrap(res, 'cost.approve', () => ({ approvals: (Array.isArray(req.body.prompts) ? req.body.prompts : [req.body.prompt]).map((p: unknown) =>
-        CostOptimizer.approve(String(req.body.sessionId || ''), String(p || ''), String(req.body.fingerprint || ''), String(req.body.compactProof || ''))) })),
+        MultiEngine.withSession(SessionManager.getSession(String(req.body.sessionId || '')), () => CostOptimizer.approve(String(req.body.sessionId || ''), String(p || ''), String(req.body.fingerprint || ''), String(req.body.compactProof || '')))) })),
     );
     app.post('/api/cost/compact', (req, res) =>
       this._wrapAsync(res, 'cost.compact', () => CostOptimizer.compact(String(req.body.sessionId || ''))),
@@ -755,8 +756,11 @@ export class Server {
         emit('error', 0, { message });
       } finally { if (!res.destroyed) res.end(); }
     });
+    app.get('/api/multi/members', (req, res) => this._wrap(res, 'multi.members', () => MultiEngine.members(String(req.query.sessionId)).map(s => ({ id: s.id, name: s.multiName, engine: s.engine, paused: s.paused, tasks: s.tasks.map(t => ({ status: t.status })) }))));
     app.post('/api/task/add', (req, res) =>
-      this._wrap(res, 'task.add', () => TaskQueue.addTasks(req.body.sessionId, req.body.prompts, false, Array.isArray(req.body.costApprovals) ? req.body.costApprovals.map(String) : [])),
+      this._wrap(res, 'task.add', () => {
+        return MultiEngine.submit(String(req.body.sessionId), req.body.prompts, Array.isArray(req.body.costApprovals) ? req.body.costApprovals.map(String) : []);
+      }),
     );
     app.post('/api/task/remove', (req, res) =>
       this._wrap(res, 'task.remove', () => {
@@ -870,6 +874,8 @@ export class Server {
       if (typeof v !== 'string' || !v) return;
       const rid = this._rootOf(v);
       if (RootLock.isLocked(rid)) out.add(rid);
+      const parent = MultiEngine.parentRoot(rid);
+      if (RootLock.isLocked(parent)) out.add(parent);
     });
     return [...out];
   }
@@ -878,7 +884,7 @@ export class Server {
   private static _redact<T extends { id: string; rootId: string }>(req: Request, list: T[]): T[] {
     const keys = RootLock.keysFromCookie(req.headers.cookie);
     return list.map((s) => {
-      if (RootLock.canAccess(s.rootId, keys)) return s;
+      if (RootLock.canAccess(s.rootId, keys) && RootLock.canAccess(MultiEngine.parentRoot(s.rootId), keys)) return s;
       const x = s as unknown as Record<string, unknown>;
       return {
         id: s.id,

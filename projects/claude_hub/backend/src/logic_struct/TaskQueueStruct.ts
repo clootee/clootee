@@ -1,3 +1,4 @@
+import { MultiEngine } from '../logic_realize/MultiEngine';
 // 任务队列调度（调度骨架）
 // 职责：把任务排队、顺序执行、支持停止当前任务（跳到下一个）、暂停/继续整条任务流
 // 运行期状态（进程句柄、被杀任务集合）由 Realize 用内部 Map/Set 持有
@@ -173,6 +174,9 @@ export class TaskQueueStruct {
   // 注意顺序：可能抛异常的准备动作（取根目录、落轨迹）一律排在 _markRunning 之前——
   // 一旦任务被置为 running 之后再抛，队列就会永远停在"执行中"，界面上表现为发消息没反应。
   static _startTask(session: Session, task: Task): void {
+    return MultiEngine.withSession(session, () => this._startConfiguredTask(session, task));
+  }
+  private static _startConfiguredTask(session: Session, task: Task): void {
     const full = SessionManager.getSessionFull(session.id);
     const limit = SessionLimit.status(full, full.messages, Settings.get().costOptimization);
     if (limit.count >= limit.max) {

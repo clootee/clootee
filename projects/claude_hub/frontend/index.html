@@ -413,6 +413,8 @@
           <select class="sx-input" id="defaultEngineSelect"></select>
           <div class="sx-note" id="defaultEngineNote"></div>
 
+          <div id="multiEngineSettings"></div>
+
           <!-- 每个引擎一个折叠块：折叠时标题行右侧显示「服务商 · 模型」摘要 -->
           <div class="eng-acc">
             <button class="eng-acc-head" id="engAccClaudeHead" type="button">
@@ -937,6 +939,7 @@
         <button id="extApiBtn" class="icon-btn ext-api-btn" aria-label="external api" style="display:none">🛰</button>
       </div>
 
+      <div id="multiEngineTabs" class="multi-engine-tabs" hidden></div>
       <div class="content">
         <!-- 消息列（含右下角错误悬浮圆圈；包一层是为了让圆圈相对「会话区」定位而不跟着消息滚动） -->
         <div class="msg-wrap">
@@ -1260,6 +1263,7 @@
   <script src="cost-optimization.js?v=20261015a"></script>
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
+  <script src="multi-engine.js"></script>
   <script src="app.js?v=20261110kimi"></script>
 </body>
 </html>
