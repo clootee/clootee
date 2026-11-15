@@ -3559,6 +3559,7 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 .multi-engine-tabs[hidden] { display: none; }
 .multi-engine-tab { display: flex; flex-direction: column; gap: 4px; flex: 1 0 120px; text-align: left; min-height: 56px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--panel); cursor: pointer; }
 .multi-engine-tab span { font-size: 12px; opacity: .75; }
+.multi-engine-tab .multi-engine-cost { color: var(--accent); opacity: 1; font-variant-numeric: tabular-nums; }
 .multi-engine-tab[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft, var(--panel)); box-shadow: inset 0 -3px var(--accent); }
 
 #multiEngineSettings .multi-engine-toggle { display: flex; align-items: center; gap: 8px; min-height: 44px; }

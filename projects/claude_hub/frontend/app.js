@@ -3127,7 +3127,11 @@ const ApiBill = {
     api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
       .then((r) => {
         this.bySession[sid] = r;
-        if (r.turns.length) { this.totals[sid] = { usd: r.totalUsd, cny: r.totalCny, sub: r.subscriptionUsd }; this.paintListTag(sid); this.paintSelection(); }
+        if (r.turns.length) {
+          const parent = State.sessions.find(s => s.multiParent && (s.multiSessionIds || []).includes(sid));
+          if (parent) { this.asked.delete(parent.id); this.pending.add(parent.id); this.flushList(); }
+          else { this.totals[sid] = { usd:r.totalUsd,cny:r.totalCny,sub:r.subscriptionUsd }; this.paintListTag(sid); this.paintSelection(); }
+        }
         if (State.session && State.session.id === sid) renderElapsedNotes();
       })
       .catch(() => { delete this.bySession[sid]; });
@@ -3210,7 +3214,7 @@ const ApiBill = {
   },
   tagHtml(t) {
     const sub = t.sub > 0 ? `<span class="api-cost-sub">${escapeHtml(T('apiSubBadge').replace('{c}', this.usd(t.sub)))}</span>` : '';
-    return `${this.money(t)}${sub}`;
+    return `${this.money(t)}${sub}${t.unpriced ? ' · ' + escapeHtml(T('apiUnpriced')) : ''}`;
   },
   paintListTag(sid) {
     document.querySelectorAll('.api-cost-tag').forEach((tag) => {
@@ -3313,6 +3317,8 @@ const ApiBill = {
   },
   // 任务结束：该会话缓存作废，重新取明细与合计
   onTaskEnd(sessionId) {
+    const parent = State.sessions.find(s => s.multiParent && (s.multiSessionIds || []).includes(sessionId));
+    if (parent) { this.asked.delete(parent.id); this.pending.add(parent.id); this.flushList(); }
     delete this.bySession[sessionId];
     if (State.session && State.session.id === sessionId) this.load(sessionId);
     else { this.asked.delete(sessionId); this.pending.add(sessionId); this.flushList(); }

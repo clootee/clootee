@@ -446,6 +446,7 @@ export interface ApiSessionCost {
 }
 // 会话列表徽章：总估价 + 其中订阅部分
 export interface ApiSessionTotals {
+  unpriced?: number; // Requests whose model price is unknown; never imply they were free.
   usd: number;
   cny: number;
   sub: number;

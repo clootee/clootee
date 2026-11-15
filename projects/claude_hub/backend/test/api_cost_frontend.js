@@ -54,3 +54,25 @@ const html = bill.selectionHtml(stats);
 assert.ok(html.includes('(CNY)'));
 assert.ok(!html.includes('(USD)'));
 console.log('api_cost_frontend: 14 assertions passed (CNY display, mixed currencies, Ark note, batch totals)');
+
+// Loading one tab must not replace the parent group's aggregate with that tab's cost.
+(async () => {
+  const requests=[];
+  context.State={sessions:[{id:'parent',multiParent:true,multiSessionIds:['parent','child']}],session:{id:'parent'},selectedSessions:new Set()};
+  context.renderElapsedNotes=()=>{};
+  context.api=async (url, body)=>{
+    requests.push({url,body});
+    return url.startsWith('/api/session/api-cost') ? {turns:[{}],totalUsd:2,totalCny:0,subscriptionUsd:2}
+      : {parent:{usd:7,cny:0,sub:7}};
+  };
+  bill.paintListTag=()=>{};bill.paintSelection=()=>{};
+  bill.load('parent');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(bill.totals.parent.usd,7);
+  bill.onTaskEnd('child');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(bill.totals.parent.usd,7);
+  assert.ok(requests.some(r=>r.url==='/api/sessions/api-cost' && r.body.ids.includes('parent')));
+  assert.ok(bill.tagHtml({usd:0,cny:0,unpriced:1}).includes('apiUnpriced'));
+  console.log('api_cost_frontend: parent aggregate cache and child completion refresh passed');
+})().catch(error=>{console.error(error);process.exitCode=1;});

@@ -84,7 +84,13 @@ export function isDeepSeekPeak(ts: number): boolean {
 // OpenAI 官方价目（美元 / 百万 token），给 Codex 轮次计价：codex 的 input_tokens 含缓存命中部分，
 // 未命中按 input、命中按 cacheRead；没有「缓存写」加价。reasoning 已含在 output_tokens 里。
 export interface OpenAiPrice { input: number; cacheRead: number; output: number }
+// GPT-6 standard short-context USD/1M tokens, verified 2026-11-15:
+// https://developers.openai.com/api/docs/pricing
 export const OPENAI_PRICES: Record<string, OpenAiPrice> = {
+  'gpt-6.1-sol': { input: 2, cacheRead: 0.1, output: 10 },
+  'gpt-6-astra': { input: 10, cacheRead: 1, output: 50 },
+  'gpt-6.1-terra': { input: 1, cacheRead: 0.05, output: 5 },
+  'gpt-6-luna': { input: 0.1, cacheRead: 0.01, output: 0.5 },
   'gpt-5': { input: 1.25, cacheRead: 0.125, output: 10 },
   'gpt-5-codex': { input: 1.25, cacheRead: 0.125, output: 10 },
   'gpt-5-mini': { input: 0.25, cacheRead: 0.025, output: 2 },
