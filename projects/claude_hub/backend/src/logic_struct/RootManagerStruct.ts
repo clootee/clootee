@@ -25,6 +25,14 @@ export class RootManagerStruct {
     return JsonStore.read<Root[]>(Paths.ROOTS_FILE, []);
   }
 
+  static markInternalRoots(parents: Record<string, string>): void {
+    const roots = this.listRoots(); let changed = false;
+    for (const root of roots) if (parents[root.id] && root.multiParentRootId !== parents[root.id]) {
+      root.multiParentRootId = parents[root.id]; changed = true;
+    }
+    if (changed) JsonStore.write(Paths.ROOTS_FILE, roots);
+  }
+
   // 新增根目录：校验路径存在 → 生成 id → 落盘
   static addRoot(name: string, dirPath: string): Root {
     if (!name || !name.trim()) throw new Error(`addRoot: invalid name=${name}`);

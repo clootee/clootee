@@ -117,7 +117,11 @@ test('named engine infrastructure', async t => {
     });
     let first, members;
     await t.test('creates three isolated directories, copies case variants and applies shared prompts', () => {
-      first = MultiEngine.create(root.id, '', 'multi'); members = MultiEngine.members(first.id);
+      const events=[]; const broadcast=EventBus.broadcast; EventBus.broadcast=e=>events.push(e);
+      try { first = MultiEngine.create(root.id, '', 'multi'); } finally { EventBus.broadcast=broadcast; }
+      assert.equal(events.filter(e=>e.kind==='session').length,1);
+      assert.equal(events[0].session.multiParent,true); assert.equal(events[0].session.rootId,root.id);
+      members = MultiEngine.members(first.id);
       assert.equal(members.length, 3);
       assert.throws(() => SessionManager.setEngine(first.id, 'claude'), /engine is fixed/); assert.equal(new Set(members.map(s => s.id)).size, 3);
       assert.deepEqual(members.map(s => s.multiName), entries.map(e => e.name));
@@ -131,6 +135,26 @@ test('named engine infrastructure', async t => {
         assert.equal(JSON.stringify(s).includes('test-key'), false);
       });
       assert.equal(fs.statSync(path.join(temp, 'multi_engine_groups.json')).mode & 0o777, 0o600);
+    });
+    await t.test('parent listing hides child sessions and directories before pagination in every scope', async () => {
+      const { SessionList } = load('logic_realize/SessionList');
+      const catalog = SessionList._catalog; SessionList._catalog = async () => [];
+      try {
+        const roots = MultiEngine.visibleRoots();
+        assert.equal(roots.some(r => members.some(s => s.rootId === r.id)), false);
+        assert.deepEqual(new Set(roots.find(r => r.id === root.id).multiChildRootIds), new Set(members.map(s => s.rootId)));
+        for (const mode of ['single', 'workspace', 'indexed']) {
+          const page = await SessionList.page({mode,rootId:root.id,limit:50});
+          const grouped = page.items.filter(s => s.multiGroup === first.multiGroup);
+          assert.equal(grouped.length,1); assert.equal(grouped[0].rootId,root.id);
+          assert.equal(grouped[0].multiParent,true); assert.equal(grouped[0].multiSessionIds.length,3);
+          assert.equal(page.directories.some(d => members.some(s => s.rootId === d.rootId)),false);
+        }
+        const page = await SessionList.page({mode:'workspace',filterRootId:root.id,limit:1});
+        assert.equal(page.items.length,1);
+        assert.equal(MultiEngine.visibleSessions(members).length,1);
+        assert.equal(MultiEngine.anchorId(members[2].id), first.id);
+      } finally { SessionList._catalog = catalog; }
     });
     await t.test('configuration is a snapshot and async contexts do not mix', async () => {
       settings.multiEngine = { enabled: false, engines: [] };
@@ -223,6 +247,30 @@ test('named engine infrastructure', async t => {
       assert.equal(MultiEngine.members(`${s.rootId}:native-engine-one`).length, 3);
       assert.equal(MultiEngine.members(`${s.rootId}:native-engine-one`)[0].id, first.id);
       assert.equal(SessionManager.getSession(`${s.rootId}:native-engine-one`).multiName, 'codex_one');
+    });
+    await t.test('group state, annotations and full-text search belong to the parent after restart', async () => {
+      const { SessionList } = load('logic_realize/SessionList');
+      const catalog=SessionList._catalog;SessionList._catalog=async()=>[];
+      const restored=MultiEngine.members(first.id), child=restored[2];
+      const tasks=child.tasks, messages=child.messages;
+      try {
+        SessionManager.setTitle(MultiEngine.anchorId(child.id),'Group title');
+        SessionManager.setFavorite(MultiEngine.anchorId(child.id),true);
+        child.tasks=[{id:'running-fixture',status:'running'}]; child.messages=[{role:'user',text:'unique-child-search'}];
+        const page=await SessionList.page({mode:'favorites',rootId:root.id});
+        assert.equal(page.items.filter(s=>s.multiGroup===first.multiGroup).length,1);
+        assert.equal(page.items[0].customTitle,'Group title');assert.equal(page.running[0].id,first.id);
+        assert.equal(SessionManager.getSession(child.id).customTitle,'Group title');
+        const search=await SessionList.page({mode:'workspace',q:'unique-child-search',fullText:true});
+        assert.equal(search.items.length,1);assert.equal(search.items[0].id,first.id);
+      } finally {child.tasks=tasks;child.messages=messages;SessionList._catalog=catalog;}
+    });
+    await t.test('removing the parent removes every member and keeps work directories internal', () => {
+      const ids=MultiEngine.members(first.id).map(s=>s.id);
+      MultiEngine.remove(first.id);
+      assert.equal(SessionManager.runtimeSessions().some(s=>ids.includes(s.id)),false);
+      assert.equal(MultiEngine.visibleRoots().some(r=>members.some(s=>s.rootId===r.id)),false);
+      assert.equal(fs.readFileSync(path.join(rootDir,'divide','codex_one','work.txt'),'utf8'),'existing work');
     });
     await t.test('rejects symlink work directories', () => {
       settings.multiEngine = { enabled: true, engines: entries };

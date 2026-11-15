@@ -99,12 +99,14 @@ export class SessionManagerStruct {
   // 读取键与写入键一致，都走「规范键」；`meta[s.id]` 只作历史遗留（草稿键上的旧标注）兜底。
   private static _withMeta(sessions: Session[], meta = SessionMeta.getAll()): Session[] {
     return sessions.map((s) => {
-      const e = meta[this._canonicalKey(s)] || meta[s.id];
+      const own = meta[this._canonicalKey(s)] || meta[s.id];
+      const parentKey = MultiEngine.metaKey(s);
+      const e = (parentKey && meta[parentKey]) || own;
       return {
         ...s,
         ...MultiEngine.decorate(s),
-        promptCache: e?.promptCache || s.promptCache,
-        promptCacheConfirmed: e?.promptCacheConfirmed ?? s.promptCacheConfirmed,
+        promptCache: own?.promptCache || s.promptCache,
+        promptCacheConfirmed: own?.promptCacheConfirmed ?? s.promptCacheConfirmed,
         pinned: !!e?.pinned,
         favorite: !!e?.favorite,
         status: e?.status || 'active',
@@ -225,7 +227,7 @@ export class SessionManagerStruct {
 
   // 新建会话：仅创建一个内存草稿（不落盘、不自造 claude id）。
   // 发首条任务时不传 --session-id，让 claude 生成 uuid 后由 _reconcileSessionId 回写。
-  static createSession(rootId: string, _name: string, engine?: Engine): Session {
+  static createSession(rootId: string, _name: string, engine?: Engine, internal = false): Session {
     if (!rootId) throw new Error(`createSession: invalid rootId=${rootId}`);
     const eng: Engine = engine === 'codex' ? 'codex' : engine === 'claude' ? 'claude' : AppConfig.DEFAULT_ENGINE;
     const cache = Settings.get();
@@ -246,11 +248,11 @@ export class SessionManagerStruct {
       source: 'empty', // 草稿尚无对话
     };
     this._put(session);
-    this.markIndexed(session.id); // 本版本起：新会话建立之初就进索引，「全部目录」视图据此取数
+    if (!internal) this.markIndexed(session.id); // 本版本起：新会话建立之初就进索引，「全部目录」视图据此取数
     SessionMeta.setPromptCache(session.id, cache.claudePromptCache, !cache.askClaudePromptCache);
     // 前端会话列表靠这个事件才知道"多了一个会话"（不是改已有会话状态那种 'session' 广播场景，
     // 比如原会话已删、外部推送兜底新建的场景，用户不刷新页面也得看见）
-    EventBus.broadcast({ kind: 'session', session });
+    if (!internal) EventBus.broadcast({ kind: 'session', session });
     return session;
   }
 

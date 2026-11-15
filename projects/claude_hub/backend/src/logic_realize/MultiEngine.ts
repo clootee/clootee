@@ -7,6 +7,8 @@ import * as path from 'path';
 import { JsonStore } from '../helper/JsonStore';
 import { MultiEngineSettings } from '../helper/MultiEngineSettings';
 import { Paths } from '../paths';
+import { EventBus } from '../helper/EventBus';
+import { SignatureCache } from '../helper/SignatureCache';
 import { Ids } from '../helper/Ids';
 import { Engine, EngineProviderConfig, MultiEngineEntry, Session } from '../models/Types';
 import { Settings } from './Settings';
@@ -22,7 +24,82 @@ interface Member extends MultiEngineEntry { rootId: string; sessionId: string }
 interface Group { id: string; rootId: string; members: Member[] }
 export class MultiEngine {
   private static file = path.join(Paths.DATA_ROOT, 'multi_engine_groups.json');
-  private static groups(): Group[] { return JsonStore.read<Group[]>(this.file, []); }
+  private static _groupCache?: { signature: string; groups: Group[] };
+  static listingVersion(): string { return SignatureCache.fileSignature(this.file) || ''; }
+  private static groups(): Group[] {
+    const signature = this.listingVersion();
+    if (this._groupCache?.signature === signature) return this._groupCache.groups;
+    const groups = JsonStore.read<Group[]>(this.file, []); this._groupCache = { signature, groups }; return groups;
+  }
+  private static _rootCache?: { signature: string; parents: Record<string,string> };
+  private static rootParents(): Record<string, string> {
+    const signature = (SignatureCache.fileSignature(Paths.ROOTS_FILE) || '') + ':' + this.listingVersion();
+    if (this._rootCache?.signature === signature) return this._rootCache.parents;
+    const parents: Record<string, string> = {};
+    for (const r of RootManager.listRoots()) if (r.multiParentRootId) parents[r.id] = r.multiParentRootId;
+    for (const g of this.groups()) for (const m of g.members) parents[m.rootId] = g.rootId;
+    this._rootCache = { signature, parents };
+    return parents;
+  }
+  static visibleRoots() {
+    const parents = this.rootParents();
+    RootManager.markInternalRoots(parents);
+    return RootManager.listRoots().filter(r => this.parentRoot(r.id) === r.id).map(r => ({ ...r,
+      multiChildRootIds: Object.keys(parents).filter(id => this.parentRoot(id) === r.id) }));
+  }
+  private static liveId(member: Member): string {
+    return SessionManager.runtimeSessions().find(s => s.id === member.sessionId ||
+      (s.rootId === member.rootId && !!s.claudeSessionId && `${s.rootId}:${s.claudeSessionId}` === member.sessionId))?.id || member.sessionId;
+  }
+  static listingInfo(s: Pick<Session, 'id' | 'rootId' | 'claudeSessionId'>) {
+    const g = this.group(s);
+    if (!g) return undefined;
+    return { groupId: g.id, rootId: this.parentRoot(g.rootId), anchorId: this.liveId(g.members[0]),
+      anchorRootId: g.members[0].rootId, ids: [...new Set(g.members.flatMap(m => [m.sessionId, this.liveId(m)]))] };
+  }
+  static metaKey(s: Session): string | undefined { return this.group(s)?.members[0]?.sessionId; }
+  static anchorId(id: string): string {
+    const s = SessionManager.getRuntimeSession(id); const g = this.group(s); return g ? this.liveId(g.members[0]) : s.id;
+  }
+  static parentView(s: Session): Session {
+    const info = this.listingInfo(s); if (!info) return { ...s, rootId: this.parentRoot(s.rootId) };
+    const members = this.members(s.id); const anchor = SessionManager.getSession(info.anchorId);
+    return { ...anchor, id: info.anchorId, rootId: info.rootId, multiRootId: info.rootId, multiParentId: info.anchorId,
+      multiParent: true, multiSessionIds: info.ids, multiName: '', messages: [],
+      name: anchor.name || members.find(m => m.name)?.name || '',
+      updatedAt: Math.max(...members.map(m => m.updatedAt)),
+      tasks: members.flatMap(m => m.tasks), paused: members.every(m => m.paused),
+      concurrencyPaused: members.some(m => m.concurrencyPaused) };
+  }
+  static visibleSessions(rows: Session[], rootId?: string): Session[] {
+    const out: Session[] = []; const used = new Set<string>();
+    const push = (s: Session) => {
+      const row = this.parentView(s); if (rootId && row.rootId !== this.parentRoot(rootId)) return;
+      const key = row.multiGroup || row.id; if (!used.has(key)) { out.push(row); used.add(key); }
+    };
+    for (const s of rows) push(s);
+    if (rootId) for (const g of this.groups()) if (this.parentRoot(g.rootId) === this.parentRoot(rootId)) {
+      try { push(SessionManager.getSession(this.liveId(g.members[0]))); } catch { /* Removed groups have no visible row. */ }
+    }
+    return out.sort((a,b) => Number(!!b.pinned)-Number(!!a.pinned) || b.updatedAt-a.updatedAt);
+  }
+  static runForGroup(id: string, action: (sessionId: string) => void): void {
+    for (const s of this.members(id)) action(s.id);
+  }
+  static remove(id: string): void {
+    const s = SessionManager.getSession(id), g = this.group(s);
+    if (!g) { TaskQueue.removeSession(id); return; }
+    RootManager.markInternalRoots(this.rootParents());
+    const ids = this.members(id).map(m => m.id);
+    for (const memberId of ids) TaskQueue.removeSession(memberId);
+    JsonStore.write(this.file, this.groups().filter(group => group.id !== g.id)); fs.chmodSync(this.file, 0o600);
+  }
+  static removeMany(ids: string[]) {
+    if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string')) throw new Error('Invalid session IDs');
+    const removed: string[] = [], failed: string[] = [];
+    for (const id of ids) { try { this.remove(id); removed.push(id); } catch { failed.push(id); } }
+    return { removed, failed };
+  }
   static async models(engine: Engine, config: Pick<EngineProviderConfig, 'provider' | 'apiKey' | 'baseUrl' | 'modelsUrl'>) {
     if (engine !== 'claude' && engine !== 'codex') throw new Error('Invalid engine');
     if (config.provider === 'official') return { models: await ModelManager.officialModels(engine) };
@@ -30,14 +107,17 @@ export class MultiEngine {
     return { models: ids.map(id => ({ id, source: 'api' as const })), recommended: EngineConfig.pickDefaultModel(config.provider, ids) };
   }
   static parentRoot(rootId: string): string {
-    return this.groups().find(g => g.members.some(m => m.rootId === rootId))?.rootId || rootId;
+    const parents = this.rootParents(); const seen = new Set<string>();
+    while (parents[rootId] && !seen.has(rootId)) { seen.add(rootId); rootId = parents[rootId]; }
+    return rootId;
   }
-  private static group(s: Session): Group | undefined {
+  private static group(s: Pick<Session, 'id' | 'rootId' | 'claudeSessionId'> & { multiGroup?: string }): Group | undefined {
     return this.groups().find(g => g.id === s.multiGroup || g.members.some(m => m.sessionId === s.id || (m.rootId === s.rootId && m.sessionId.endsWith(':'+s.claudeSessionId) && !!s.claudeSessionId)));
   }
   static decorate(s: Session): Partial<Session> {
     const g = this.group(s), m = g?.members.find(m => m.rootId === s.rootId);
-    return g && m ? { multiGroup: g.id, multiName: m.name } : {};
+    const info = g ? this.listingInfo(s) : undefined;
+    return g && m && info ? { multiGroup: g.id, multiName: m.name, multiRootId: info.rootId, multiParentId: info.anchorId, multiSessionIds: info.ids } : {};
   }
   static config(s: Session): MultiEngineEntry | undefined {
     return this.group(s)?.members.find(m => m.rootId === s.rootId);
@@ -91,14 +171,17 @@ export class MultiEngine {
     const sessions: Session[] = [];
     for (const e of entries) {
       const child = RootManager.ensureRoot(path.join(base, e.name), false);
-      const s = SessionManager.createSession(child.id, '', e.engine);
+      RootManager.markInternalRoots({ [child.id]: rootId });
+      const s = SessionManager.createSession(child.id, '', e.engine, true);
       s.multiGroup = g.id; s.multiName = e.name;
       sessions.push(s);
       g.members.push({ ...e, rootId: child.id, sessionId: s.id });
     }
     const groups = this.groups(); groups.push(g); JsonStore.write(this.file, groups); fs.chmodSync(this.file, 0o600);
     sessions.forEach(s => SessionManager.saveSession(s));
-    return sessions[0];
+    SessionManager.markIndexed(sessions[0].id);
+    EventBus.broadcast({ kind: 'session', session: this.parentView(sessions[0]) });
+    return SessionManager.getSession(sessions[0].id);
   }
   private static safeDir(dir: string): void {
     if (fs.existsSync(dir)) {

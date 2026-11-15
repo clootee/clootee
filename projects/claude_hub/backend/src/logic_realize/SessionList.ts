@@ -1,3 +1,4 @@
+import { MultiEngine } from './MultiEngine';
 // List catalogs contain file descriptors, never conversation bodies. Only a page
 // of previews is hydrated; pagination snapshots keep ordering stable while tasks run.
 import * as fs from 'fs';
@@ -17,6 +18,7 @@ import { Settings } from './Settings';
 import { Session } from '../models/Types';
 
 interface Candidate {
+  displayRootId?: string; members?: Candidate[];
   id: string; rootId: string; uuid: string; engine: 'claude' | 'codex';
   file?: string; mtimeMs: number; size: number; createdAt: number;
   live?: Session;
@@ -104,7 +106,10 @@ export class SessionList {
   private static _decorate(c: Candidate, row: Session, meta: ReturnType<typeof SessionMeta.getAll>): Session {
     const natural = `${c.rootId}:${c.uuid}`;
     const m = meta[natural] || meta[c.id];
-    return { ...row, id: c.id, tasks: c.live?.tasks || [], paused: c.live?.paused || false,
+    return { ...row, id: c.id, rootId: c.displayRootId || c.rootId,
+      multiGroup: c.live?.multiGroup, multiRootId: c.live?.multiRootId, multiParentId: c.live?.multiParentId,
+      multiParent: c.live?.multiParent, multiSessionIds: c.live?.multiSessionIds,
+      tasks: c.live?.tasks || [], paused: c.live?.paused || false,
       updatedAt: Math.max(row.updatedAt || 0, c.live?.updatedAt || 0),
       pinned: !!m?.pinned, favorite: !!m?.favorite, status: m?.status || 'active',
       customTitle: m?.customTitle || '', promptCache: m?.promptCache || c.live?.promptCache,
@@ -127,11 +132,31 @@ export class SessionList {
       out.push({ id: s.id, rootId: s.rootId, uuid: s.claudeSessionId, engine: s.engine || 'claude',
         mtimeMs: s.updatedAt, size: 0, createdAt: s.createdAt, live: s });
     }
-    return out;
+    const visible: Candidate[] = [];
+    const groups = new Map<string, { info: NonNullable<ReturnType<typeof MultiEngine.listingInfo>>; rows: Candidate[] }>();
+    for (const c of out) {
+      const info = MultiEngine.listingInfo({ id:c.id,rootId:c.rootId,claudeSessionId:c.uuid });
+      if (!info) { visible.push({ ...c, displayRootId: MultiEngine.parentRoot(c.rootId) }); continue; }
+      const group = groups.get(info.groupId) || { info, rows: [] }; group.rows.push(c); groups.set(info.groupId,group);
+    }
+    for (const { info, rows } of groups.values()) {
+      const anchor = rows.find(c => c.rootId === info.anchorRootId) || rows[0];
+      const updatedAt = Math.max(...rows.map(c => c.mtimeMs));
+      const live: Session = { id:anchor.id,rootId:anchor.rootId,engine:anchor.engine,claudeSessionId:anchor.uuid,
+        name:'',createdAt:anchor.createdAt,updatedAt,source:'empty',messages:[], ...anchor.live,
+        multiGroup:info.groupId,multiRootId:info.rootId,multiParentId:anchor.id,multiParent:true,multiSessionIds:info.ids,
+        tasks:rows.flatMap(c=>c.live?.tasks || []), paused:rows.every(c=>!!c.live?.paused) };
+      visible.push({ ...anchor, displayRootId:info.rootId,mtimeMs:updatedAt,live,members:rows });
+    }
+    return visible;
   }
 
   // Search only real user/assistant messages, streaming one frame at a time.
   private static async _textHit(c: Candidate, q: string, signal?: AbortSignal): Promise<string | null> {
+    if (c.members) {
+      for (const member of c.members) { const hit = await this._textHit(member,q,signal); if (hit !== null) return hit; }
+      return null;
+    }
     if (!c.file) {
       const m = c.live?.messages.find(m => m.text.toLowerCase().includes(q));
       return m ? m.text.slice(0, 120) : null;
@@ -158,13 +183,14 @@ export class SessionList {
   }
 
   static async page(query: ListQuery, canRead: (rootId: string) => boolean = () => true, signal?: AbortSignal) {
+    query = { ...query, rootId: query.rootId ? MultiEngine.parentRoot(query.rootId) : query.rootId, filterRootId: query.filterRootId ? MultiEngine.parentRoot(query.filterRootId) : query.filterRootId };
     const roots = RootManager.listRoots();
     const access = roots.filter(r => canRead(r.id)).map(r => r.id).sort();
     const mode = ['single', 'favorites', 'indexed', 'workspace'].includes(query.mode || '') ? query.mode : 'single';
     const q = String(query.q || '').trim().toLowerCase().slice(0, 500);
     const finished = new Set((query.finished || []).slice(0, 2000));
     const status = ['active', 'testing', 'completed'].includes(query.status || '') ? query.status : 'all';
-    const key = JSON.stringify([Settings.effectiveHomeDir(), process.env.CODEX_HOME, process.env.CLAUDE_CONFIG_DIR, roots.map(r => [r.id, r.path]), mode, query.rootId, query.filterRootId, status,
+    const key = JSON.stringify([Settings.effectiveHomeDir(), process.env.CODEX_HOME, process.env.CLAUDE_CONFIG_DIR, roots.map(r => [r.id, r.path]), MultiEngine.listingVersion(), mode, query.rootId, query.filterRootId, status,
       q, !!query.fullText, query.run, [...finished].sort(), access]);
     const meta = SessionMeta.getAll();
     let offset = Number.isFinite(query.offset) ? Math.max(0, Math.floor(query.offset!)) : 0;
@@ -179,25 +205,26 @@ export class SessionList {
         build = (async () => {
           const scoped = (await this._candidates()).filter(c => {
             const m = meta[`${c.rootId}:${c.uuid}`] || meta[c.id];
-            return !(mode === 'single' && c.rootId !== query.rootId)
+            return !(mode === 'single' && (c.displayRootId || c.rootId) !== query.rootId)
               && !(mode === 'favorites' && !m?.favorite) && !(mode === 'indexed' && !m?.indexed);
           });
           const dirs = new Map<string, Directory>();
           for (const c of scoped) {
-            const d = dirs.get(c.rootId) || { rootId: c.rootId, count: 0, lastAt: 0, running: 0, justFinished: 0 };
+            const displayRootId = c.displayRootId || c.rootId;
+            const d = dirs.get(displayRootId) || { rootId: displayRootId, count: 0, lastAt: 0, running: 0, justFinished: 0 };
             d.count++; d.lastAt = Math.max(d.lastAt, c.mtimeMs);
             if (c.live?.tasks.some(t => t.status === 'running')) d.running++;
             else if (finished.has(c.id)) d.justFinished++;
-            dirs.set(c.rootId, d);
+            dirs.set(displayRootId, d);
           }
           let rows = scoped.filter(c => {
             const m = meta[`${c.rootId}:${c.uuid}`] || meta[c.id];
-            if (query.filterRootId && c.rootId !== query.filterRootId) return false;
+            if (query.filterRootId && (c.displayRootId || c.rootId) !== query.filterRootId) return false;
             if (status !== 'all' && (m?.status || 'active') !== status) return false;
             const running = c.live?.tasks.some(t => t.status === 'running');
             const run = (query.run || '').split(',');
             if (query.run && !(run.includes('running') && running) && !(run.includes('justFinished') && !running && finished.has(c.id))) return false;
-            return !q || canRead(c.rootId);
+            return !q || canRead(c.displayRootId || c.rootId);
           });
           rows.sort((a, b) => {
             const ma = meta[`${a.rootId}:${a.uuid}`] || meta[a.id];
@@ -249,12 +276,12 @@ export class SessionList {
     return { items, total: snapshot.rows.length, nextOffset: end, hasMore: end < snapshot.rows.length,
       snapshot: token, reset, snippets: Object.fromEntries(items.filter(s => snapshot!.snippets[s.id]).map(s => [s.id, snapshot!.snippets[s.id]])),
       directories: snapshot.directories,
-      running: SessionManager.runtimeSessions().filter(s => canRead(s.rootId) && s.tasks.some(t => t.status === 'running')).map(s => ({ id: s.id, tasks: s.tasks.filter(t => t.status === 'running') })) };
+      running: (await this._candidates()).filter(c => canRead(c.displayRootId || c.rootId) && c.live?.tasks.some(t => t.status === 'running')).map(c => ({ id: c.id, tasks: c.live!.tasks.filter(t => t.status === 'running') })) };
   }
 
   static async recency(): Promise<Record<string, number>> {
     const out: Record<string, number> = {};
-    for (const c of await this._candidates()) out[c.rootId] = Math.max(out[c.rootId] || 0, c.mtimeMs);
+    for (const c of await this._candidates()) out[c.displayRootId || c.rootId] = Math.max(out[c.displayRootId || c.rootId] || 0, c.mtimeMs);
     return out;
   }
 }

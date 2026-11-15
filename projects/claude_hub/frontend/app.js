@@ -824,7 +824,7 @@ async function loadRoots(refreshSessions = true) {
     sel.appendChild(o);
   });
   if (!State.roots.find((r) => r.id === State.rootId)) {
-    setTabRootId(State.roots.length === 1 ? State.roots[0].id : '');
+    setTabRootId(State.roots.find(r => r.multiChildRootIds?.includes(State.rootId))?.id || (State.roots.length === 1 ? State.roots[0].id : ''));
   }
   sel.value = State.rootId;
   renderWorkdirBar();
@@ -850,6 +850,7 @@ function sortedRoots() {
 }
 
 // 当前选中的根目录对象
+function activeWorkRootId() { return State.session?.rootId || State.rootId; }
 function currentRoot() {
   return State.roots.find((r) => r.id === State.rootId) || null;
 }
@@ -1486,7 +1487,7 @@ async function deleteSelectedSessions() {
   if (ids.length === 0) return;
   if (!confirm(Tn('confirmRemoveSessions', ids.length))) return;
   await api('/api/session/remove-batch', { ids });
-  if (State.selectedSessions.has(State.sessionId)) {
+  if (State.selectedSessions.has(State.session?.multiParentId || State.sessionId)) {
     activateSession('');
     State.session = null;
   }
@@ -1542,7 +1543,7 @@ async function loadSessions(append = false) {
     rebuildRunning();
     const current = State.session;
     const needsSelection = !State.sessionId || (!State.favoritesOnly && !isWorkspace()
-      && current && current.rootId !== State.rootId);
+      && current && MultiUi.displayRoot(current) !== State.rootId);
     if (selection === sessionSelectionVersion && needsSelection) await selectSession(State.sessions[0]?.id || null);
   } catch (error) {
     if (request === sessionListRequest && error.name !== 'AbortError') Page.error = error.message;
@@ -2136,7 +2137,7 @@ function renderSessions() {
     const isSel = State.batchMode && State.selectedSessions.has(s.id);
     div.dataset.sid = s.id;
     div.className = 'session-item'
-      + (s.id === State.sessionId ? ' active' : '')
+      + (MultiUi.isSelected(s) ? ' active' : '')
       + (s.pinned ? ' pinned' : '')
       + (s.favorite ? ' favorite' : '')
       + (status === 'completed' ? ' completed' : '')
@@ -2161,7 +2162,7 @@ function renderSessions() {
     const testingTag = status === 'testing' ? `<span class="testing-tag">🧪 ${escapeHtml(T('testingTag'))}</span>` : '';
     // 引擎徽章（claude / codex）
     const favoriteTag = s.favorite && State.listMode !== 'favorites' ? `<span class="favorite-tag">★ ${escapeHtml(T('favoriteTag'))}</span>` : '';
-    const engBadge = `<span class="eng-badge eng-${s.engine === 'codex' ? 'codex' : 'claude'}" title="${escapeHtml(engineLabel(s.engine))}">${escapeHtml(engineShortLabel(s.engine))}</span>`;
+    const engBadge = `<span class="eng-badge eng-${s.engine === 'codex' ? 'codex' : 'claude'}" title="${escapeHtml(engineLabel(s.multiParent ? 'multi' : s.engine))}">${escapeHtml(engineShortLabel(s.multiParent ? 'multi' : s.engine))}</span>`;
     // 工作台模式：显示会话所属目录（根目录末段名）
     const dirNm = (isWorkspace() || State.favoritesOnly) ? rootName(s.rootId) : '';
     const dirBadgeClass = State.favoritesOnly ? 'dir-badge favorite-dir-badge' : 'dir-badge';
@@ -2199,7 +2200,7 @@ function renderSessions() {
     } else {
       div.addEventListener('click', (e) => {
         if (e.target.dataset.del || e.target.classList.contains('copy-id')) return;
-        selectSession(s.id);
+        selectSession(MultiUi.sessionTarget(s));
         closeDrawer(); // 移动端：显式点开某条会话（右侧要展示内容）才收抽屉
       });
     }
@@ -2210,9 +2211,9 @@ function renderSessions() {
     });
     div.querySelector('.del').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm(T('confirmRemoveSession'))) return;
+      if (!confirm(s.multiParent ? MultiUi.text('confirmRemoveGroup') : T('confirmRemoveSession'))) return;
       await api('/api/session/remove', { id: s.id });
-      if (State.sessionId === s.id) await selectSession(null);
+      if (MultiUi.isSelected(s)) await selectSession(null);
       await loadSessions();
     });
     // 右键（桌面）/ 长按（移动端）弹出菜单：标记完成 / 置顶
@@ -2300,7 +2301,7 @@ function closeSessionCtxMenu() {
 function applySessionCustomTitle(id, customTitle) {
   State.sessions = State.sessions.map((x) => (x.id === id ? { ...x, customTitle } : x));
   State.favoriteSessions = State.favoriteSessions.map((x) => (x.id === id ? { ...x, customTitle } : x));
-  if (State.sessionId === id && State.session) {
+  if ((State.sessionId === id || State.session?.multiParentId === id) && State.session) {
     State.session.customTitle = customTitle;
     $('sessionTitle').textContent = sessionTitle(State.session);
   }
@@ -2560,8 +2561,8 @@ async function selectSession(id) {
     State.running.delete(id);
   }
   // 工作台模式：同步当前会话所属根目录，让文件抽屉 / 上传 / 「前往」等按会话目录工作
-  if (State.session && State.session.rootId && State.rootId !== State.session.rootId) {
-    setTabRootId(State.session.rootId);
+  if (State.session && State.session.rootId && State.rootId !== MultiUi.displayRoot(State.session)) {
+    setTabRootId(MultiUi.displayRoot(State.session));
     const sel = $('rootSelect');
     if (sel) sel.value = State.rootId;
     renderWorkdirBar();
@@ -2898,7 +2899,7 @@ async function bindFavoriteDraftRoot(rootId, controls = null) {
     if (selection !== sessionSelectionVersion || State.sessionId !== draftId) { renderSessions(); return; }
     activateSession(real.id);
     State.session = real;
-    setTabRootId(real.rootId);
+    setTabRootId(MultiUi.displayRoot(real));
     $('sessionTitle').textContent = sessionTitle(real);
     renderMessages();
     renderQueue();
@@ -6013,7 +6014,7 @@ async function stopChoiceNext() {
 }
 async function togglePause() {
   if (!State.session) return;
-  if (State.session.paused && !(await EngineRecovery.ensure(State.session.engine))) return;
+  if (State.session.paused && !(await MultiUi.ensureEngines())) return;
   const path = State.session.paused ? '/api/flow/resume' : '/api/flow/pause';
   await api(path, { sessionId: State.sessionId });
 }
@@ -6028,7 +6029,7 @@ function refreshPauseBtn() {
 // - 继续任务流按钮 + 暂停说明：仅暂停整条序列时显示；
 // - 提交按钮/输入框文案：暂停时改为「补充并执行」语义。
 function refreshComposerControls() {
-  const running = isSessionRunning();
+  const running = isSessionRunning() || (!!State.session?.multiGroup && MultiUi.membersGroup === State.session.multiGroup && MultiUi.members?.some(m => m.tasks?.some(t => t.status === 'running')));
   const paused = !!State.session?.paused;
   $('stopBtn').style.display = running ? '' : 'none';
   const pauseBtn = $('pauseBtn');
@@ -6380,10 +6381,10 @@ function connectWs() {
     if (e.kind === 'claudeLogin') { onClaudeLoginEvent(e); return; }
     // Codex 登录进度：同上，没有 sessionId
     if (e.kind === 'codexLogin') { onCodexLoginEvent(e); return; }
-    if (State.session?.multiGroup && ['session', 'task', 'taskDone'].includes(e.kind)) MultiUi.schedule();
     // 后端级异常：同样没有 sessionId，顶部横幅直接显示，别只写进服务器日志
     if (e.kind === 'serverError') { showServerError(e.message); return; }
-    if (State.session?.multiGroup && ['session', 'task', 'taskDone'].includes(e.kind)) MultiUi.schedule();
+    if (State.session?.multiGroup && ['session','task','taskDone'].includes(e.kind)) MultiUi.schedule();
+    if (e.kind === 'task' && MultiUi.knowsMember(e.sessionId)) MultiUi.scheduleList();
     if (e.kind === 'session') {
       // 影响会话列表排序/暂停态
       if (State.session && e.session.id === State.session.id) {
@@ -6394,6 +6395,10 @@ function connectWs() {
         if (e.session.engine) State.session.engine = e.session.engine;
         refreshPauseBtn();
         refreshEngineControl(); // 拿到会话 id 即已开始 → 引擎锁定为徽章
+      }
+      if (e.session.multiGroup) {
+        MultiUi.scheduleList();
+        if (!e.session.multiParent) return;
       }
       // 全新会话（如外部推送兜底新建）：当前正看着它所在的根目录时，直接插进列表最前面，
       // 不需要用户手动刷新页面才能看见——bumpSessionUpdatedAt 只会更新已存在的条目，覆盖不到这种情况。
@@ -6958,7 +6963,7 @@ const FM = {
 
 // 文件管理器下载/预览直链（按 rootId + 相对路径，带 token）
 function fmFileUrl(rel, download) {
-  return '/api/fm/file?rootId=' + encodeURIComponent(State.rootId) +
+  return '/api/fm/file?rootId=' + encodeURIComponent(activeWorkRootId()) +
     '&rel=' + encodeURIComponent(rel) +
     '&token=' + encodeURIComponent(TOKEN) +
     (download ? '&download=1' : '');
@@ -6967,7 +6972,7 @@ function fmFileUrl(rel, download) {
 async function toggleFilesPanel() {
   const ov = $('filesOverlay');
   if (!ov.hidden) { ov.hidden = true; return; }
-  if (!State.rootId) { alert(T('selectRootFirst')); return; }
+  if (!activeWorkRootId()) { alert(T('selectRootFirst')); return; }
   ov.hidden = false;
   FM.searchOpen = false;
   $('fmSearch').hidden = true;
@@ -6983,7 +6988,7 @@ async function fmBrowse(rel) {
   list.innerHTML = `<div class="files-empty">${T('loading')}</div>`;
   let data;
   try {
-    data = await api('/api/fm/browse?rootId=' + encodeURIComponent(State.rootId) +
+    data = await api('/api/fm/browse?rootId=' + encodeURIComponent(activeWorkRootId()) +
       '&rel=' + encodeURIComponent(rel || ''));
   } catch (e) {
     list.innerHTML = `<div class="files-empty">${escapeHtml(e.message)}</div>`;
@@ -7097,7 +7102,7 @@ function fmFileRowEl(f) {
 
 async function fmTogglePin(rel) {
   try {
-    const data = await api('/api/fm/favorite', { rootId: State.rootId, rel });
+    const data = await api('/api/fm/favorite', { rootId: activeWorkRootId(), rel });
     FM.favorites = data.favorites || [];
     fmRenderFavs(FM.favorites);
     // 重渲染当前列表以更新各目录的星标态（非搜索态才刷新）
@@ -7143,7 +7148,7 @@ async function fmRunSearch(q) {
   const rel = FM.rel;
   const recursive = FM.recurse;
   try {
-    files = await api('/api/fm/search?rootId=' + encodeURIComponent(State.rootId) +
+    files = await api('/api/fm/search?rootId=' + encodeURIComponent(activeWorkRootId()) +
       '&q=' + encodeURIComponent(q) +
       '&rel=' + encodeURIComponent(rel || '') +
       '&recursive=' + (recursive ? '1' : '0'));
@@ -7219,7 +7224,7 @@ function ensureCm() {
 async function openEditor(f) {
   let data;
   try {
-    data = await api('/api/fm/read?rootId=' + encodeURIComponent(State.rootId) +
+    data = await api('/api/fm/read?rootId=' + encodeURIComponent(activeWorkRootId()) +
       '&rel=' + encodeURIComponent(f.name));
     await ensureOptionalAsset('editor');
   } catch (e) {
@@ -7265,7 +7270,7 @@ async function saveEditor() {
   const btn = $('edSave');
   btn.disabled = true;
   try {
-    await api('/api/fm/write', { rootId: State.rootId, rel: Editor.file.name, content });
+    await api('/api/fm/write', { rootId: activeWorkRootId(), rel: Editor.file.name, content });
     Editor.original = content;
     Editor.dirty = false;
     $('edDirty').hidden = true;

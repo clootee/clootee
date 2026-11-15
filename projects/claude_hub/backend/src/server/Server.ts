@@ -407,7 +407,7 @@ export class Server {
       const keys = RootLock.keysFromCookie(req.headers.cookie);
       this._ok(
         res,
-        RootManager.listRoots().map((r) =>
+        MultiEngine.visibleRoots().map((r) =>
           RootLock.isLocked(r.id) ? { ...r, locked: true, unlocked: RootLock.canAccess(r.id, keys) } : r,
         ),
       );
@@ -539,18 +539,18 @@ export class Server {
     }));
     app.get('/api/session/recency', (_req, res) => this._wrapAsync(res, 'session.recency', () => SessionList.recency()));
     app.get('/api/session/list', (req, res) =>
-      this._wrapAsync(res, 'session.list', () => CodexStoreHelper.withIndex(Settings.effectiveHomeDir(), () => this._redact(req, SessionManager.listSessions(String(req.query.rootId))))),
+      this._wrapAsync(res, 'session.list', () => CodexStoreHelper.withIndex(Settings.effectiveHomeDir(), () => this._redact(req, MultiEngine.visibleSessions(SessionManager.listSessions(String(req.query.rootId)), String(req.query.rootId))))),
     );
     // 工作台模式：跨全部根目录合并列出会话
     app.get('/api/session/list-all', (req, res) =>
-      this._wrapAsync(res, 'session.listAll', async () => this._redact(req, await SessionManager.listAllSessions())),
+      this._wrapAsync(res, 'session.listAll', async () => this._redact(req, MultiEngine.visibleSessions(await SessionManager.listAllSessions()))),
     );
     app.get('/api/session/list-favorites', (req, res) =>
-      this._wrapAsync(res, 'session.listFavorites', async () => this._redact(req, await SessionManager.listFavoriteSessions())),
+      this._wrapAsync(res, 'session.listFavorites', async () => this._redact(req, MultiEngine.visibleSessions(await SessionManager.listFavoriteSessions()).filter(s => s.favorite))),
     );
     // 「全部目录」视图：只取带索引标记的会话（本版本起新建即打标），不逐目录扫盘
     app.get('/api/session/list-indexed', (req, res) =>
-      this._wrapAsync(res, 'session.listIndexed', async () => this._redact(req, await SessionManager.listIndexedSessions())),
+      this._wrapAsync(res, 'session.listIndexed', async () => this._redact(req, MultiEngine.visibleSessions(await SessionManager.listIndexedSessions()))),
     );
     app.post('/api/session/create', (req, res) =>
       this._wrap(res, 'session.create', () =>
@@ -587,27 +587,27 @@ export class Server {
     );
     app.post('/api/session/remove', (req, res) =>
       this._wrap(res, 'session.remove', () => {
-        TaskQueue.removeSession(req.body.id);
+        MultiEngine.remove(req.body.id);
         return { id: req.body.id };
       }),
     );
     // 批量删除会话
     app.post('/api/session/remove-batch', (req, res) =>
-      this._wrap(res, 'session.removeBatch', () => TaskQueue.removeSessions(req.body.ids)),
+      this._wrap(res, 'session.removeBatch', () => MultiEngine.removeMany(req.body.ids)),
     );
     app.post('/api/session/pin', (req, res) =>
-      this._wrap(res, 'session.pin', () => SessionManager.setPinned(req.body.id, !!req.body.pinned)),
+      this._wrap(res, 'session.pin', () => SessionManager.setPinned(MultiEngine.anchorId(req.body.id), !!req.body.pinned)),
     );
     app.post('/api/session/favorite', (req, res) =>
       this._wrap(res, 'session.favorite', () =>
-        SessionManager.setFavorite(req.body.id, !!req.body.favorite),
+        SessionManager.setFavorite(MultiEngine.anchorId(req.body.id), !!req.body.favorite),
       ),
     );
     app.post('/api/session/status', (req, res) =>
-      this._wrap(res, 'session.status', () => SessionManager.setStatus(req.body.id, req.body.status)),
+      this._wrap(res, 'session.status', () => SessionManager.setStatus(MultiEngine.anchorId(req.body.id), req.body.status)),
     );
     app.post('/api/session/title', (req, res) =>
-      this._wrap(res, 'session.title', () => SessionManager.setTitle(req.body.id, req.body.title)),
+      this._wrap(res, 'session.title', () => SessionManager.setTitle(MultiEngine.anchorId(req.body.id), req.body.title)),
     );
 
     // ── 会话工具命令（/usage、/compact 等斜杠命令）：一键执行并返回输出反馈 ──
@@ -796,19 +796,19 @@ export class Server {
     );
     app.post('/api/task/stop', (req, res) =>
       this._wrap(res, 'task.stop', () => {
-        TaskQueue.stopCurrent(req.body.sessionId);
+        MultiEngine.runForGroup(req.body.sessionId, id => TaskQueue.stopCurrent(id));
         return { ok: true };
       }),
     );
     app.post('/api/flow/pause', (req, res) =>
       this._wrap(res, 'flow.pause', () => {
-        TaskQueue.pauseFlow(req.body.sessionId);
+        MultiEngine.runForGroup(req.body.sessionId, id => TaskQueue.pauseFlow(id));
         return { ok: true };
       }),
     );
     app.post('/api/flow/resume', (req, res) =>
       this._wrap(res, 'flow.resume', () => {
-        TaskQueue.resumeFlow(req.body.sessionId);
+        MultiEngine.runForGroup(req.body.sessionId, id => TaskQueue.resumeFlow(id));
         return { ok: true };
       }),
     );
