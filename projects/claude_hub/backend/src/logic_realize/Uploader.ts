@@ -38,6 +38,7 @@ export class Uploader extends UploaderStruct {
     return {
       name: finalName,
       rel: `tmp/${finalName}`,
+      absolutePath: path.resolve(full),
       sizeKb: Math.round((data.length / 1024) * 10) / 10,
     };
   }

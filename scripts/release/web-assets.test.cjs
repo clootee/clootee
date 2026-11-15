@@ -77,3 +77,34 @@ test('built frontend serves compressed immutable bundles and keeps source/API fa
     fs.rmSync(temp, { recursive: true, force: true });
   }
 });
+
+
+test('multi-engine attachments retain the uploaded absolute path across engine tabs', () => {
+  const { Uploader } = require(path.join(backend, 'dist/logic_realize/Uploader'));
+  const { Settings } = require(path.join(backend, 'dist/logic_realize/Settings'));
+  const originalRunAsUser = Settings.runAsUser;
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-upload-'));
+  try {
+    Settings.runAsUser = () => ({ enabled: false, user: '' });
+    const work = path.join(temp, 'divide', 'engine_one');
+    const first = Uploader._writeToTmp(work, 'sample file.txt', Buffer.from('attachment'));
+    const second = Uploader._writeToTmp(work, 'sample file.txt', Buffer.from('second'));
+    assert.equal(first.absolutePath, path.join(work, 'tmp', 'sample file.txt'));
+    assert.equal(fs.readFileSync(second.absolutePath, 'utf8'), 'second');
+    assert.notEqual(first.absolutePath, second.absolutePath);
+    const source = fs.readFileSync(path.join(root, 'projects/claude_hub/frontend/app.js'), 'utf8');
+    const context = vm.createContext({ State: { session: { multiGroup: 'group', id: 'one' } } });
+    vm.runInContext(source.slice(source.indexOf('const Attach ='), source.indexOf('function attachRemove(')) +
+      source.slice(source.indexOf('function attachPaths()'), source.indexOf('function fmtBytes(')), context);
+    context.upload = first;
+    vm.runInContext('attachAdd(upload.rel, null, upload.absolutePath)', context);
+    assert.equal(vm.runInContext('attachPaths()[0]', context), first.absolutePath);
+    context.State.session = { multiGroup: 'group', id: 'two' };
+    assert.equal(vm.runInContext('attachPaths()[0]', context), first.absolutePath);
+    context.State.session = { id: 'single' };
+    assert.equal(vm.runInContext('attachPaths()[0]', context), first.rel);
+  } finally {
+    Settings.runAsUser = originalRunAsUser;
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
