@@ -66,6 +66,7 @@ const DICT = {
   messageLinkFolderOpened: { en: 'Folder opened on this Windows computer.', zh: '已在 Windows 电脑上打开文件夹。' },
   messageLinkFolderFailed: { en: 'Could not open folder', zh: '打开文件夹失败' },
   messageLinkCopyText: { en: 'Copy text', zh: '复制文字' },
+  messageLinkCopyLink: { en: 'Copy link', zh: '复制链接' },
   messageLinkCopyPath: { en: 'Copy path', zh: '复制路径' },
   messageLinkOpen: { en: 'Open link', zh: '打开网址' },
   messageLinkOutsideRoot: { en: 'This file is outside the current project. Copy its path to open it locally.', zh: '此文件不在当前项目目录内，可复制路径在本机打开。' },
