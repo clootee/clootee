@@ -156,6 +156,33 @@ test('named engine infrastructure', async t => {
         assert.equal(MultiEngine.anchorId(members[2].id), first.id);
       } finally { SessionList._catalog = catalog; }
     });
+    await t.test('instruction files carry zero-based snapshot identity without changing root rules', () => {
+      for (const [index, member] of members.entries()) {
+        const dir=RootManager.getRoot(member.rootId).path;
+        for (const filename of ['CLAUDE.md','AGENTS.md']) {
+          const file=path.join(dir,filename), before=fs.readFileSync(file,'utf8');
+          assert.ok(before.includes(`从 0 开始): ${index}`));assert.ok(before.includes(`引擎名称: ${entries[index].name}`));
+          MultiEngine.ensureIdentity(member);assert.equal(fs.readFileSync(file,'utf8'),before);
+          assert.equal(before.split('<!-- clootee:engine-identity:start -->').length,2);
+        }
+      }
+      assert.equal(fs.readFileSync(path.join(rootDir,'claude.md'),'utf8').includes('clootee:engine-identity'),false);
+      const dir=RootManager.getRoot(members[1].rootId).path;
+      const file=path.join(dir,'AGENTS.md'), lower=path.join(dir,'agents.md');
+      fs.renameSync(file,lower);fs.writeFileSync(lower,'Keep my local rules\n');
+      const original=settings.multiEngine;settings.multiEngine={enabled:true,engines:[...entries].reverse()};
+      try { MultiEngine.ensureIdentity(members[1]); } finally {settings.multiEngine=original;}
+      const text=fs.readFileSync(lower,'utf8');assert.match(text,/Keep my local rules/);assert.match(text,/从 0 开始\): 1/);assert.match(text,/引擎名称: codex_two/);
+      assert.equal(fs.existsSync(file),false);
+      fs.unlinkSync(lower);fs.unlinkSync(path.join(dir,'CLAUDE.md'));
+      MultiEngine.ensureIdentity(members[1]);
+      assert.ok(fs.existsSync(file));assert.ok(fs.existsSync(path.join(dir,'CLAUDE.md')));
+      fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace('从 0 开始): 1','从 0 开始): 9'));
+      MultiEngine.ensureIdentity(members[1]);assert.match(fs.readFileSync(file,'utf8'),/从 0 开始\): 1/);
+      const external=path.join(temp,'external-rule.md');fs.writeFileSync(external,'untouched');fs.unlinkSync(file);fs.symlinkSync(external,file);
+      try { assert.throws(()=>MultiEngine.ensureIdentity(members[1]),/Unsafe instruction/);assert.equal(fs.readFileSync(external,'utf8'),'untouched'); }
+      finally {fs.unlinkSync(file);MultiEngine.ensureIdentity(members[1]);}
+    });
     await t.test('configuration is a snapshot and async contexts do not mix', async () => {
       settings.multiEngine = { enabled: false, engines: [] };
       await Promise.all(members.map((s, i) => MultiEngine.withSession(s, async () => {
@@ -271,6 +298,17 @@ test('named engine infrastructure', async t => {
       assert.equal(SessionManager.runtimeSessions().some(s=>ids.includes(s.id)),false);
       assert.equal(MultiEngine.visibleRoots().some(r=>members.some(s=>s.rootId===r.id)),false);
       assert.equal(fs.readFileSync(path.join(rootDir,'divide','codex_one','work.txt'),'utf8'),'existing work');
+    });
+    await t.test('identity files are created even without source files or a shared prompt', () => {
+      const saved=settings.systemPrompt;settings.systemPrompt='';settings.multiEngine={enabled:true,engines:entries};
+      const dir=path.join(temp,'blank-project');fs.mkdirSync(dir);
+      try {
+        const r=RootManager.addRoot('Blank',dir), s=MultiEngine.create(r.id,'','multi');
+        for(const [index,member] of MultiEngine.members(s.id).entries()) for(const filename of ['CLAUDE.md','AGENTS.md']) {
+          const text=fs.readFileSync(path.join(RootManager.getRoot(member.rootId).path,filename),'utf8');
+          assert.ok(text.includes(`从 0 开始): ${index}`));assert.ok(text.includes(`引擎名称: ${entries[index].name}`));
+        }
+      } finally {settings.systemPrompt=saved;}
     });
     await t.test('rejects symlink work directories', () => {
       settings.multiEngine = { enabled: true, engines: entries };
