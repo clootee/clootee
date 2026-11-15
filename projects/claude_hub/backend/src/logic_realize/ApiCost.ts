@@ -83,7 +83,7 @@ export class ApiCost extends ApiCostStruct {
             tokens.cacheRead += line.cacheReadTokens;
             tokens.cacheWrite += line.cacheWrite5mTokens + line.cacheWrite1hTokens;
           }
-          out[id] = { unpriced: s.turns.flatMap(t => t.lines).filter(l => !l.priced && (l.reportedRequests || 0) < l.requests).length, usd: s.totalUsd, cny: s.totalCny, sub: s.subscriptionUsd, breakdown, breakdownCny, tokens,
+          out[id] = { missingUsageTurns: s.missingUsageTurns || 0, unpriced: s.turns.flatMap(t => t.lines).filter(l => !l.priced && (l.reportedRequests || 0) < l.requests).length, usd: s.totalUsd, cny: s.totalCny, sub: s.subscriptionUsd, breakdown, breakdownCny, tokens,
             consumedMessages: s.turns.reduce((n, t) => n + t.consumedMessages, 0) };
         }
       } catch (e) {
@@ -115,9 +115,11 @@ export class ApiCost extends ApiCostStruct {
       turns.push(t.codex ? this._codexTurn(taskId, t.ts, t.provider, t.codex, own)
         : this._turn(taskId, t.ts, t.provider, own, deltas.get(taskId)));
     }
+    for (const turn of turns) turn.usageStatus = turn.lines.length ? 'available' : 'missing';
     turns.sort((a, b) => a.startedAt - b.startedAt);
     return {
       sessionId,
+      missingUsageTurns: turns.filter(t => t.usageStatus === 'missing').length,
       turns,
       totalUsd: this._round(turns.reduce((n, t) => n + t.totalUsd, 0)),
       totalCny: this._round(turns.reduce((n, t) => n + t.totalCny, 0)),

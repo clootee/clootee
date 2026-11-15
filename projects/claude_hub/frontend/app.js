@@ -3088,6 +3088,7 @@ function renderElapsedNotes() {
 // 数据源 GET /api/session/api-cost（后端按每条消息 usage × 服务商价目逐项计算，含 5m/1h 缓存写、缓存读）。
 // 订阅登录跑的轮次不实扣，但同样按 Claude 价目折算成「相当于花了多少」，用「订阅」+ 黄色区分。
 const ApiBill = {
+  requests: {}, totalRequests: {}, observedCosts: {}, parentIds: {},
   bySession: {},     // sessionId → ApiSessionCost | 'loading'
   totals: {},        // sessionId → { usd: 合计, sub: 其中订阅轮次的等价估价 }（会话列表用）
   asked: new Set(),  // 已请求过合计的会话
@@ -3104,9 +3105,11 @@ const ApiBill = {
   money(t) {
     const usd = Number(t && t.usd) || 0;
     const cny = Number(t && t.cny) || 0;
+    if (t?.missingUsageTurns && usd === 0 && cny === 0) return T('apiCostUnconfirmed');
     const parts = [];
     if (usd > 0 || cny <= 0) parts.push(this.usd(usd));
     if (cny > 0) parts.push(this.cny(cny));
+    if (t?.missingUsageTurns) parts.push(T('apiCostUnconfirmed'));
     return parts.join(' + ');
   },
   tok(n) { return fmtNum(Number(n) || 0); },
@@ -3121,20 +3124,51 @@ const ApiBill = {
   labelKey(kind) {
     return { sub: 'apiTurnCostSub', or: 'apiTurnCostOr', ds: 'apiTurnCostDs' }[kind] || 'apiTurnCost';
   },
+  parentFor(sid) {
+    const row = State.sessions.find(s => s.multiParent && (s.multiSessionIds || []).includes(sid));
+    if (row) for (const id of row.multiSessionIds || []) this.parentIds[id] = row.id;
+    if (this.isCurrent(sid) && State.session?.multiGroup) {
+      const parent = State.session.multiParentId || row?.id;
+      if (parent) for (const id of State.session.multiSessionIds || [sid]) this.parentIds[id] = parent;
+    }
+    return row?.id || this.parentIds[sid];
+  },
+  isCurrent(sid) {
+    const s = State.session;
+    return !!s && (s.id === sid || State.sessionId === sid || (!!s.claudeSessionId && sid === `${s.rootId}:${s.claudeSessionId}`)
+      || (!!s.multiGroup && (s.multiSessionIds || []).includes(sid) && sid.split(':')[0] === s.rootId));
+  },
+  invalidate(sid) { this.requests[sid] = (this.requests[sid] || 0) + 1; delete this.bySession[sid]; },
+  syncMemberCosts(members) {
+    if (!State.session?.multiGroup) return;
+    const member = members.find(m => m.id === State.session.id || m.id.split(':')[0] === State.session.rootId);
+    const sid = State.session.id, data = this.bySession[sid], cost = member?.cost;
+    if (!cost || !data) return;
+    const signature = JSON.stringify([cost.usd,cost.cny || 0,cost.consumedMessages,cost.missingUsageTurns || 0]);
+    const changed = this.observedCosts[sid] !== signature; this.observedCosts[sid] = signature;
+    if (data === 'loading') { if (changed) { this.invalidate(sid); this.load(sid); } return; }
+    if (Math.abs(data.totalUsd - cost.usd) > 1e-7 || Math.abs((data.totalCny || 0) - (cost.cny || 0)) > 1e-7
+      || data.turns.reduce((n,t) => n + t.consumedMessages, 0) !== cost.consumedMessages
+      || (data.missingUsageTurns || 0) !== (cost.missingUsageTurns || 0)) { this.invalidate(sid); this.load(sid); }
+  },
   load(sid) {
     if (!sid || this.bySession[sid] === 'loading') return;
+    const request = this.requests[sid] = (this.requests[sid] || 0) + 1;
     this.bySession[sid] = 'loading';
-    api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
+    return api(`/api/session/api-cost?id=${encodeURIComponent(sid)}`)
       .then((r) => {
+        if (this.requests[sid] !== request) return;
+        for (const turn of r.turns) turn.usageStatus ||= turn.lines?.length ? 'available' : 'missing';
+        r.missingUsageTurns ??= r.turns.filter(t => t.usageStatus === 'missing').length;
         this.bySession[sid] = r;
         if (r.turns.length) {
-          const parent = State.sessions.find(s => s.multiParent && (s.multiSessionIds || []).includes(sid));
-          if (parent) { this.asked.delete(parent.id); this.pending.add(parent.id); this.flushList(); }
-          else { this.totals[sid] = { usd:r.totalUsd,cny:r.totalCny,sub:r.subscriptionUsd }; this.paintListTag(sid); this.paintSelection(); }
+          const parent = this.parentFor(sid);
+          if (parent) { this.asked.delete(parent); this.pending.add(parent); this.flushList(); }
+          else { this.totals[sid] = { usd:r.totalUsd,cny:r.totalCny,sub:r.subscriptionUsd,missingUsageTurns:r.missingUsageTurns || 0 }; this.paintListTag(sid); this.paintSelection(); }
         }
         if (State.session && State.session.id === sid) renderElapsedNotes();
       })
-      .catch(() => { delete this.bySession[sid]; });
+      .catch(() => { if (this.requests[sid] === request) delete this.bySession[sid]; });
   },
   // 在「耗时」行后追加「API 本轮 $x ▸」，点开显示按模型 × 计费项的明细
   attach(el, taskId) {
@@ -3150,8 +3184,9 @@ const ApiBill = {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `api-cost-toggle${kind === 'sub' ? ' sub' : ''}`;
-    btn.textContent = `${T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.money({ usd: turn.totalUsd, cny: turn.totalCny }))} ${isOpen ? '▾' : '▸'}`;
-    btn.title = T(kind === 'sub' ? 'apiCostTipSub' : 'apiCostTip');
+    const missing = turn.usageStatus === 'missing';
+    btn.textContent = `${missing ? T('apiUsageMissing') : T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.money({ usd: turn.totalUsd, cny: turn.totalCny }))} ${isOpen ? '▾' : '▸'}`;
+    btn.title = T(missing ? 'apiUsageMissingNote' : kind === 'sub' ? 'apiCostTipSub' : 'apiCostTip');
     btn.onclick = (ev) => {
       ev.stopPropagation();
       if (this.open.has(taskId)) this.open.delete(taskId); else this.open.add(taskId);
@@ -3195,8 +3230,9 @@ const ApiBill = {
       ? `<div class="api-cost-note">${escapeHtml(T('apiCliRef').replace('{c}', this.usd(turn.cliUsd)))}</div>` : '';
     const ark = turn.lines.some((l) => l.currency === 'CNY')
       ? `<div class="api-cost-note">${escapeHtml(T('apiArkNote'))}</div>` : '';
-    box.innerHTML = blocks + sub + ark +
-      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${this.money({ usd: turn.totalUsd, cny: turn.totalCny })}</b> · ` +
+    const missing = turn.usageStatus === 'missing';
+    box.innerHTML = (missing ? `<div class="api-cost-note">${escapeHtml(T('apiUsageMissingNote'))}</div>` : '') + blocks + sub + ark +
+      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${missing ? escapeHtml(T('apiCostUnconfirmed')) : this.money({ usd: turn.totalUsd, cny: turn.totalCny })}</b> · ` +
       `${escapeHtml(T('apiSessionTotal'))} <b>${this.money(this.runningTotal(turn, data))}</b></div>${cli}`;
     box.addEventListener('click', (ev) => ev.stopPropagation());
     return box;
@@ -3204,10 +3240,11 @@ const ApiBill = {
   // 截至这一轮（含）的累计：每条消息显示的是它当时的累计，而不是会话现在的总额（总额在左侧会话列表）
   runningTotal(turn, data) {
     return data.turns.filter((t) => t.startedAt <= turn.startedAt)
-      .reduce((n, t) => ({ usd: n.usd + t.totalUsd, cny: n.cny + t.totalCny }), { usd: 0, cny: 0 });
+      .reduce((n, t) => ({ usd: n.usd + t.totalUsd, cny: n.cny + t.totalCny, missingUsageTurns:n.missingUsageTurns + (t.usageStatus === 'missing' ? 1 : 0) }), { usd: 0, cny: 0, missingUsageTurns:0 });
   },
   // 会话列表：已知合计就出徽章；有订阅轮次的话额外用黄色标出其中「订阅」的那部分
   listTag(s) {
+    if (s.multiParent) for (const id of s.multiSessionIds || []) this.parentIds[id] = s.id;
     if (!this.asked.has(s.id)) this.pending.add(s.id);
     const t = this.totals[s.id];
     return `<span class="api-cost-tag" data-api-sid="${escapeHtml(s.id)}" title="${escapeHtml(T('apiListTip'))}"${t ? '' : ' hidden'}>${t ? this.tagHtml(t) : ''}</span>`;
@@ -3228,9 +3265,13 @@ const ApiBill = {
     if (!this.pending.size) return;
     const ids = [...this.pending].slice(0, 300);
     ids.forEach((id) => { this.pending.delete(id); this.asked.add(id); });
-    api('/api/sessions/api-cost', { ids })
-      .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); this.paintSelection(); })
-      .catch(() => { ids.forEach((id) => this.asked.delete(id)); });
+    return this.requestTotals(ids);
+  },
+  requestTotals(ids) {
+    const versions = Object.fromEntries(ids.map(id => [id, this.totalRequests[id] = (this.totalRequests[id] || 0) + 1]));
+    return api('/api/sessions/api-cost', { ids })
+      .then((r) => { Object.keys(r || {}).forEach((id) => { if (this.totalRequests[id] !== versions[id]) return; this.totals[id] = r[id]; this.paintListTag(id); }); this.paintSelection(); })
+      .catch(() => { ids.forEach((id) => { if (this.totalRequests[id] === versions[id]) this.asked.delete(id); }); });
   },
   // 批量勾选：工具条上即时显示已选会话的费用合计；没取过合计的会话先补取再刷新
   paintSelection() {
@@ -3241,23 +3282,22 @@ const ApiBill = {
     const miss = ids.filter((id) => !this.asked.has(id)).slice(0, 300);
     if (miss.length) {
       miss.forEach((id) => this.asked.add(id));
-      api('/api/sessions/api-cost', { ids: miss.slice(0, 300) })
-        .then((r) => { Object.keys(r || {}).forEach((id) => { this.totals[id] = r[id]; this.paintListTag(id); }); this.paintSelection(); })
-        .catch(() => { miss.forEach((id) => this.asked.delete(id)); });
+      this.requestTotals(miss);
     }
-    const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.cny += t.cny || 0; a.sub += t.sub || 0; } return a; }, { usd: 0, cny: 0, sub: 0 });
-    el.hidden = sum.usd <= 0 && sum.cny <= 0;
-    el.innerHTML = sum.usd > 0 || sum.cny > 0 ? this.tagHtml(sum) : '';
+    const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.cny += t.cny || 0; a.sub += t.sub || 0; a.missingUsageTurns += t.missingUsageTurns || 0; } return a; }, { usd: 0, cny: 0, sub: 0, missingUsageTurns:0 });
+    el.hidden = sum.usd <= 0 && sum.cny <= 0 && !sum.missingUsageTurns;
+    el.innerHTML = sum.usd > 0 || sum.cny > 0 || sum.missingUsageTurns ? this.tagHtml(sum) : '';
   },
   selectionStats(data) {
-    const stats = { sessions: 0, messages: 0, usd: 0, cny: 0, sub: 0,
+    const stats = { sessions: 0, messages: 0, usd: 0, cny: 0, sub: 0, missingUsageTurns:0,
       costs: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, webSearch: 0 },
       costsCny: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, webSearch: 0 },
       tokens: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } };
     for (const t of Object.values(data)) {
-      if (!(t.usd > 0) && !(t.cny > 0)) continue;
+      if (!(t.usd > 0) && !(t.cny > 0) && !t.missingUsageTurns) continue;
       if (!t.breakdown || (t.cny > 0 && !t.breakdownCny) || !t.tokens || !Number.isFinite(t.consumedMessages)) throw new Error(T('apiBatchUnavailable'));
       stats.sessions++;
+      stats.missingUsageTurns += t.missingUsageTurns || 0;
       stats.messages += t.consumedMessages;
       stats.usd += t.usd;
       stats.cny += t.cny || 0;
@@ -3271,6 +3311,7 @@ const ApiBill = {
     return stats;
   },
   selectionHtml(s) {
+    if (!s.messages && s.missingUsageTurns) return `<p class="api-cost-note">${escapeHtml(T('apiPartialUsage'))}</p>`;
     const text = (key) => escapeHtml(T(key));
     const table = (currency, total, costs) => {
       const money = (v) => currency === 'CNY' ? this.cny(v) : this.usd(v);
@@ -3291,6 +3332,7 @@ const ApiBill = {
       (s.usd > 0 || s.cny <= 0 ? table('USD', s.usd, s.costs) : '') +
       (s.cny > 0 ? table('CNY', s.cny, s.costsCny) : '') +
       (s.sub > 0 ? `<p class="api-cost-note sub">${text('apiSubBadge').replace('{c}', this.usd(s.sub))} · ${text('apiSubscription')}</p>` : '') +
+      `${s.missingUsageTurns ? `<p class="api-cost-note">${text('apiPartialUsage')}</p>` : ''}` +
       `<p class="api-cost-note batch-cost-help">${text('apiBatchRule')}</p>`;
   },
   async showSelection() {
@@ -3317,10 +3359,12 @@ const ApiBill = {
   },
   // 任务结束：该会话缓存作废，重新取明细与合计
   onTaskEnd(sessionId) {
-    const parent = State.sessions.find(s => s.multiParent && (s.multiSessionIds || []).includes(sessionId));
-    if (parent) { this.asked.delete(parent.id); this.pending.add(parent.id); this.flushList(); }
-    delete this.bySession[sessionId];
-    if (State.session && State.session.id === sessionId) this.load(sessionId);
+    const parent = this.parentFor(sessionId);
+    if (parent) { this.asked.delete(parent); this.pending.add(parent); this.flushList(); }
+    const sid = this.isCurrent(sessionId) ? State.session.id : sessionId;
+    this.invalidate(sessionId);
+    if (sid !== sessionId) this.invalidate(sid);
+    if (this.isCurrent(sessionId)) this.load(sid);
     else { this.asked.delete(sessionId); this.pending.add(sessionId); this.flushList(); }
   },
 };
@@ -6395,6 +6439,10 @@ function connectWs() {
     if (e.kind === 'serverError') { showServerError(e.message); return; }
     if (State.session?.multiGroup && ['session','task','taskDone'].includes(e.kind)) MultiUi.schedule();
     if (e.kind === 'task' && MultiUi.knowsMember(e.sessionId)) MultiUi.scheduleList();
+    if (e.kind === 'trace' && (e.event?.name === 'turn.completed' || e.event?.kind === 'task_end')) {
+      if (ApiBill.isCurrent(e.sessionId)) ApiBill.onTaskEnd(e.sessionId);
+      if (State.session?.multiGroup && MultiUi.knowsMember(e.sessionId)) MultiUi.schedule();
+    }
     if (e.kind === 'session') {
       // 影响会话列表排序/暂停态
       if (State.session && e.session.id === State.session.id) {

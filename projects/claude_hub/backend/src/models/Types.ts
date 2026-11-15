@@ -427,6 +427,7 @@ export interface ApiCostLine {
 export type ApiBilling = 'subscription' | 'apikey';
 
 export interface ApiTurnCost {
+  usageStatus?: 'available' | 'missing';
   consumedMessages: number; // 去重后费用大于零的 assistant 消息数，不含不可见后台补差
   taskId: string;
   provider: string;         // 服务商 id：official/custom/anthropic/openrouter/minimax/…（老轨迹可能为空）
@@ -438,6 +439,7 @@ export interface ApiTurnCost {
   cliUsd: number | null;    // Claude CLI 自报的 total_cost_usd，仅供对照
 }
 export interface ApiSessionCost {
+  missingUsageTurns?: number;
   sessionId: string;
   turns: ApiTurnCost[];
   totalUsd: number;         // 全部轮次美元合计（订阅轮次算估价在内）
@@ -446,6 +448,7 @@ export interface ApiSessionCost {
 }
 // 会话列表徽章：总估价 + 其中订阅部分
 export interface ApiSessionTotals {
+  missingUsageTurns?: number;
   unpriced?: number; // Requests whose model price is unknown; never imply they were free.
   usd: number;
   cny: number;
