@@ -3544,7 +3544,17 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 
 .multi-engine-card { min-width: 0; margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; }
 .multi-engine-card label { display: block; margin-top: 8px; }
-#multiEngineSettings { margin: 18px 0; }
+#multiEngineSettings { position: relative; margin: 28px 0 4px; padding-top: 22px; }
+#multiEngineSettings::before { content: ''; position: absolute; inset: 0 0 auto; height: 2px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--border) 12%, var(--accent) 50%, var(--border) 88%, transparent); }
+#multiEngineSettings .multi-engine-toggle { margin: 0; font-size: 15px; font-weight: 600; }
+#multiEngineSettings .multi-engine-intro { margin: 0; }
+.multi-engine-help { margin: 2px 0 12px; }
+.multi-engine-help summary { display: flex; align-items: center; gap: 7px; width: fit-content; min-height: 44px; color: var(--accent); cursor: pointer; font-size: 12px; list-style: none; border-radius: 4px; }
+.multi-engine-help summary::-webkit-details-marker { display: none; }
+.multi-engine-help summary::before { content: ''; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); }
+.multi-engine-help[open] summary::before { transform: rotate(45deg); }
+.multi-engine-help summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.multi-engine-help > .sx-note { margin: 0; padding: 10px 12px; border-left: 2px solid var(--border); line-height: 1.7; }
 #multiEngineSettings .btn { margin: 6px 6px 0 0; }
 .multi-engine-tabs { display: flex; gap: 8px; padding: 8px 12px; overflow-x: auto; flex-shrink: 0; border-bottom: 1px solid var(--border); }
 .multi-engine-tabs[hidden] { display: none; }

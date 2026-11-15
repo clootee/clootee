@@ -3,6 +3,8 @@ const MultiUi = {
   text(key) {
     const copy = {
       title: ['多引擎', 'Multiple engines'], add: ['添加引擎', 'Add engine'], remove: ['移除', 'Remove'],
+      intro: ['让多个引擎同时处理同一需求。', 'Let multiple engines work on the same request.'],
+      details: ['了解详情', 'Learn more'],
       note: ['开启后，新会话会同时向每个引擎发送需求，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'New sessions send each request to all engines in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
       name: ['英文名称', 'English name'], nameNote: ['字母开头，仅英文字母、数字、下划线，最多40字符，名称不能重复。', 'Start with a letter; use letters, numbers and underscores, up to 40 characters. Names must be unique.'],
       engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型 ID', 'Model ID'], base: ['自定义 Base URL', 'Custom Base URL'],
@@ -16,11 +18,16 @@ const MultiUi = {
   fill() {
     const host = $('multiEngineSettings');
     host.replaceChildren();
+    host.setAttribute('aria-label', this.text('title'));
     const toggle = document.createElement('label'); toggle.className = 'sx-lbl multi-engine-toggle';
     const check = document.createElement('input'); check.type = 'checkbox'; check.id = 'multiEngineEnabled';
     check.checked = !!State.settings.multiEngine?.enabled;
     toggle.append(check, ' ' + this.text('title')); host.append(toggle);
-    const note = document.createElement('div'); note.className = 'sx-note'; note.textContent = this.text('note'); host.append(note);
+    const note = document.createElement('div'); note.className = 'sx-note multi-engine-intro'; note.textContent = this.text('intro'); host.append(note);
+    const details = document.createElement('details'); details.className = 'multi-engine-help';
+    const summary = document.createElement('summary'); summary.textContent = this.text('details');
+    const description = document.createElement('div'); description.className = 'sx-note'; description.textContent = this.text('note');
+    details.append(summary, description); host.append(details);
     const rows = document.createElement('div'); rows.id = 'multiEngineRows'; host.append(rows);
     const entries = State.settings.multiEngine?.engines || [];
     entries.forEach(e => this.addRow(e));
