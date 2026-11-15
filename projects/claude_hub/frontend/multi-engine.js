@@ -4,6 +4,12 @@ const MultiUi = {
     const copy = {
       title: ['多引擎', 'Multiple engines'], add: ['添加引擎', 'Add engine'], remove: ['移除', 'Remove'],
       details: ['了解详情', 'Learn more'],
+      chooseSessionEngine: ['选择本次会话的引擎', 'Choose an engine for this session'],
+      singleSession: ['单引擎会话', 'Single-engine session'],
+      multiDisabled: ['多引擎（已关闭）', 'Multiple engines (disabled)'],
+      multiSession: ['并行运行 {n} 个引擎', 'Run {n} engines in parallel'],
+      multiSetup: ['请先在设置中配置至少两个引擎', 'Configure at least two engines in Settings first'],
+
       fetchModels: ['拉取模型', 'Fetch models'], fetchingModels: ['拉取中…', 'Fetching…'],
       fetchedModels: ['已获取 {n} 个模型', 'Loaded {n} models'], emptyModels: ['未获取到模型，请手动输入或重试。', 'No models returned. Enter a model ID or retry.'],
       manualModel: ['手动输入模型 ID', 'Enter a model ID'], autoModel: ['自动', 'Automatic'],
@@ -11,7 +17,7 @@ const MultiUi = {
 
       toggleFailed: ['开关未保存，请重新勾选重试。', 'The switch was not saved. Toggle it again to retry.'],
       loadingConfig: ['正在带入已保存的配置…', 'Loading saved configuration…'],
-      note: ['开启后，新会话会同时向每个引擎发送需求，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'New sessions send each request to all engines in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
+      note: ['开启后，新建会话可选择「多引擎」；选择后每次需求会同时发给各个引擎，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'When enabled, new sessions can choose Multiple engines to send each request to all engines in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
       name: ['英文名称', 'English name'], nameNote: ['字母开头，仅英文字母、数字、下划线，最多40字符，名称不能重复。', 'Start with a letter; use letters, numbers and underscores, up to 40 characters. Names must be unique.'],
       engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型', 'Model'], base: ['自定义 Base URL', 'Custom Base URL'],
       key: ['API Key', 'API Key'], saving: ['保存中…', 'Saving…'],
@@ -19,6 +25,45 @@ const MultiUi = {
       broadcast: ['每次发送将分发给所有引擎', 'Each message is sent to all engines'], retry: ['重试加载引擎', 'Retry loading engines'], loading: ['正在加载引擎…', 'Loading engines…'],
     };
     return copy[key]?.[LANG === 'en' ? 1 : 0] || key;
+  },
+  sessionMode(session) { return session?.multiGroup ? 'multi' : session?.engine; },
+  chooseSessionEngine() {
+    if (this.enginePickerOpen) return Promise.resolve(null);
+    this.enginePickerOpen = true;
+    const focus = document.activeElement, overflow = document.body.style.overflow;
+    const dialog = document.createElement('dialog'); dialog.className = 'session-engine-picker'; dialog.id = 'sessionEnginePicker';
+    dialog.setAttribute('aria-labelledby', 'sessionEnginePickerTitle');
+    const title = document.createElement('h2'); title.id = 'sessionEnginePickerTitle'; title.textContent = this.text('chooseSessionEngine'); dialog.append(title);
+    const list = document.createElement('div'); list.className = 'session-engine-choices'; dialog.append(list);
+    const choices = [
+      { id: 'claude', title: 'Claude Code', mark: 'CC', note: this.text('singleSession') },
+      { id: 'codex', title: 'Codex', mark: 'CD', note: this.text('singleSession') },
+    ];
+    if (State.settings.multiEngine?.enabled) {
+      const count = State.settings.multiEngine.engines?.length || 0;
+      choices.push({ id: 'multi', title: this.text('title'), mark: 'M', note: count >= 2 ? this.text('multiSession').replace('{n}', count) : this.text('multiSetup'), disabled: count < 2 });
+    }
+    let preferred;
+    for (const choice of choices) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'session-engine-choice'; button.dataset.engine = choice.id; button.disabled = !!choice.disabled;
+      const mark = document.createElement('span'); mark.className = 'session-engine-mark'; mark.textContent = choice.mark; mark.setAttribute('aria-hidden', 'true');
+      const content = document.createElement('span'); content.className = 'session-engine-choice-copy';
+      const name = document.createElement('strong'); name.textContent = choice.title;
+      const note = document.createElement('span'); note.textContent = choice.note; content.append(name, note);
+      button.append(mark, content); button.onclick = () => dialog.close(choice.id); list.append(button);
+      if (choice.id === State.settings.defaultEngine) preferred = button;
+    }
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'sx-btn session-engine-cancel'; cancel.textContent = T('cancel'); cancel.onclick = () => dialog.close(); dialog.append(cancel);
+    document.body.append(dialog); document.body.style.overflow = 'hidden';
+    return new Promise(resolve => {
+      dialog.addEventListener('close', () => {
+        const choice = dialog.returnValue || null;
+        dialog.remove(); this.enginePickerOpen = false; document.body.style.overflow = overflow;
+        if (focus?.isConnected) focus.focus();
+        resolve(choice);
+      }, { once: true });
+      dialog.showModal(); preferred?.focus();
+    });
   },
   rows: [], members: [], timer: null, request: 0,
   fill() {
@@ -68,6 +113,7 @@ const MultiUi = {
       const pending = api('/api/settings', { multiEngine: { enabled } }).then(saved => {
         State.settings.multiEngine = { ...(State.settings.multiEngine || { engines: [] }), enabled: saved.multiEngine.enabled };
         State.settings.maxConcurrentTasks = saved.maxConcurrentTasks;
+        refreshEngineControl();
         toggleStatus.hidden = true;
         return true;
       }).catch(error => {

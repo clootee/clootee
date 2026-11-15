@@ -63,9 +63,10 @@ export class MultiEngine {
     // Always enter a fresh context: a completion callback can start a different engine.
     return EngineConfig.withConfig(m ? { [m.engine]: m.config } : {}, run);
   }
-  static create(rootId: string, name: string, engine?: Engine): Session {
+  static create(rootId: string, name: string, engine?: Engine | 'multi'): Session {
+    if (engine !== 'multi') return SessionManager.createSession(rootId, name, engine);
     const setting = Settings.get().multiEngine;
-    if (!setting.enabled) return SessionManager.createSession(rootId, name, engine);
+    if (!setting.enabled) throw new Error('请先在设置中启用多引擎 / Enable multiple engines in Settings first');
     rootId = this.parentRoot(rootId);
     const entries = MultiEngineSettings.validate(setting).engines;
     const root = RootManager.getRoot(rootId);
