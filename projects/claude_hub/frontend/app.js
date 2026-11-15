@@ -8491,9 +8491,7 @@ function defaultEngineNoteText() {
 // 返回 false ＝ 有块没存上，调用方（leavePane）据此决定先别关弹窗。
 async function saveEnginePane() {
   try {
-    const saved = await api('/api/settings', { multiEngine: MultiUi.collect() });
-    State.settings.multiEngine = saved.multiEngine;
-    State.settings.maxConcurrentTasks = saved.maxConcurrentTasks;
+    await MultiUi.saveConfiguration();
   } catch (e) { setPaneNotice('engBlockSaveFail', { block: MultiUi.text('title'), msg: e.message }, 'err', 0); return false; }
   const eng = $('defaultEngineSelect').value === 'codex' ? 'codex' : 'claude';
   const targets = ['claude', 'codex'].filter((e) => EngineDirty[e]);
