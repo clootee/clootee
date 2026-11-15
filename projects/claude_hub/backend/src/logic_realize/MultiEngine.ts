@@ -17,6 +17,9 @@ import { RootManager } from './RootManager';
 import { ProjectPrompt } from './ProjectPrompt';
 import { TaskQueue } from './TaskQueue';
 import { SessionLimit } from '../helper/SessionLimit';
+import { ApiCost } from './ApiCost';
+import { ApiSessionTotals } from '../models/Types';
+import { API_COST_MAX_BATCH } from '../config/ClaudePricing';
 import { ModelManager } from './ModelManager';
 import { EngineConfig } from './EngineConfig';
 
@@ -82,6 +85,27 @@ export class MultiEngine {
       try { push(SessionManager.getSession(this.liveId(g.members[0]))); } catch { /* Removed groups have no visible row. */ }
     }
     return out.sort((a,b) => Number(!!b.pinned)-Number(!!a.pinned) || b.updatedAt-a.updatedAt);
+  }
+  static costTotals(ids: string[]): Record<string, ApiSessionTotals> {
+    if (!Array.isArray(ids) || ids.length > API_COST_MAX_BATCH) throw new Error('Invalid cost session IDs');
+    const out: Record<string, ApiSessionTotals> = {};
+    for (const id of ids) {
+      let members: string[];
+      try { members = this.members(id).map(s => s.id); } catch { members = [id]; }
+      const totals = Object.values(ApiCost.totals(members));
+      if (!totals.length) continue;
+      const sum = structuredClone(totals[0]);
+      for (const t of totals.slice(1)) {
+        sum.usd += t.usd; sum.cny += t.cny; sum.sub += t.sub; sum.consumedMessages += t.consumedMessages;
+        sum.unpriced = (sum.unpriced || 0) + (t.unpriced || 0);
+        for (const key of Object.keys(sum.tokens) as (keyof typeof sum.tokens)[]) sum.tokens[key] += t.tokens[key];
+        for (const key of Object.keys(sum.breakdown) as (keyof typeof sum.breakdown)[]) {
+          sum.breakdown[key] += t.breakdown[key]; sum.breakdownCny[key] += t.breakdownCny[key];
+        }
+      }
+      out[id] = sum;
+    }
+    return out;
   }
   static runForGroup(id: string, action: (sessionId: string) => void): void {
     for (const s of this.members(id)) action(s.id);

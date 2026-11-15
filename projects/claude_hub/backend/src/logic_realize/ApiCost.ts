@@ -58,7 +58,9 @@ export class ApiCost extends ApiCostStruct {
     const hit = this._cache.get(id);
     if (hit && hit.stamp === stamp && stamp !== 'none') return hit.value;
     const value = fn();
-    this._cache.set(id, { stamp, value });
+    // A background price refresh can resolve an unknown model without changing its trace.
+    if (value.turns.some(t => t.lines.some(l => !l.priced && (l.reportedRequests || 0) < l.requests))) this._cache.delete(id);
+    else this._cache.set(id, { stamp, value });
     return value;
   }
 
@@ -81,7 +83,7 @@ export class ApiCost extends ApiCostStruct {
             tokens.cacheRead += line.cacheReadTokens;
             tokens.cacheWrite += line.cacheWrite5mTokens + line.cacheWrite1hTokens;
           }
-          out[id] = { usd: s.totalUsd, cny: s.totalCny, sub: s.subscriptionUsd, breakdown, breakdownCny, tokens,
+          out[id] = { unpriced: s.turns.flatMap(t => t.lines).filter(l => !l.priced && (l.reportedRequests || 0) < l.requests).length, usd: s.totalUsd, cny: s.totalCny, sub: s.subscriptionUsd, breakdown, breakdownCny, tokens,
             consumedMessages: s.turns.reduce((n, t) => n + t.consumedMessages, 0) };
         }
       } catch (e) {

@@ -183,6 +183,31 @@ test('named engine infrastructure', async t => {
       try { assert.throws(()=>MultiEngine.ensureIdentity(members[1]),/Unsafe instruction/);assert.equal(fs.readFileSync(external,'utf8'),'untouched'); }
       finally {fs.unlinkSync(file);MultiEngine.ensureIdentity(members[1]);}
     });
+    await t.test('Codex API-equivalent prices differ by model and parent totals include every engine', () => {
+      const { ApiCost } = load('logic_realize/ApiCost');
+      const fixture=(model,taskId)=>[
+        {kind:'task_start',engine:'codex',taskId,ts:1,raw:{provider:'official',model,codexAuth:'chatgpt'}},
+        {kind:'raw',engine:'codex',taskId,ts:2,name:'turn.completed',usage:{input_tokens:1000000,cached_input_tokens:200000,output_tokens:100000}},
+      ];
+      let reads=0;
+      const unknown=ApiCost._compute('unknown-fixture',fixture('not-a-known-price','unknown-task'));
+      ApiCost._cached('price-refresh','same-trace',()=>{reads++;return unknown;});
+      ApiCost._cached('price-refresh','same-trace',()=>{reads++;return unknown;});
+      assert.equal(reads,2,'unknown prices must be reconsidered after background pricing refresh');
+      const sol=ApiCost._compute('sol-fixture',fixture('gpt-6.1-sol','sol-task'));
+      const astra=ApiCost._compute('astra-fixture',fixture('gpt-6-astra','astra-task'));
+      assert.equal(sol.totalUsd,2.62);assert.equal(astra.totalUsd,13.2);
+      assert.equal(sol.subscriptionUsd,sol.totalUsd);assert.equal(astra.turns[0].lines[0].model,'gpt-6-astra');
+      const { TraceStore }=load('logic_realize/TraceStore');const live=TraceStore.liveEvents;
+      TraceStore.liveEvents=id=>({stamp:'multi-price-fixture',events:fixture(id===members[0].id?'gpt-6.1-sol':'gpt-6-astra',id)});
+      try {
+        const individual=ApiCost.totals(members.map(s=>s.id));
+        const parent=MultiEngine.costTotals([first.id])[first.id];
+        assert.ok(Math.abs(parent.usd-29.02)<1e-9);assert.ok(Math.abs(parent.sub-29.02)<1e-9);
+        assert.equal(parent.consumedMessages,3);assert.equal(parent.tokens.input,2400000);
+        assert.equal(individual[members[0].id].usd,2.62,'individual costs must stay separate from parent totals');
+      } finally {TraceStore.liveEvents=live;ApiCost._cache.clear();}
+    });
     await t.test('configuration is a snapshot and async contexts do not mix', async () => {
       settings.multiEngine = { enabled: false, engines: [] };
       await Promise.all(members.map((s, i) => MultiEngine.withSession(s, async () => {

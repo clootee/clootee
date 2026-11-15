@@ -15,6 +15,8 @@ const MultiUi = {
       multiSession: ['并行运行 {n} 个引擎', 'Run {n} engines in parallel'],
       multiSetup: ['请先在设置中配置至少两个引擎', 'Configure at least two engines in Settings first'],
 
+      noUsage: ['暂无用量', 'No usage yet'],
+      equivalentCost: ['API 等价估价', 'API-equivalent estimate'],
       fetchModels: ['拉取模型', 'Fetch models'], fetchingModels: ['拉取中…', 'Fetching…'],
       fetchedModels: ['已获取 {n} 个模型', 'Loaded {n} models'], emptyModels: ['未获取到模型，请手动输入或重试。', 'No models returned. Enter a model ID or retry.'],
       manualModel: ['手动输入模型 ID', 'Enter a model ID'], autoModel: ['自动', 'Automatic'],
@@ -377,7 +379,10 @@ const MultiUi = {
         const status = m.paused ? 'paused' : tasks.some(t => t.status === 'running') ? 'running' : tasks.some(t => t.status === 'pending') ? 'pending' : last?.status === 'error' ? 'error' : last?.status === 'done' ? 'done' : 'idle';
         const title = document.createElement('strong'); title.textContent = m.name;
         const detail = document.createElement('span'); detail.textContent = `${m.engine === 'codex' ? 'Codex' : 'Claude Code'} · ${this.text(status)}`;
-        button.append(title, detail); button.onclick = () => this.switchTab(m.id);
+        const cost = document.createElement('span'); cost.className = 'multi-engine-cost';
+        cost.textContent = m.cost?.consumedMessages ? `${m.cost.sub > 0 ? '≈' : ''}${ApiBill.money(m.cost)}${m.cost.unpriced ? ' · ' + T('apiUnpriced') : ''}` : this.text('noUsage');
+        cost.title = `${m.model || ''}${m.cost?.sub > 0 ? ' · ' + this.text('equivalentCost') : ''}`;
+        button.append(title, detail, cost); button.onclick = () => this.switchTab(m.id);
         button.onkeydown = e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const target = e.key === 'Home' ? 0 : e.key === 'End' ? members.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + members.length) % members.length; this.switchTab(members[target].id).then(() => $('multiEngineTabs').children[target]?.focus()); } };
         host.append(button);
       });

@@ -633,7 +633,7 @@ export class Server {
     );
     // POST /api/sessions/api-cost { ids }             → 会话列表用：各会话 API 费用合计
     app.post('/api/sessions/api-cost', (req, res) =>
-      this._wrap(res, 'sessions.apiCost', () => ApiCost.totals(Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [])),
+      this._wrap(res, 'sessions.apiCost', () => MultiEngine.costTotals(Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [])),
     );
 
     // GET /api/session/trace-stats?id=<sessionId>    → 只要统计（慢在哪）
@@ -764,7 +764,11 @@ export class Server {
         emit('error', 0, { message });
       } finally { if (!res.destroyed) res.end(); }
     });
-    app.get('/api/multi/members', (req, res) => this._wrap(res, 'multi.members', () => MultiEngine.members(String(req.query.sessionId)).map(s => ({ id: s.id, name: s.multiName, engine: s.engine, paused: s.paused, tasks: s.tasks.map(t => ({ status: t.status })) }))));
+    app.get('/api/multi/members', (req, res) => this._wrap(res, 'multi.members', () => {
+      const members = MultiEngine.members(String(req.query.sessionId));
+      const totals = ApiCost.totals(members.map(s => s.id));
+      return members.map(s => ({ id:s.id, name:s.multiName, engine:s.engine, model:MultiEngine.config(s)?.config.model || '', cost:totals[s.id] || null, paused:s.paused, tasks:s.tasks.map(t => ({status:t.status})) }));
+    }));
     app.post('/api/multi/submit', (req, res) =>
       this._wrap(res, 'multi.submit', () => {
         if (req.body.scope !== 'all' && req.body.scope !== 'current') throw new Error('Invalid delivery scope');
