@@ -1,10 +1,10 @@
 {
-  "version": "3.1.40",
+  "version": "3.1.41",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-08",
+  "releasedAt": "2026-11-15",
   "notesI18n": {
-    "zh": "访问开关立即生效，精简安全设置保存操作，支持反向代理仅监听本机。",
-    "en": "Apply remote access changes immediately, simplify security settings, and support loopback-only reverse proxy deployments."
+    "zh": "新增独立配置的多引擎并行会话、会话内引擎切换、按次选择发送范围与费用汇总；优化设置、默认引擎和桌面交互。",
+    "en": "Add parallel multi-engine sessions with frozen configurations, engine tabs, per-message recipients and cost totals; improve settings, default engines and desktop interactions."
   }
 }
