@@ -5898,7 +5898,9 @@ async function addTask() {
   if (initialId && !isFavoriteDraftId(initialId) && initialSelection !== sessionSelectionVersion) return;
   const selection = sessionSelectionVersion;
   const target = State.sessionId;
-  if (!(await MultiUi.ensureEngines()) || selection !== sessionSelectionVersion) return;
+  const scope = await MultiUi.chooseDelivery();
+  if (!scope || selection !== sessionSelectionVersion || State.sessionId !== target) return;
+  if (!(await MultiUi.ensureEngines(scope)) || selection !== sessionSelectionVersion) return;
   if (!(await SessionLimitUi.prepare(1)) || selection !== sessionSelectionVersion) return;
   if (!(await PromptCacheUi.ensure()) || selection !== sessionSelectionVersion) return;
   const prepared = await CostUi.prepare([applyQuickPrefix(applySlashPrefix(raw))]);
@@ -5916,7 +5918,7 @@ async function addTask() {
   renderAttachBar();
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
   try {
-    await api('/api/task/add', prepared);
+    await api(State.session?.multiGroup ? '/api/multi/submit' : '/api/task/add', { ...prepared, scope });
     clearSlashPrefix(); // 单次使用：发送成功后自动摘掉标记
     for (const a of keepAttach) if (a.url) URL.revokeObjectURL(a.url);
   } catch (e) {
@@ -5965,7 +5967,9 @@ async function submitTasks() {
   const selection = sessionSelectionVersion;
   const target = State.sessionId;
   clearNotices(); // 新消息开始 → 清掉上一轮遗留的失败提示
-  if (!(await MultiUi.ensureEngines()) || selection !== sessionSelectionVersion) return;
+  const scope = await MultiUi.chooseDelivery();
+  if (!scope || selection !== sessionSelectionVersion || State.sessionId !== target) return;
+  if (!(await MultiUi.ensureEngines(scope)) || selection !== sessionSelectionVersion) return;
   if (!(await SessionLimitUi.prepare(prompts.length)) || selection !== sessionSelectionVersion) return;
   if (!(await PromptCacheUi.ensure()) || selection !== sessionSelectionVersion) return;
   const prepared = await CostUi.prepare(prompts.map(applyQuickPrefix));
@@ -5976,7 +5980,7 @@ async function submitTasks() {
     await selectSession(prepared.sessionId);
     if (State.sessionId !== prepared.sessionId || State.session?.id !== prepared.sessionId) return;
   }
-  await api('/api/task/add', prepared);
+  await api(State.session?.multiGroup ? '/api/multi/submit' : '/api/task/add', { ...prepared, scope });
   closeTasksModal();
 }
 

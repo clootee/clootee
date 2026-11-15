@@ -218,9 +218,10 @@ export class MultiEngine {
       if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Unsafe divide directory: ${dir}`);
     } else fs.mkdirSync(dir);
   }
-  static submit(sessionId: string, prompts: string[], approvals: string[] = []) {
+  static submit(sessionId: string, prompts: string[], approvals: string[] = [], scope: 'all' | 'current' = 'all') {
+    if (scope !== 'all' && scope !== 'current') throw new Error('Invalid delivery scope');
     if (!Array.isArray(prompts) || !prompts.length || prompts.some(p => typeof p !== 'string' || !p.trim())) throw new Error('Invalid prompts');
-    const members = this.members(sessionId);
+    const members = scope === 'current' ? [SessionManager.getSession(sessionId)] : this.members(sessionId);
     for (const s of members) {
       const full = SessionManager.getSessionFull(s.id);
       SessionLimit.assertCapacity(SessionLimit.status(full, full.messages, Settings.get().costOptimization), prompts.length);

@@ -765,9 +765,15 @@ export class Server {
       } finally { if (!res.destroyed) res.end(); }
     });
     app.get('/api/multi/members', (req, res) => this._wrap(res, 'multi.members', () => MultiEngine.members(String(req.query.sessionId)).map(s => ({ id: s.id, name: s.multiName, engine: s.engine, paused: s.paused, tasks: s.tasks.map(t => ({ status: t.status })) }))));
+    app.post('/api/multi/submit', (req, res) =>
+      this._wrap(res, 'multi.submit', () => {
+        if (req.body.scope !== 'all' && req.body.scope !== 'current') throw new Error('Invalid delivery scope');
+        return MultiEngine.submit(String(req.body.sessionId), req.body.prompts, Array.isArray(req.body.costApprovals) ? req.body.costApprovals.map(String) : [], req.body.scope);
+      }),
+    );
     app.post('/api/task/add', (req, res) =>
       this._wrap(res, 'task.add', () => {
-        return MultiEngine.submit(String(req.body.sessionId), req.body.prompts, Array.isArray(req.body.costApprovals) ? req.body.costApprovals.map(String) : []);
+        return MultiEngine.submit(String(req.body.sessionId), req.body.prompts, Array.isArray(req.body.costApprovals) ? req.body.costApprovals.map(String) : [], req.body.scope);
       }),
     );
     app.post('/api/task/remove', (req, res) =>
