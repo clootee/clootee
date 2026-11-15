@@ -208,6 +208,42 @@ test('named engine infrastructure', async t => {
         assert.equal(individual[members[0].id].usd,2.62,'individual costs must stay separate from parent totals');
       } finally {TraceStore.liveEvents=live;ApiCost._cache.clear();}
     });
+    await t.test('existing groups freeze names, order, models, providers and credentials across settings edits and reload', () => {
+      const before=structuredClone(settings.multiEngine);
+      const snapshots=members.map(s=>MultiEngine.config(s));
+      const identities=members.map(s=>({id:s.id,rootId:s.rootId,name:s.multiName}));
+      try {
+        settings.multiEngine.engines.forEach((entry,i)=>{
+          entry.name='renamed_'+i;entry.engine=entry.engine==='codex'?'claude':'codex';
+          entry.config.model='new-model-'+i;entry.config.provider='official';entry.config.apiKey='new-key-'+i;
+          entry.config.baseUrl='https://changed.example/v1';entry.config.effort='low';
+        });
+        settings.multiEngine.engines.reverse();settings.multiEngine.enabled=false;
+        for(const [i,member] of members.entries()) {
+          assert.deepEqual(MultiEngine.config(member),snapshots[i]);
+          const returned=MultiEngine.config(member);returned.name='accidental-edit';returned.config.model='accidental-model';
+          assert.deepEqual(MultiEngine.config(member),snapshots[i]);
+          MultiEngine.withSession(member,()=>{EngineConfig.get()[member.engine].model='accidental-runner-edit';});
+          assert.deepEqual(MultiEngine.config(member),snapshots[i]);
+          MultiEngine.ensureIdentity(member);
+          const text=fs.readFileSync(path.join(RootManager.getRoot(member.rootId).path,'AGENTS.md'),'utf8');
+          assert.ok(text.includes(`引擎名称: ${snapshots[i].name}`));assert.ok(text.includes(`从 0 开始): ${i}`));
+          assert.equal(SessionManager.getSession(member.id).multiName,snapshots[i].name);
+        }
+        // Reload group data exactly as a fresh process does, while global settings remain changed.
+        MultiEngine._groupCache=undefined;
+        assert.deepEqual(MultiEngine.members(first.id).map(s=>({id:s.id,rootId:s.rootId,name:s.multiName})),identities);
+        members.forEach((s,i)=>assert.deepEqual(MultiEngine.config(s),snapshots[i]));
+        settings.multiEngine.engines=[];
+        members.forEach((s,i)=>assert.deepEqual(MultiEngine.config(s),snapshots[i]));
+        settings.multiEngine={enabled:true,engines:before.engines.map((e,i)=>({...e,name:'future_'+i,config:{...e.config,model:'future-model-'+i}}))};
+        const next=MultiEngine.create(root.id,'','multi');
+        assert.deepEqual(MultiEngine.members(next.id).map(s=>s.multiName),['future_0','future_1','future_2']);
+        assert.equal(MultiEngine.config(next).config.model,'future-model-0');
+        members.forEach((s,i)=>assert.deepEqual(MultiEngine.config(s),snapshots[i]));
+        MultiEngine.remove(next.id);
+      } finally {settings.multiEngine=before;}
+    });
     await t.test('configuration is a snapshot and async contexts do not mix', async () => {
       settings.multiEngine = { enabled: false, engines: [] };
       await Promise.all(members.map((s, i) => MultiEngine.withSession(s, async () => {
@@ -305,7 +341,13 @@ test('named engine infrastructure', async t => {
     });
     await t.test('group metadata survives queue restoration and IDs becoming native IDs', () => {
       const s = SessionManager.getSession(first.id); s.claudeSessionId = 'native-engine-one'; SessionManager.saveSession(s);
-      SessionManager._live.clear(); SessionManager.restorePersisted();
+      const snapshot=MultiEngine.config(s), saved=settings.multiEngine;
+      settings.multiEngine={enabled:false,engines:[]};
+      try {
+        SessionManager._live.clear(); MultiEngine._groupCache=undefined; SessionManager.restorePersisted();
+        assert.deepEqual(MultiEngine.config(SessionManager.getSession(`${s.rootId}:native-engine-one`)),snapshot);
+        assert.deepEqual(MultiEngine.members(`${s.rootId}:native-engine-one`).map(m=>m.multiName),entries.map(e=>e.name));
+      } finally {settings.multiEngine=saved;}
       assert.equal(MultiEngine.members(`${s.rootId}:native-engine-one`).length, 3);
       assert.equal(MultiEngine.members(`${s.rootId}:native-engine-one`)[0].id, first.id);
       assert.equal(SessionManager.getSession(`${s.rootId}:native-engine-one`).multiName, 'codex_one');
