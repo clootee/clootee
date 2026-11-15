@@ -144,7 +144,9 @@ export class MultiEngine {
     return g && m && info ? { multiGroup: g.id, multiName: m.name, multiRootId: info.rootId, multiParentId: info.anchorId, multiSessionIds: info.ids } : {};
   }
   static config(s: Session): MultiEngineEntry | undefined {
-    return this.group(s)?.members.find(m => m.rootId === s.rootId);
+    const member = this.group(s)?.members.find(m => m.rootId === s.rootId);
+    // Callers receive a copy: a runner must never mutate the persisted session snapshot.
+    return member ? structuredClone(member) : undefined;
   }
   static claudeSettings(s: Session, settings: object): string {
     const dir = path.join(Paths.DATA_ROOT, 'multi_engine_runtime');
@@ -200,7 +202,7 @@ export class MultiEngine {
       const s = SessionManager.createSession(child.id, '', e.engine, true);
       s.multiGroup = g.id; s.multiName = e.name;
       sessions.push(s);
-      g.members.push({ ...e, rootId: child.id, sessionId: s.id });
+      g.members.push({ ...structuredClone(e), rootId: child.id, sessionId: s.id });
     }
     const groups = this.groups(); groups.push(g); JsonStore.write(this.file, groups); fs.chmodSync(this.file, 0o600);
     sessions.forEach(s => SessionManager.saveSession(s));
