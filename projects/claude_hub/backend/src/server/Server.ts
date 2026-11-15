@@ -261,6 +261,14 @@ export class Server {
       })),
     );
     // 实时拉取服务商模型列表；recommended = 在真实返回的 id 里挑的默认模型（前端换服务商时自动选中）
+    // Instance-local discovery: credentials stay in the request body and main settings remain unchanged.
+    app.post('/api/engine/models', (req, res) =>
+      this._wrapAsync(res, 'engine.instanceModels', async () => MultiEngine.models(req.body.engine, {
+        provider: req.body.provider,
+        apiKey: String(req.body.apiKey || '') || (req.body.provider === 'clootee' ? await ConsoleAccount.ensureToken() : ''),
+        baseUrl: String(req.body.baseUrl || ''), modelsUrl: String(req.body.modelsUrl || ''),
+      })),
+    );
     app.get('/api/engine/models', (req, res) =>
       this._wrapAsync(res, 'engine.models', async () => {
         const provider = req.query.provider as any;

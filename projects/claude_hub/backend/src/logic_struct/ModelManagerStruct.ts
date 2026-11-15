@@ -64,6 +64,13 @@ export class ModelManagerStruct {
     return r;
   }
 
+  // Instance-local model discovery must not overwrite the main provider's cache.
+  static async officialModels(engine: Engine): Promise<ModelOption[]> {
+    this._assertEngine('officialModels', engine);
+    return EngineConfig.withConfig({ [engine]: { provider: 'official', apiKey: '', model: '', effort: '' } },
+      () => engine === 'claude' ? this._availableClaude(false) : this._availableCodex());
+  }
+
   // ── 检测可用模型；写回候选列表 ──
   // verify=true 时对每个候选做一次真实极小调用来确认（仅 claude 原版有意义，较慢）。
   static async available(engine: Engine, verify = false): Promise<ModelOption[]> {

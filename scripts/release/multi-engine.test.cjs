@@ -47,6 +47,26 @@ test('named engine infrastructure', async t => {
         assert.equal(settings.multiEngine.engines[0].config.apiKey, 'edited-fixture');
       } finally { Settings._patch = original; Object.assign(settings, before); }
     });
+    await t.test('model discovery uses each instance credential without changing main provider caches', async () => {
+      const { ModelManager } = load('logic_realize/ModelManager');
+      const originals = { list:EngineConfig.listModels, cache:EngineConfig.setCache, catalog:ModelManager._codexCatalog };
+      const calls = [];
+      EngineConfig.listModels = async (provider, key, base, modelsUrl) => { calls.push({ provider, key, base, modelsUrl }); return [key+'-first',key+'-second']; };
+      EngineConfig.setCache = () => { throw new Error('Discovery must not change main cache'); };
+      ModelManager._codexCatalog = async () => {
+        assert.equal(EngineConfig.get().codex.provider, 'official');
+        return [{id:'native-codex',source:'catalog'}];
+      };
+      try {
+        const [one,two] = await Promise.all([MultiEngine.models('codex',{...config(0),modelsUrl:'https://example.com/models'}),MultiEngine.models('codex',config(1))]);
+        assert.notDeepEqual(one.models,two.models);
+        assert.equal(calls[0].key,config(0).apiKey);assert.equal(calls[1].base,config(1).baseUrl);
+        assert.equal(calls[0].modelsUrl,'https://example.com/models');
+        assert.equal((await MultiEngine.models('codex',{provider:'official',apiKey:''})).models[0].id,'native-codex');
+        assert.ok((await MultiEngine.models('claude',{provider:'official',apiKey:''})).models.length>0);
+        await assert.rejects(MultiEngine.models('invalid',{provider:'official',apiKey:''}),/Invalid engine/);
+      } finally { EngineConfig.listModels=originals.list;EngineConfig.setCache=originals.cache;ModelManager._codexCatalog=originals.catalog; }
+    });
     await t.test('validates names, duplicate names, count and provider requirements', () => {
       assert.equal(MultiEngineSettings.validate(settings.multiEngine).engines.length, 3);
       for (const name of ['../bad','中文','bad-name','_bad','CON','a/b']) assert.throws(() => MultiEngineSettings.validate({ enabled: true, engines: [{ ...entries[0], name }, entries[1]] }));

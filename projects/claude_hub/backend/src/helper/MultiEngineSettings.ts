@@ -15,7 +15,7 @@ export class MultiEngineSettings {
       if (entry.engine !== 'claude' && entry.engine !== 'codex') throw new Error('Invalid engine');
       const c = entry.config;
       if (!c || !isProvider(c.provider) || !isEffort(c.effort)) throw new Error('Invalid engine provider');
-      const config = { provider: c.provider, apiKey: String(c.apiKey || '').trim(), model: String(c.model || '').trim(), effort: c.effort || '', baseUrl: String(c.baseUrl || '').trim() };
+      const config = { provider: c.provider, apiKey: String(c.apiKey || '').trim(), model: String(c.model || '').trim(), effort: c.effort || '', baseUrl: String(c.baseUrl || '').trim(), ...(typeof c.modelsUrl === 'string' && c.modelsUrl.trim() ? { modelsUrl: c.modelsUrl.trim() } : {}) };
       if (config.provider !== 'official') {
         if (!config.apiKey || !config.model) throw new Error(`${name}: 需要 API Key 和模型 / API key and model required`);
         if (config.provider === 'custom') {

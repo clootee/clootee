@@ -4,11 +4,16 @@ const MultiUi = {
     const copy = {
       title: ['多引擎', 'Multiple engines'], add: ['添加引擎', 'Add engine'], remove: ['移除', 'Remove'],
       details: ['了解详情', 'Learn more'],
+      fetchModels: ['拉取模型', 'Fetch models'], fetchingModels: ['拉取中…', 'Fetching…'],
+      fetchedModels: ['已获取 {n} 个模型', 'Loaded {n} models'], emptyModels: ['未获取到模型，请手动输入或重试。', 'No models returned. Enter a model ID or retry.'],
+      manualModel: ['手动输入模型 ID', 'Enter a model ID'], autoModel: ['自动', 'Automatic'],
+      needKey: ['请先填写此引擎的 API Key。', 'Enter this engine’s API key first.'], needBase: ['请先填写 Base URL。', 'Enter a Base URL first.'],
+
       toggleFailed: ['开关未保存，请重新勾选重试。', 'The switch was not saved. Toggle it again to retry.'],
       loadingConfig: ['正在带入已保存的配置…', 'Loading saved configuration…'],
       note: ['开启后，新会话会同时向每个引擎发送需求，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'New sessions send each request to all engines in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
       name: ['英文名称', 'English name'], nameNote: ['字母开头，仅英文字母、数字、下划线，最多40字符，名称不能重复。', 'Start with a letter; use letters, numbers and underscores, up to 40 characters. Names must be unique.'],
-      engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型 ID', 'Model ID'], base: ['自定义 Base URL', 'Custom Base URL'],
+      engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型', 'Model'], base: ['自定义 Base URL', 'Custom Base URL'],
       key: ['API Key', 'API Key'], saving: ['保存中…', 'Saving…'],
       running: ['工作中', 'Working'], pending: ['等待中', 'Waiting'], paused: ['已暂停', 'Paused'], done: ['已完成', 'Done'], error: ['失败', 'Failed'], idle: ['待命', 'Ready'],
       broadcast: ['每次发送将分发给所有引擎', 'Each message is sent to all engines'], retry: ['重试加载引擎', 'Retry loading engines'], loading: ['正在加载引擎…', 'Loading engines…'],
@@ -19,6 +24,7 @@ const MultiUi = {
   fill() {
     this.savedConfig = null;
     const host = $('multiEngineSettings');
+    host.querySelectorAll('.multi-engine-card').forEach(card => card.abortModels?.());
     host.replaceChildren();
     host.setAttribute('aria-label', this.text('title'));
     const toggle = document.createElement('label'); toggle.className = 'sx-lbl multi-engine-toggle';
@@ -97,7 +103,7 @@ const MultiUi = {
   currentConfiguration(engine, saved) {
     if (typeof EngineLoaded !== 'undefined' && EngineLoaded[engine]) {
       const ui = providerUi(engine);
-      return { provider: ui.select.value, apiKey: ui.key.value, baseUrl: ui.base.value, model: modelValue(engine), effort: ui.effort?.value || '' };
+      return { provider: ui.select.value, apiKey: ui.key.value, baseUrl: ui.base.value, modelsUrl: ui.modelsUrl.value, model: modelValue(engine), effort: ui.effort?.value || '', models: saved.current[engine].provider === ui.select.value ? saved.current[engine].models : saved.slots[engine][ui.select.value]?.models };
     }
     return saved.current[engine];
   },
@@ -130,7 +136,27 @@ const MultiUi = {
     };
     input('key', 'password').value = entry?.config?.apiKey || '';
     input('base', 'url').value = entry?.config?.baseUrl || '';
-    input('model').value = entry?.config?.model || '';
+    const modelInput = input('model'); modelInput.classList.add('multi-engine-model-input'); modelInput.setAttribute('aria-label', this.text('manualModel'));
+    const choices = document.createElement('select'); choices.className = 'sx-input'; choices.setAttribute('aria-label', this.text('model'));
+    modelInput.parentElement.insertBefore(choices, modelInput); fields.modelChoice = choices;
+    const manualValue = '__clootee_manual_model__';
+    const setChoices = (models, selected) => {
+      card.multiModels = Array.from(new Map((models || []).map(m => typeof m === 'string' ? { id: m } : m).filter(m => m?.id).map(m => [m.id, m])).values());
+      choices.replaceChildren();
+      if (provider.value === 'official') choices.add(new Option(this.text('autoModel'), ''));
+      for (const m of card.multiModels) choices.add(new Option(m.label || m.id, m.id));
+      if (selected && !card.multiModels.some(m => m.id === selected)) choices.add(new Option(selected, selected));
+      choices.add(new Option(this.text('manualModel'), manualValue));
+      choices.value = selected || (provider.value === 'official' ? '' : manualValue);
+      modelInput.value = selected;
+      modelInput.hidden = choices.value !== manualValue;
+    };
+    choices.onchange = () => {
+      modelInput.hidden = choices.value !== manualValue;
+      if (!modelInput.hidden) modelInput.focus();
+      else modelInput.value = choices.value;
+    };
+    const fetchModels = document.createElement('button'); fetchModels.type = 'button'; fetchModels.className = 'btn'; fetchModels.textContent = this.text('fetchModels'); card.append(fetchModels);
     const update = () => {
       fields.key.parentElement.hidden = provider.value === 'official';
       fields.base.parentElement.hidden = provider.value !== 'custom';
@@ -142,9 +168,40 @@ const MultiUi = {
     const drafts = new Map();
     const lastProviders = new Map([[currentEngine, currentProvider]]);
     const status = document.createElement('div'); status.className = 'sx-note'; status.setAttribute('role', 'status');
-    const readConfig = () => ({ provider: currentProvider, apiKey: fields.key.value, baseUrl: fields.base.value, model: fields.model.value, effort: card.multiEffort || '' });
+    let modelVersion = 0, modelController;
+    const cancelModels = () => {
+      modelVersion++; modelController?.abort(); delete card.dataset.modelsLoading;
+      fetchModels.disabled = false; fetchModels.textContent = this.text('fetchModels');
+    };
+    card.abortModels = cancelModels;
+    const fingerprint = () => JSON.stringify([engine.value, provider.value, fields.key.value.trim(), fields.base.value.trim(), card.multiModelsUrl || '']);
+    fetchModels.onclick = async () => {
+      const request = { engine: engine.value, provider: provider.value, apiKey: fields.key.value.trim(), baseUrl: fields.base.value.trim(), modelsUrl: card.multiModelsUrl || '' };
+      if (request.provider !== 'official' && request.provider !== 'clootee' && !request.apiKey) { status.textContent = this.text('needKey'); return; }
+      if (request.provider === 'custom' && !request.baseUrl) { status.textContent = this.text('needBase'); return; }
+      cancelModels(); const version = modelVersion, signature = fingerprint();
+      modelController = new AbortController(); card.dataset.modelsLoading = 'true';
+      fetchModels.disabled = true; fetchModels.textContent = this.text('fetchingModels'); status.textContent = this.text('fetchingModels');
+      try {
+        const response = await api('/api/engine/models', request, false, modelController.signal);
+        if (version !== modelVersion || signature !== fingerprint() || !card.isConnected) return;
+        const models = (response.models || []).map(m => typeof m === 'string' ? { id: m } : m).filter(m => m?.id);
+        if (!models.length) throw new Error(this.text('emptyModels'));
+        const selected = modelInput.value || (models.some(m => m.id === response.recommended) ? response.recommended : models[0].id);
+        setChoices(models, selected);
+        status.textContent = this.text('fetchedModels').replace('{n}', card.multiModels.length);
+      } catch (e) {
+        if (version === modelVersion && signature === fingerprint() && e.name !== 'AbortError') status.textContent = e.message;
+      } finally {
+        if (version === modelVersion) { delete card.dataset.modelsLoading; fetchModels.disabled = false; fetchModels.textContent = this.text('fetchModels'); }
+      }
+    };
+    for (const field of [fields.key, fields.base]) field.addEventListener('input', () => { cancelModels(); setChoices([], modelInput.value); status.textContent = ''; });
+
+    const readConfig = () => ({ provider: currentProvider, apiKey: fields.key.value, baseUrl: fields.base.value, model: fields.model.value, effort: card.multiEffort || '', modelsUrl: card.multiModelsUrl || '', models: card.multiModels || [] });
     const change = async (engineChanged) => {
       drafts.set(currentEngine + ':' + currentProvider, readConfig());
+      cancelModels();
       const targetEngine = engine.value;
       const targetProvider = provider.value;
       card.disabled = true; card.dataset.loading = 'true'; status.textContent = this.text('loadingConfig');
@@ -160,7 +217,8 @@ const MultiUi = {
         populate(wanted);
         fields.key.value = config.apiKey || '';
         fields.base.value = config.baseUrl || '';
-        fields.model.value = config.model || '';
+        card.multiModelsUrl = config.modelsUrl || '';
+        setChoices(config.models || [], config.model || '');
         card.multiEffort = config.effort || '';
         status.textContent = '';
       } catch (e) {
@@ -168,18 +226,21 @@ const MultiUi = {
       } finally { card.disabled = false; delete card.dataset.loading; }
     };
     engine.onchange = () => change(true); provider.onchange = () => change(false); populate();
+    card.multiModelsUrl = entry?.config?.modelsUrl || '';
+    setChoices(entry?.config?.models || [], entry?.config?.model || '');
     card.append(status);
-    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn'; remove.textContent = this.text('remove'); remove.onclick = () => card.remove(); card.append(remove);
+    const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn'; remove.textContent = this.text('remove'); remove.onclick = () => { cancelModels(); card.remove(); }; card.append(remove);
     card.multiFields = fields; card.multiEffort = entry?.config?.effort || ''; parent.append(card);
   },
   collect() {
     const enabled = $('multiEngineEnabled').checked;
     if (!enabled) return { enabled: false, engines: State.settings.multiEngine?.engines || [] };
     const engines = Array.from($('multiEngineRows').children).map(card => {
+      if (card.dataset.modelsLoading) throw new Error(this.text('fetchingModels'));
       if (card.dataset.loading) throw new Error(this.text('loadingConfig'));
       const f = card.multiFields;
       if (enabled) for (const el of Object.values(f)) if (!el.reportValidity()) throw new Error(this.text('nameNote'));
-      return { name: f.name.value.trim(), engine: f.engine.value, config: { provider: f.provider.value, apiKey: f.key.value.trim(), baseUrl: f.base.value.trim(), model: f.model.value.trim(), effort: card.multiEffort } };
+      return { name: f.name.value.trim(), engine: f.engine.value, config: { provider: f.provider.value, apiKey: f.key.value.trim(), baseUrl: f.base.value.trim(), model: f.model.value.trim(), effort: card.multiEffort, modelsUrl: card.multiModelsUrl || '' } };
     });
     return { enabled, engines };
   },
