@@ -37,7 +37,10 @@ export class EngineConfig extends EngineConfigStruct {
   }
 
   protected static async _fetchModels(url: string, apiKey: string): Promise<string[]> {
-    const r = await HttpJson.get(url, { Authorization: `Bearer ${apiKey}` });
+    const headers: Record<string, string> = new URL(url).hostname === 'api.anthropic.com'
+      ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
+      : { Authorization: `Bearer ${apiKey}` };
+    const r = await HttpJson.get(url, headers);
     if (r.status < 200 || r.status >= 300)
       throw new Error(`fetchModels: HTTP ${r.status} ${(r.raw || '').slice(0, 200)}`);
     const data = r.json && Array.isArray(r.json.data) ? r.json.data : [];

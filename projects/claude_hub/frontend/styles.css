@@ -3565,3 +3565,21 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 #multiEngineSettings .multi-engine-toggle input { width: 18px; height: 18px; margin: 0; flex: 0 0 18px; }
 
 .multi-engine-model-input { margin-top: 6px; }
+
+.multi-engine-model-box { margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--accent) 3%, var(--panel)); }
+.multi-engine-model-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.multi-engine-model-title { color: var(--text); font-size: 13px; font-weight: 600; }
+#multiEngineSettings .multi-engine-model-fetch { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 7px; min-width: 118px; min-height: 44px; margin: 0; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border)); border-radius: 10px; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--panel)); font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+#multiEngineSettings .multi-engine-model-fetch:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 15%, var(--panel)); }
+#multiEngineSettings .multi-engine-model-fetch:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+#multiEngineSettings .multi-engine-model-fetch:disabled { opacity: .7; cursor: wait; }
+.multi-engine-model-fetch svg { flex-shrink: 0; }
+.multi-engine-model-fetch.is-loading svg { animation: multi-engine-model-spin 1s linear infinite; }
+.multi-engine-model-box > .sx-input { min-width: 0; }
+.multi-engine-model-status { margin: 9px 0 0; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.multi-engine-model-status:empty { display: none; }
+.multi-engine-model-status[data-state="loading"] { color: var(--accent); }
+.multi-engine-model-status[data-state="success"] { color: var(--green); }
+.multi-engine-model-status[data-state="error"] { color: var(--red); }
+@keyframes multi-engine-model-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .multi-engine-model-fetch.is-loading svg { animation: none; } }
