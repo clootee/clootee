@@ -5,7 +5,9 @@
 //   selectSession / escapeHtml / focusTaskInputIfDesktop。仅在用户交互（点击新建会话）时被调用，无加载顺序问题。
 
 // 打开「选择工作目录」弹窗：列出近期用过的目录 + 手动输入/浏览
-function openWsDir() {
+let WsSessionEngine = '';
+function openWsDir(engine = '') {
+  WsSessionEngine = engine;
   renderWsRecent();
   $('wsDirPath').value = '';
   $('wsDirCreate').checked = true;
@@ -14,6 +16,7 @@ function openWsDir() {
 }
 function closeWsDir() {
   $('wsDirOverlay').hidden = true;
+  WsSessionEngine = '';
 }
 
 // 近期目录 = 已登记的根目录列表（按名称）。点击某项直接在该目录下新建会话
@@ -65,12 +68,14 @@ async function wsUseTypedDir() {
 
 // 在指定根目录下创建一个新会话并选中它（引擎取默认引擎）。会话目录一经绑定不可更改。
 async function wsCreateSessionInRoot(rootId) {
+  const engine = WsSessionEngine || await MultiUi.chooseSessionEngine();
+  if (!engine) return;
   const selection = sessionSelectionVersion;
   try {
     const s = await api('/api/session/create', {
       rootId,
       name: '',
-      engine: State.settings.defaultEngine,
+      engine,
     });
     closeWsDir();
     if (selection !== sessionSelectionVersion) { await loadSessions(); return; }

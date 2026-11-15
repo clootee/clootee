@@ -219,10 +219,10 @@ function listModeIcon(mode) {
 
 // 引擎显示名
 function engineLabel(e) {
-  return e === 'codex' ? T('engineCodex') : T('engineClaude');
+  return e === 'multi' ? MultiUi.text('title') : e === 'codex' ? T('engineCodex') : T('engineClaude');
 }
 function engineShortLabel(e) {
-  return e === 'codex' ? 'CD' : 'CC';
+  return e === 'multi' ? 'M' : e === 'codex' ? 'CD' : 'CC';
 }
 function assistantLabel() {
   return engineLabel(State.session?.engine);
@@ -271,7 +271,7 @@ async function api(path, body, authRetried = false, signal) {
     }
     throw new Error(message);
   }
-  if (path === '/api/session/create' && json.data?.multiGroup) await loadRoots();
+  if (path === '/api/session/create' && json.data?.multiGroup) await loadRoots(false);
   return json.data;
 }
 
@@ -542,7 +542,8 @@ function fillEngineOptions(sel) {
   const prev = sel.value;
   sel.innerHTML =
     `<option value="claude">${escapeHtml(T('engineClaude'))}</option>` +
-    `<option value="codex">${escapeHtml(T('engineCodex'))}</option>`;
+    `<option value="codex">${escapeHtml(T('engineCodex'))}</option>` +
+    (sel.id === 'engineSelect' && State.settings.multiEngine?.enabled ? `<option value="multi">${escapeHtml(MultiUi.text('title'))}</option>` : '');
   if (prev) sel.value = prev;
 }
 
@@ -807,7 +808,7 @@ function logout() {
 }
 
 // ── 根目录 ──
-async function loadRoots() {
+async function loadRoots(refreshSessions = true) {
   State.roots = await api('/api/root/list');
   await refreshRootRecency();
   const sel = $('rootSelect');
@@ -828,7 +829,7 @@ async function loadRoots() {
   sel.value = State.rootId;
   renderWorkdirBar();
   renderRootMeta();
-  await loadSessions();
+  if (refreshSessions) await loadSessions();
 }
 
 async function refreshRootRecency() {
@@ -2399,6 +2400,8 @@ function focusTaskInputIfDesktop() {
 }
 
 async function newSession() {
+  const engine = await MultiUi.chooseSessionEngine();
+  if (!engine) return;
   closeDrawer(); // 移动端：新建会话（右侧要开新对话/弹目录选择）收起抽屉
   resetSessionSearch(false);
   if (State.favoritesOnly) {
@@ -2406,7 +2409,7 @@ async function newSession() {
     const favRoot = favFilterRootId();
     const cur = State.session;
     // 与主列表同规则：当前就是该目录下一个空的新会话时直接复用，不重复建
-    if (favRoot && cur && cur.rootId === favRoot && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
+    if (favRoot && cur && cur.rootId === favRoot && MultiUi.sessionMode(cur) === engine && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
       showMiniToast(T('alreadyNewSession'));
       flashSessionRow(cur.id);
       selectSession(cur.id);
@@ -2414,20 +2417,20 @@ async function newSession() {
       return;
     }
     // 已经是收藏草稿会话（哪怕还没选目录）也算「已经是新会话」，不重复弹目录选择
-    if (cur && isFavoriteDraftId(cur.id)) {
+    if (cur && isFavoriteDraftId(cur.id) && cur.engine === engine) {
       showMiniToast(T('alreadyNewSession'));
       flashSessionRow(cur.id);
       focusTaskInputIfDesktop();
       return;
     }
     // 新建按钮只预选目录；点确认、发送消息或上传文件时再真正建会话。
-    createFavoriteDraftSession(favRoot);
+    createFavoriteDraftSession(favRoot, engine);
     focusTaskInputIfDesktop();
     return;
   }
   // 工作台模式：先选择工作目录（近期用过的 / 手动添加，可创建不存在的目录）
   if (isWorkspace()) {
-    openWsDir();
+    openWsDir(engine);
     return;
   }
   if (!selectOnlyRoot()) {
@@ -2436,7 +2439,7 @@ async function newSession() {
   }
   // 当前已是空的新会话（未发起、无任务）则不再重复创建，直接复用并聚焦输入框
   const cur = State.session;
-  if (cur && !State.settings.multiEngine?.enabled && !cur.multiGroup && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
+  if (cur && MultiUi.sessionMode(cur) === engine && !cur.claudeSessionId && (cur.tasks || []).length === 0) {
     showMiniToast(T('alreadyNewSession'));
     flashSessionRow(cur.id);
     selectSession(cur.id);
@@ -2447,7 +2450,7 @@ async function newSession() {
   const s = await api('/api/session/create', {
     rootId: State.rootId,
     name: '',
-    engine: State.settings.defaultEngine,
+    engine,
   });
   if (selection !== sessionSelectionVersion) { await loadSessions(); return; }
   await selectSession(s.id);
@@ -2459,7 +2462,7 @@ function isFavoriteDraftId(id) {
   return String(id || '').startsWith('favorite-draft-');
 }
 
-function createFavoriteDraftSession(preferredRootId = '') {
+function createFavoriteDraftSession(preferredRootId = '', engine = State.settings.defaultEngine) {
   if (!preferredRootId && State.roots.length === 1) preferredRootId = State.roots[0].id;
   const prevKey = State.sessionId;
   const now = Date.now();
@@ -2469,7 +2472,7 @@ function createFavoriteDraftSession(preferredRootId = '') {
     preferredRootId,
     pendingRootId: preferredRootId,
     name: '',
-    engine: State.settings.defaultEngine,
+    engine,
     claudeSessionId: '',
     paused: false,
     createdAt: now,
@@ -5852,7 +5855,9 @@ async function ensureSession() {
   // 收藏夹视图：创建一个待绑定根目录的草稿会话（后续仍需绑定根目录才能发任务）。
   if (State.favoritesOnly) {
     // 当前操作已表示确认：预选目录后继续绑定，无须再点一次发送/上传。
-    createFavoriteDraftSession(favFilterRootId());
+    const engine = await MultiUi.chooseSessionEngine();
+    if (!engine) return false;
+    createFavoriteDraftSession(favFilterRootId(), engine);
     return ensureSession();
   }
   // 工作台模式：必须先选工作目录，无法静默创建，走原有目录选择流程。
@@ -5866,10 +5871,12 @@ async function ensureSession() {
     return false;
   }
   const selection = sessionSelectionVersion;
+  const engine = await MultiUi.chooseSessionEngine();
+  if (!engine || selection !== sessionSelectionVersion) return false;
   const s = await api('/api/session/create', {
     rootId: State.rootId,
     name: '',
-    engine: State.settings.defaultEngine,
+    engine,
   });
   if (selection !== sessionSelectionVersion) return false;
   await selectSession(s.id);
@@ -9782,6 +9789,7 @@ async function saveSettings() {
 function refreshEngineControl() {
   PromptCacheUi.render();
   const sel = $('engineSelect');
+  fillEngineOptions(sel);
   const badge = $('engineBadge');
   const s = State.session;
   if (!s) {
@@ -9792,6 +9800,9 @@ function refreshEngineControl() {
   // 会话顶部不再显示 CC/CD 引擎徽章；草稿仍可用下拉选择引擎
   badge.style.display = 'none';
   if (isDraftSession(s) && !s.multiGroup) {
+    if (s.engine === 'multi' && !State.settings.multiEngine?.enabled) {
+      const disabled = new Option(MultiUi.text('multiDisabled'), 'multi'); disabled.disabled = true; sel.add(disabled);
+    }
     sel.style.display = '';
     sel.value = s.engine || State.settings.defaultEngine;
     sel.title = T('engine');
@@ -9804,7 +9815,8 @@ function refreshEngineControl() {
 async function onEngineChange() {
   const s = State.session;
   if (!s || s.multiGroup || !isDraftSession(s)) return;
-  const eng = $('engineSelect').value === 'codex' ? 'codex' : 'claude';
+  const selected = $('engineSelect').value;
+  const eng = selected === 'multi' ? 'multi' : selected === 'codex' ? 'codex' : 'claude';
   // 收藏夹草稿只在前端存在，后端没有这个会话；直接改本地，等绑定目录时带过去
   if (isFavoriteDraftId(s.id)) {
     s.engine = eng;
@@ -9814,6 +9826,13 @@ async function onEngineChange() {
     return;
   }
   try {
+    if (eng === 'multi') {
+      const selection = sessionSelectionVersion;
+      const created = await api('/api/session/create', { rootId: s.rootId, name: '', engine: 'multi' });
+      if (selection !== sessionSelectionVersion) return;
+      if (s.favorite) await api('/api/session/favorite', { id: created.id, favorite: true });
+      await selectSession(created.id); await loadSessions(); return;
+    }
     const updated = await api('/api/session/engine', { id: s.id, engine: eng });
     s.engine = updated.engine;
     const inList = State.sessions.find((x) => x.id === s.id);

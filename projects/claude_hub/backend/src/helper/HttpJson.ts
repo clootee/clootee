@@ -10,7 +10,11 @@ export interface HttpJsonResult {
   raw: string;
 }
 
+const proxyAgentOptions = { keepAlive: true, proxyEnv: process.env };
 export class HttpJson {
+  // Node 24 uses the same configured proxy / NO_PROXY rules as the CLI and connectivity checks.
+  private static _httpAgent = new http.Agent(proxyAgentOptions);
+  private static _httpsAgent = new https.Agent(proxyAgentOptions);
   static get(url: string, headers: Record<string, string> = {}, timeoutMs = 15000): Promise<HttpJsonResult> {
     return this._request('GET', url, headers, undefined, timeoutMs);
   }
@@ -46,7 +50,7 @@ export class HttpJson {
         h['Content-Length'] = String(Buffer.byteLength(body));
       }
       const req = lib.request(
-        { method, hostname: u.hostname, port: u.port, path: u.pathname + u.search, headers: h },
+        { method, hostname: u.hostname, port: u.port, path: u.pathname + u.search, headers: h, agent: u.protocol === 'http:' ? this._httpAgent : this._httpsAgent },
         (res) => {
           let raw = '';
           res.on('data', (c) => (raw += c));

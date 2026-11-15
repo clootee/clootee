@@ -47,6 +47,20 @@ test('named engine infrastructure', async t => {
         assert.equal(settings.multiEngine.engines[0].config.apiKey, 'edited-fixture');
       } finally { Settings._patch = original; Object.assign(settings, before); }
     });
+    await t.test('model HTTP transport follows configured proxy settings', async () => {
+      const http=require('node:http'),{spawn}=require('node:child_process');let request;
+      const server=http.createServer((req,res)=>{request={url:req.url,auth:req.headers.authorization};res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data:[{id:'proxy-model'}]}));});
+      await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+      const proxy='http://127.0.0.1:'+server.address().port;
+      const code=`const {HttpJson}=require(${JSON.stringify(path.join(base,'helper/HttpJson'))});HttpJson.get('http://models.example.invalid/v1/models',{Authorization:'Bearer fixture-proxy'}).then(r=>{console.log(JSON.stringify({status:r.status,count:r.json.data.length}));},()=>process.exit(1));`;
+      const child=spawn(process.execPath,['-e',code],{env:{...process.env,HTTP_PROXY:proxy,http_proxy:proxy,NO_PROXY:'',no_proxy:''},stdio:['ignore','pipe','pipe']});
+      let output='';child.stdout.on('data',b=>output+=b);const timer=setTimeout(()=>child.kill('SIGKILL'),5000);
+      try {
+        const exit=await new Promise((resolve,reject)=>{child.once('exit',resolve);child.once('error',reject);});
+        assert.equal(exit,0);assert.deepEqual(JSON.parse(output),{status:200,count:1});
+        assert.equal(request.url,'http://models.example.invalid/v1/models');assert.equal(request.auth,'Bearer fixture-proxy');
+      } finally {clearTimeout(timer);child.kill();await new Promise(resolve=>server.close(resolve));}
+    });
     await t.test('model requests use native Anthropic headers and retain OpenAI-compatible authentication', async () => {
       const { HttpJson } = load('helper/HttpJson'); const original = HttpJson.get; const requests=[];
       HttpJson.get = async (url, headers) => { requests.push({url,headers}); return {status:200,json:{data:[{id:'model-fixture'}]},raw:''}; };
@@ -86,9 +100,24 @@ test('named engine infrastructure', async t => {
     });
     const rootDir = path.join(temp, 'project'); fs.mkdirSync(rootDir); fs.writeFileSync(path.join(rootDir, 'claude.md'), 'Root Claude rule'); fs.writeFileSync(path.join(rootDir, 'agents.md'), 'Root agent rule');
     const root = RootManager.addRoot('Project', rootDir);
+    await t.test('enabled capability never converts explicitly single or legacy sessions', () => {
+      const claude = MultiEngine.create(root.id,'','claude');
+      const codex = MultiEngine.create(root.id,'','codex');
+      const legacy = MultiEngine.create(root.id,'');
+      for (const s of [claude,codex,legacy]) { assert.equal(s.multiGroup,undefined);assert.equal(s.rootId,root.id); }
+      assert.equal(claude.engine,'claude');assert.equal(codex.engine,'codex');
+      assert.equal(fs.existsSync(path.join(rootDir,'divide')),false);
+      const tick=TaskQueue._tick;TaskQueue._tick=()=>{};
+      try { assert.equal(MultiEngine.submit(codex.id,['Only Codex']).length,1); } finally { TaskQueue._tick=tick; }
+      settings.multiEngine.enabled=false;
+      assert.throws(()=>MultiEngine.create(root.id,'','multi'),/Enable multiple engines/);
+      settings.multiEngine.enabled=true;
+      assert.equal(SessionManager.getSession(codex.id).engine,'codex');
+      assert.deepEqual(SessionManager.getSession(codex.id).tasks.map(t=>t.prompt),['Only Codex']);
+    });
     let first, members;
     await t.test('creates three isolated directories, copies case variants and applies shared prompts', () => {
-      first = MultiEngine.create(root.id, '', 'claude'); members = MultiEngine.members(first.id);
+      first = MultiEngine.create(root.id, '', 'multi'); members = MultiEngine.members(first.id);
       assert.equal(members.length, 3);
       assert.throws(() => SessionManager.setEngine(first.id, 'claude'), /engine is fixed/); assert.equal(new Set(members.map(s => s.id)).size, 3);
       assert.deepEqual(members.map(s => s.multiName), entries.map(e => e.name));
@@ -183,7 +212,7 @@ test('named engine infrastructure', async t => {
     await t.test('new groups reuse initial directories and preserve existing files', () => {
       settings.multiEngine = { enabled: true, engines: entries };
       const marker = path.join(rootDir, 'divide', 'codex_one', 'work.txt'); fs.writeFileSync(marker, 'existing work');
-      const next = MultiEngine.create(members[0].rootId, '', 'codex');
+      const next = MultiEngine.create(members[0].rootId, '', 'multi');
       assert.equal(RootManager.getRoot(next.rootId).path, path.join(rootDir, 'divide', 'codex_one'));
       assert.equal(fs.readFileSync(marker, 'utf8'), 'existing work');
       assert.notEqual(next.multiGroup, first.multiGroup);
@@ -199,7 +228,7 @@ test('named engine infrastructure', async t => {
       settings.multiEngine = { enabled: true, engines: entries };
       const unsafe = path.join(temp, 'unsafe'); fs.mkdirSync(unsafe); fs.symlinkSync(rootDir, path.join(unsafe, 'divide'));
       const r = RootManager.addRoot('Unsafe', unsafe);
-      assert.throws(() => MultiEngine.create(r.id, '', 'codex'), /Unsafe divide directory/);
+      assert.throws(() => MultiEngine.create(r.id, '', 'multi'), /Unsafe divide directory/);
     });
   } finally { fs.rmSync(temp, { recursive: true, force: true }); }
 });
