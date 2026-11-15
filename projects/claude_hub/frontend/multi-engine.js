@@ -45,6 +45,7 @@ const MultiUi = {
   },
   sessionMode(session) { return session?.multiGroup ? 'multi' : session?.engine; },
   chooseSessionEngine() {
+    if (!State.settings.multiEngine?.enabled) return Promise.resolve(State.settings.defaultEngine === 'codex' ? 'codex' : 'claude');
     if (this.enginePickerOpen) return Promise.resolve(null);
     this.enginePickerOpen = true;
     const focus = document.activeElement, overflow = document.body.style.overflow;
