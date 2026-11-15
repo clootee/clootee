@@ -5,6 +5,7 @@ const MultiUi = {
       title: ['多引擎', 'Multiple engines'], add: ['添加引擎', 'Add engine'], remove: ['移除', 'Remove'],
       intro: ['让多个引擎同时处理同一需求。', 'Let multiple engines work on the same request.'],
       details: ['了解详情', 'Learn more'],
+      loadingConfig: ['正在带入已保存的配置…', 'Loading saved configuration…'],
       note: ['开启后，新会话会同时向每个引擎发送需求，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'New sessions send each request to all engines in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
       name: ['英文名称', 'English name'], nameNote: ['字母开头，仅英文字母、数字、下划线，最多40字符，名称不能重复。', 'Start with a letter; use letters, numbers and underscores, up to 40 characters. Names must be unique.'],
       engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型 ID', 'Model ID'], base: ['自定义 Base URL', 'Custom Base URL'],
@@ -16,6 +17,7 @@ const MultiUi = {
   },
   rows: [], members: [], timer: null, request: 0,
   fill() {
+    this.savedConfig = null;
     const host = $('multiEngineSettings');
     host.replaceChildren();
     host.setAttribute('aria-label', this.text('title'));
@@ -32,7 +34,16 @@ const MultiUi = {
     const entries = State.settings.multiEngine?.engines || [];
     entries.forEach(e => this.addRow(e));
     const add = document.createElement('button'); add.type = 'button'; add.className = 'btn'; add.textContent = this.text('add');
-    add.onclick = () => this.addRow(); host.append(add);
+    add.onclick = async () => {
+      add.disabled = true; result.textContent = this.text('loadingConfig');
+      try {
+        const saved = await this.savedConfigurations();
+        if (!add.isConnected) return;
+        const engine = State.settings.defaultEngine === 'claude' ? 'claude' : 'codex';
+        this.addRow({ engine, config: this.currentConfiguration(engine, saved) });
+        result.textContent = '';
+      } catch (e) { result.textContent = e.message; } finally { add.disabled = false; }
+    }; host.append(add);
     const save = document.createElement('button'); save.type = 'button'; save.className = 'btn'; save.textContent = this.text('save');
     const result = document.createElement('div'); result.className = 'sx-note'; result.setAttribute('role', 'status');
     save.onclick = async () => {
@@ -58,6 +69,24 @@ const MultiUi = {
     };
     check.onchange = visibility; visibility();
   },
+  savedConfigurations() {
+    if (!this.savedConfig) {
+      this.savedConfig = Promise.all([
+        api('/api/engine/config'),
+        api('/api/engine/slots?engine=claude'),
+        api('/api/engine/slots?engine=codex'),
+      ]).then(([current, claude, codex]) => ({ current, slots: { claude: claude.slots || {}, codex: codex.slots || {} } }))
+        .catch(error => { this.savedConfig = null; throw error; });
+    }
+    return this.savedConfig;
+  },
+  currentConfiguration(engine, saved) {
+    if (typeof EngineLoaded !== 'undefined' && EngineLoaded[engine]) {
+      const ui = providerUi(engine);
+      return { provider: ui.select.value, apiKey: ui.key.value, baseUrl: ui.base.value, model: modelValue(engine), effort: ui.effort?.value || '' };
+    }
+    return saved.current[engine];
+  },
   addRow(entry) {
     const parent = $('multiEngineRows'); if (parent.children.length >= 10) return;
     const card = document.createElement('fieldset'); card.className = 'multi-engine-card';
@@ -76,13 +105,13 @@ const MultiUi = {
     };
     const engine = select('engine'); engine.add(new Option('Claude Code', 'claude')); engine.add(new Option('Codex', 'codex')); engine.value = entry?.engine || 'codex';
     const provider = select('provider');
-    const populate = () => {
-      const previous = provider.value || entry?.config?.provider || 'official';
+    const populate = (wanted) => {
+      const previous = wanted || provider.value || entry?.config?.provider || 'official';
       provider.replaceChildren();
       const source = $(engine.value + 'ProviderSelect');
       for (const option of source.options) provider.add(new Option(option.textContent, option.value));
+      if (!Array.from(provider.options).some(o => o.value === previous)) provider.add(new Option(previous, previous));
       provider.value = previous;
-      if (!provider.value) provider.value = 'official';
       update();
     };
     input('key', 'password').value = entry?.config?.apiKey || '';
@@ -94,7 +123,38 @@ const MultiUi = {
       fields.key.required = provider.value !== 'official'; fields.base.required = provider.value === 'custom';
       fields.model.required = provider.value !== 'official';
     };
-    engine.onchange = populate; provider.onchange = update; populate();
+    let currentEngine = engine.value;
+    let currentProvider = entry?.config?.provider || 'official';
+    const drafts = new Map();
+    const lastProviders = new Map([[currentEngine, currentProvider]]);
+    const status = document.createElement('div'); status.className = 'sx-note'; status.setAttribute('role', 'status');
+    const readConfig = () => ({ provider: currentProvider, apiKey: fields.key.value, baseUrl: fields.base.value, model: fields.model.value, effort: card.multiEffort || '' });
+    const change = async (engineChanged) => {
+      drafts.set(currentEngine + ':' + currentProvider, readConfig());
+      const targetEngine = engine.value;
+      const targetProvider = provider.value;
+      card.disabled = true; card.dataset.loading = 'true'; status.textContent = this.text('loadingConfig');
+      try {
+        const saved = await this.savedConfigurations();
+        if (!card.isConnected) return;
+        const current = this.currentConfiguration(targetEngine, saved);
+        const wanted = engineChanged ? lastProviders.get(targetEngine) || current.provider : targetProvider;
+        const config = drafts.get(targetEngine + ':' + wanted)
+          || (current.provider === wanted ? current : saved.slots[targetEngine][wanted])
+          || {};
+        currentEngine = targetEngine; currentProvider = wanted; lastProviders.set(targetEngine, wanted);
+        populate(wanted);
+        fields.key.value = config.apiKey || '';
+        fields.base.value = config.baseUrl || '';
+        fields.model.value = config.model || '';
+        card.multiEffort = config.effort || '';
+        status.textContent = '';
+      } catch (e) {
+        engine.value = currentEngine; populate(currentProvider); status.textContent = e.message;
+      } finally { card.disabled = false; delete card.dataset.loading; }
+    };
+    engine.onchange = () => change(true); provider.onchange = () => change(false); populate();
+    card.append(status);
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn'; remove.textContent = this.text('remove'); remove.onclick = () => card.remove(); card.append(remove);
     card.multiFields = fields; card.multiEffort = entry?.config?.effort || ''; parent.append(card);
   },
@@ -102,6 +162,7 @@ const MultiUi = {
     const enabled = $('multiEngineEnabled').checked;
     if (!enabled) return { enabled: false, engines: State.settings.multiEngine?.engines || [] };
     const engines = Array.from($('multiEngineRows').children).map(card => {
+      if (card.dataset.loading) throw new Error(this.text('loadingConfig'));
       const f = card.multiFields;
       if (enabled) for (const el of Object.values(f)) if (!el.reportValidity()) throw new Error(this.text('nameNote'));
       return { name: f.name.value.trim(), engine: f.engine.value, config: { provider: f.provider.value, apiKey: f.key.value.trim(), baseUrl: f.base.value.trim(), model: f.model.value.trim(), effort: card.multiEffort } };
