@@ -47,6 +47,16 @@ test('named engine infrastructure', async t => {
         assert.equal(settings.multiEngine.engines[0].config.apiKey, 'edited-fixture');
       } finally { Settings._patch = original; Object.assign(settings, before); }
     });
+    await t.test('model requests use native Anthropic headers and retain OpenAI-compatible authentication', async () => {
+      const { HttpJson } = load('helper/HttpJson'); const original = HttpJson.get; const requests=[];
+      HttpJson.get = async (url, headers) => { requests.push({url,headers}); return {status:200,json:{data:[{id:'model-fixture'}]},raw:''}; };
+      try {
+        assert.deepEqual(await EngineConfig._fetchModels('https://api.anthropic.com/v1/models','fixture-native'),['model-fixture']);
+        assert.deepEqual(requests[0].headers,{'x-api-key':'fixture-native','anthropic-version':'2023-06-01'});
+        await EngineConfig._fetchModels('https://example.com/v1/models','fixture-compatible');
+        assert.deepEqual(requests[1].headers,{Authorization:'Bearer fixture-compatible'});
+      } finally { HttpJson.get=original; }
+    });
     await t.test('model discovery uses each instance credential without changing main provider caches', async () => {
       const { ModelManager } = load('logic_realize/ModelManager');
       const originals = { list:EngineConfig.listModels, cache:EngineConfig.setCache, catalog:ModelManager._codexCatalog };

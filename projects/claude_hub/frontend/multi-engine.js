@@ -138,7 +138,12 @@ const MultiUi = {
     input('base', 'url').value = entry?.config?.baseUrl || '';
     const modelInput = input('model'); modelInput.classList.add('multi-engine-model-input'); modelInput.setAttribute('aria-label', this.text('manualModel'));
     const choices = document.createElement('select'); choices.className = 'sx-input'; choices.setAttribute('aria-label', this.text('model'));
-    modelInput.parentElement.insertBefore(choices, modelInput); fields.modelChoice = choices;
+    const modelBox = document.createElement('div'); modelBox.className = 'multi-engine-model-box';
+    const modelHead = document.createElement('div'); modelHead.className = 'multi-engine-model-head';
+    const modelTitle = document.createElement('span'); modelTitle.className = 'multi-engine-model-title'; modelTitle.textContent = this.text('model');
+    modelHead.append(modelTitle);
+    modelInput.parentElement.replaceWith(modelBox);
+    modelBox.append(modelHead, choices, modelInput); fields.modelChoice = choices;
     const manualValue = '__clootee_manual_model__';
     const setChoices = (models, selected) => {
       card.multiModels = Array.from(new Map((models || []).map(m => typeof m === 'string' ? { id: m } : m).filter(m => m?.id).map(m => [m.id, m])).values());
@@ -156,7 +161,17 @@ const MultiUi = {
       if (!modelInput.hidden) modelInput.focus();
       else modelInput.value = choices.value;
     };
-    const fetchModels = document.createElement('button'); fetchModels.type = 'button'; fetchModels.className = 'btn'; fetchModels.textContent = this.text('fetchModels'); card.append(fetchModels);
+    const fetchModels = document.createElement('button'); fetchModels.type = 'button'; fetchModels.className = 'sx-btn multi-engine-model-fetch';
+    const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    for (const [key, value] of Object.entries({ viewBox: '0 0 24 24', width: '16', height: '16', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) icon.setAttribute(key, value);
+    const arrows = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    arrows.setAttribute('d', 'M20 11a8 8 0 0 0-14-5.3L3 9M3 4v5h5M4 13a8 8 0 0 0 14 5.3L21 15M16 15h5v5'); icon.append(arrows);
+    const fetchLabel = document.createElement('span'); fetchLabel.textContent = this.text('fetchModels');
+    fetchModels.append(icon, fetchLabel); modelHead.append(fetchModels);
+    const setFetching = (busy) => {
+      fetchModels.disabled = busy; fetchModels.classList.toggle('is-loading', busy); fetchModels.setAttribute('aria-busy', String(busy));
+      fetchLabel.textContent = this.text(busy ? 'fetchingModels' : 'fetchModels');
+    };
     const update = () => {
       fields.key.parentElement.hidden = provider.value === 'official';
       fields.base.parentElement.hidden = provider.value !== 'custom';
@@ -167,21 +182,22 @@ const MultiUi = {
     let currentProvider = entry?.config?.provider || 'official';
     const drafts = new Map();
     const lastProviders = new Map([[currentEngine, currentProvider]]);
-    const status = document.createElement('div'); status.className = 'sx-note'; status.setAttribute('role', 'status');
+    const status = document.createElement('div'); status.className = 'sx-note multi-engine-model-status'; status.setAttribute('role', 'status');
+    const say = (message, state = '') => { status.textContent = message; status.dataset.state = state; };
     let modelVersion = 0, modelController;
     const cancelModels = () => {
       modelVersion++; modelController?.abort(); delete card.dataset.modelsLoading;
-      fetchModels.disabled = false; fetchModels.textContent = this.text('fetchModels');
+      setFetching(false);
     };
     card.abortModels = cancelModels;
     const fingerprint = () => JSON.stringify([engine.value, provider.value, fields.key.value.trim(), fields.base.value.trim(), card.multiModelsUrl || '']);
     fetchModels.onclick = async () => {
       const request = { engine: engine.value, provider: provider.value, apiKey: fields.key.value.trim(), baseUrl: fields.base.value.trim(), modelsUrl: card.multiModelsUrl || '' };
-      if (request.provider !== 'official' && request.provider !== 'clootee' && !request.apiKey) { status.textContent = this.text('needKey'); return; }
-      if (request.provider === 'custom' && !request.baseUrl) { status.textContent = this.text('needBase'); return; }
+      if (request.provider !== 'official' && request.provider !== 'clootee' && !request.apiKey) { say(this.text('needKey'), 'error'); return; }
+      if (request.provider === 'custom' && !request.baseUrl) { say(this.text('needBase'), 'error'); return; }
       cancelModels(); const version = modelVersion, signature = fingerprint();
       modelController = new AbortController(); card.dataset.modelsLoading = 'true';
-      fetchModels.disabled = true; fetchModels.textContent = this.text('fetchingModels'); status.textContent = this.text('fetchingModels');
+      setFetching(true); say(this.text('fetchingModels'), 'loading');
       try {
         const response = await api('/api/engine/models', request, false, modelController.signal);
         if (version !== modelVersion || signature !== fingerprint() || !card.isConnected) return;
@@ -189,14 +205,14 @@ const MultiUi = {
         if (!models.length) throw new Error(this.text('emptyModels'));
         const selected = modelInput.value || (models.some(m => m.id === response.recommended) ? response.recommended : models[0].id);
         setChoices(models, selected);
-        status.textContent = this.text('fetchedModels').replace('{n}', card.multiModels.length);
+        say(this.text('fetchedModels').replace('{n}', card.multiModels.length), 'success');
       } catch (e) {
-        if (version === modelVersion && signature === fingerprint() && e.name !== 'AbortError') status.textContent = e.message;
+        if (version === modelVersion && signature === fingerprint() && e.name !== 'AbortError') say(e.message, 'error');
       } finally {
-        if (version === modelVersion) { delete card.dataset.modelsLoading; fetchModels.disabled = false; fetchModels.textContent = this.text('fetchModels'); }
+        if (version === modelVersion) { delete card.dataset.modelsLoading; setFetching(false); }
       }
     };
-    for (const field of [fields.key, fields.base]) field.addEventListener('input', () => { cancelModels(); setChoices([], modelInput.value); status.textContent = ''; });
+    for (const field of [fields.key, fields.base]) field.addEventListener('input', () => { cancelModels(); setChoices([], modelInput.value); say(''); });
 
     const readConfig = () => ({ provider: currentProvider, apiKey: fields.key.value, baseUrl: fields.base.value, model: fields.model.value, effort: card.multiEffort || '', modelsUrl: card.multiModelsUrl || '', models: card.multiModels || [] });
     const change = async (engineChanged) => {
@@ -204,7 +220,7 @@ const MultiUi = {
       cancelModels();
       const targetEngine = engine.value;
       const targetProvider = provider.value;
-      card.disabled = true; card.dataset.loading = 'true'; status.textContent = this.text('loadingConfig');
+      card.disabled = true; card.dataset.loading = 'true'; say(this.text('loadingConfig'), 'loading');
       try {
         const saved = await this.savedConfigurations();
         if (!card.isConnected) return;
@@ -220,15 +236,15 @@ const MultiUi = {
         card.multiModelsUrl = config.modelsUrl || '';
         setChoices(config.models || [], config.model || '');
         card.multiEffort = config.effort || '';
-        status.textContent = '';
+        say('');
       } catch (e) {
-        engine.value = currentEngine; populate(currentProvider); status.textContent = e.message;
+        engine.value = currentEngine; populate(currentProvider); say(e.message, 'error');
       } finally { card.disabled = false; delete card.dataset.loading; }
     };
     engine.onchange = () => change(true); provider.onchange = () => change(false); populate();
     card.multiModelsUrl = entry?.config?.modelsUrl || '';
     setChoices(entry?.config?.models || [], entry?.config?.model || '');
-    card.append(status);
+    modelBox.append(status);
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn'; remove.textContent = this.text('remove'); remove.onclick = () => { cancelModels(); card.remove(); }; card.append(remove);
     card.multiFields = fields; card.multiEffort = entry?.config?.effort || ''; parent.append(card);
   },
