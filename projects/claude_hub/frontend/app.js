@@ -4479,7 +4479,7 @@ async function uploadFiles(files) {
     try {
       const data = await uploadOne(file, fname, (pct) => setUpProgress(pct, fname, i, list.length));
       names.push(data.rel);
-      attachAdd(data.rel, file);
+      attachAdd(data.rel, file, data.absolutePath);
     } catch (e) {
       const msg = e && e.message ? e.message : fname;
       if (msg === '__canceled__' || Upload.canceled) break;
@@ -4495,13 +4495,14 @@ async function uploadFiles(files) {
   }
 }
 
-// ── 附件区：上传成功的文件先停在输入框上方，可预览/删除，发送时才把相对路径拼进正文 ──
+// ── 附件区：上传成功的文件先停在输入框上方，可预览/删除，发送时按会话模式选择路径拼进正文 ──
 const Attach = { items: [], seq: 0 };
-function attachAdd(rel, file) {
+function attachAdd(rel, file, absolutePath) {
   const isImg = !!(file && file.type && file.type.indexOf('image/') === 0);
   Attach.items.push({
     id: ++Attach.seq,
     rel,
+    absolutePath,
     name: rel.split('/').pop(),
     size: file ? file.size : 0,
     type: (file && file.type) || '',
@@ -4522,7 +4523,7 @@ function clearAttachments() {
   renderAttachBar();
 }
 function attachPaths() {
-  return Attach.items.map((a) => a.rel);
+  return Attach.items.map((a) => State.session?.multiGroup ? a.absolutePath : a.rel);
 }
 function fmtBytes(n) {
   if (!n) return '';

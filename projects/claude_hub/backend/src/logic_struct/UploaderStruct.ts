@@ -6,6 +6,7 @@ import { RootManager } from '../logic_realize/RootManager';
 export interface UploadResult {
   name: string;   // 最终保存的文件名（可能因防重名带后缀）
   rel: string;    // 相对根目录的路径（统一用 / 分隔，如 tmp/foo.png）
+  absolutePath: string; // 实际落盘位置，供多引擎跨工作目录引用
   sizeKb: number;
 }
 
