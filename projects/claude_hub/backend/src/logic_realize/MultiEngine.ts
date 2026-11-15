@@ -98,6 +98,7 @@ export class MultiEngine {
       for (const t of totals.slice(1)) {
         sum.usd += t.usd; sum.cny += t.cny; sum.sub += t.sub; sum.consumedMessages += t.consumedMessages;
         sum.unpriced = (sum.unpriced || 0) + (t.unpriced || 0);
+        sum.missingUsageTurns = (sum.missingUsageTurns || 0) + (t.missingUsageTurns || 0);
         for (const key of Object.keys(sum.tokens) as (keyof typeof sum.tokens)[]) sum.tokens[key] += t.tokens[key];
         for (const key of Object.keys(sum.breakdown) as (keyof typeof sum.breakdown)[]) {
           sum.breakdown[key] += t.breakdown[key]; sum.breakdownCny[key] += t.breakdownCny[key];

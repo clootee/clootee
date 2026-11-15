@@ -194,6 +194,14 @@ test('named engine infrastructure', async t => {
       ApiCost._cached('price-refresh','same-trace',()=>{reads++;return unknown;});
       ApiCost._cached('price-refresh','same-trace',()=>{reads++;return unknown;});
       assert.equal(reads,2,'unknown prices must be reconsidered after background pricing refresh');
+      const interrupted=ApiCost._compute('interrupted-fixture',fixture('gpt-6.1-sol','old-task').slice(0,1));
+      assert.equal(interrupted.turns[0].usageStatus,'missing');assert.equal(interrupted.missingUsageTurns,1);
+      const resumed=ApiCost._compute('mixed-fixture',[...fixture('gpt-6.1-sol','old-task').slice(0,1),...fixture('gpt-6.1-sol','new-task')]);
+      assert.equal(resumed.missingUsageTurns,1);assert.equal(resumed.totalUsd,2.62);
+      assert.equal(resumed.turns[1].usageStatus,'available');
+      const zero=fixture('gpt-6.1-sol','free-task');zero[1].usage={input_tokens:0,cached_input_tokens:0,output_tokens:0};
+      const free=ApiCost._compute('zero-fixture',zero);
+      assert.equal(free.totalUsd,0);assert.equal(free.turns[0].usageStatus,'available');assert.equal(free.missingUsageTurns,0);
       const sol=ApiCost._compute('sol-fixture',fixture('gpt-6.1-sol','sol-task'));
       const astra=ApiCost._compute('astra-fixture',fixture('gpt-6-astra','astra-task'));
       assert.equal(sol.totalUsd,2.62);assert.equal(astra.totalUsd,13.2);
@@ -206,6 +214,10 @@ test('named engine infrastructure', async t => {
         assert.ok(Math.abs(parent.usd-29.02)<1e-9);assert.ok(Math.abs(parent.sub-29.02)<1e-9);
         assert.equal(parent.consumedMessages,3);assert.equal(parent.tokens.input,2400000);
         assert.equal(individual[members[0].id].usd,2.62,'individual costs must stay separate from parent totals');
+        TraceStore.liveEvents=id=>({stamp:'missing-member-fixture',events:id===members[0].id?fixture('gpt-6.1-sol',id).slice(0,1):fixture('gpt-6-astra',id)});
+        const partial=MultiEngine.costTotals([first.id])[first.id];
+        assert.equal(partial.missingUsageTurns,1);assert.equal(partial.usd,26.4);
+
       } finally {TraceStore.liveEvents=live;ApiCost._cache.clear();}
     });
     await t.test('existing groups freeze names, order, models, providers and credentials across settings edits and reload', () => {

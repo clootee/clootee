@@ -370,6 +370,7 @@ const MultiUi = {
     try {
       const members = await api('/api/multi/members?sessionId=' + encodeURIComponent(id));
       if (version !== this.request || State.sessionId !== id) return;
+      ApiBill.syncMemberCosts(members);
       this.members = members; this.membersGroup = State.session.multiGroup; refreshComposerControls(); host.replaceChildren(); host.setAttribute('role', 'tablist'); host.setAttribute('aria-label', this.text('title'));
       members.forEach((m, i) => {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'multi-engine-tab'; button.setAttribute('role', 'tab');
@@ -380,7 +381,7 @@ const MultiUi = {
         const title = document.createElement('strong'); title.textContent = m.name;
         const detail = document.createElement('span'); detail.textContent = `${m.engine === 'codex' ? 'Codex' : 'Claude Code'} · ${this.text(status)}`;
         const cost = document.createElement('span'); cost.className = 'multi-engine-cost';
-        cost.textContent = m.cost?.consumedMessages ? `${m.cost.sub > 0 ? '≈' : ''}${ApiBill.money(m.cost)}${m.cost.unpriced ? ' · ' + T('apiUnpriced') : ''}` : this.text('noUsage');
+        cost.textContent = m.cost?.consumedMessages || m.cost?.missingUsageTurns || m.cost?.unpriced ? `${m.cost.sub > 0 ? '≈' : ''}${ApiBill.money(m.cost)}${m.cost.unpriced ? ' · ' + T('apiUnpriced') : ''}` : this.text('noUsage');
         cost.title = `${m.model || ''}${m.cost?.sub > 0 ? ' · ' + this.text('equivalentCost') : ''}`;
         button.append(title, detail, cost); button.onclick = () => this.switchTab(m.id);
         button.onkeydown = e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const target = e.key === 'Home' ? 0 : e.key === 'End' ? members.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + members.length) % members.length; this.switchTab(members[target].id).then(() => $('multiEngineTabs').children[target]?.focus()); } };
