@@ -46,7 +46,16 @@ const MultiUi = {
       } catch (e) { result.textContent = e.message; } finally { save.disabled = false; }
     };
     host.append(save, result);
-    const visibility = () => { rows.hidden = !check.checked; add.hidden = !check.checked; };
+    const visibility = () => {
+      const enabled = check.checked;
+      note.hidden = enabled;
+      details.hidden = !enabled;
+      details.open = enabled;
+      rows.hidden = !enabled;
+      add.hidden = !enabled;
+      save.hidden = !enabled;
+      result.hidden = !enabled;
+    };
     check.onchange = visibility; visibility();
   },
   addRow(entry) {
