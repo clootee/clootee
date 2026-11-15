@@ -154,7 +154,7 @@ export class MultiEngine {
     this.safeDir(base);
     ProjectPrompt.ensure(root.path);
     // Check every target before creating sessions; never follow directory symlinks.
-    for (const e of entries) {
+    for (const [index, e] of entries.entries()) {
       const dir = path.join(base, e.name);
       this.safeDir(dir);
       for (const filename of ['CLAUDE.md', 'AGENTS.md']) {
@@ -166,6 +166,7 @@ export class MultiEngine {
         if (!existing) fs.copyFileSync(path.join(root.path, source), target, fs.constants.COPYFILE_EXCL);
       }
       ProjectPrompt.ensure(dir);
+      this.writeIdentity(dir, index, e);
     }
     const g: Group = { id: Ids.short('multi'), rootId, members: [] };
     const sessions: Session[] = [];
@@ -183,6 +184,34 @@ export class MultiEngine {
     EventBus.broadcast({ kind: 'session', session: this.parentView(sessions[0]) });
     return SessionManager.getSession(sessions[0].id);
   }
+  // Identity is taken from the session snapshot, never from subsequently edited settings.
+  static ensureIdentity(session: Session): void {
+    const group = this.group(session); if (!group) return;
+    const index = group.members.findIndex(m => m.rootId === session.rootId);
+    if (index < 0) throw new Error('Multi-engine member unavailable');
+    this.writeIdentity(RootManager.getRoot(session.rootId).path, index, group.members[index]);
+  }
+  private static writeIdentity(dir: string, index: number, entry: MultiEngineEntry): void {
+    this.safeDir(dir);
+    const start = '<!-- clootee:engine-identity:start -->';
+    const end = '<!-- clootee:engine-identity:end -->';
+    const block = `${start}\n## Multi-engine identity\n- Engine index (zero-based / 引擎编号，从 0 开始): ${index}\n- Engine name / 引擎名称: ${entry.name}\n- Engine type: ${entry.engine === 'codex' ? 'Codex' : 'Claude Code'}\nWhen separate addresses are requested, include your engine index in the address to distinguish it from the other engines.\n${end}`;
+    for (const filename of ['CLAUDE.md', 'AGENTS.md']) {
+      const matches = fs.readdirSync(dir).filter(n => n.toLowerCase() === filename.toLowerCase());
+      for (const name of matches.length ? matches : [filename]) {
+        const file = path.join(dir, name);
+        if (fs.existsSync(file) && !fs.lstatSync(file).isFile()) throw new Error(`Unsafe instruction file: ${name}`);
+        const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+        const at = current.indexOf(start), to = current.indexOf(end, at + start.length);
+        const next = at >= 0 && to >= at ? current.slice(0, at) + block + current.slice(to + end.length)
+          : `${current.replace(/\s+$/, '')}${current.trim() ? '\n\n' : ''}${block}\n`;
+        if (next !== current) {
+          const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | (fs.constants.O_NOFOLLOW || 0), 0o644);
+          try { fs.writeFileSync(fd, next, 'utf8'); } finally { fs.closeSync(fd); }
+        }
+      }
+    }
+  }
   private static safeDir(dir: string): void {
     if (fs.existsSync(dir)) {
       const stat = fs.lstatSync(dir);
@@ -196,6 +225,7 @@ export class MultiEngine {
       const full = SessionManager.getSessionFull(s.id);
       SessionLimit.assertCapacity(SessionLimit.status(full, full.messages, Settings.get().costOptimization), prompts.length);
     }
+    for (const s of members) this.ensureIdentity(s);
     return members.flatMap(s => TaskQueue.addTasks(s.id, prompts, false, s.id === sessionId ? approvals : []));
   }
   static members(sessionId: string): Session[] {

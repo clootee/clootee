@@ -193,6 +193,7 @@ export class TaskQueueStruct {
     CostOptimizer.consume(task.costApproval);
     const root = RootManager.getRoot(session.rootId);
     this._ensureProjectPrompt(root.path);
+    MultiEngine.ensureIdentity(session);
 
     // 轨迹：记录任务起点（含完整 prompt 与工作目录），后续引擎事件都挂在这个 taskId 下
     TraceStore.record(this._traceSessionId(session.id), {
