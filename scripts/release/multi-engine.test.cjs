@@ -136,6 +136,20 @@ test('named engine infrastructure', async t => {
       });
       assert.equal(fs.statSync(path.join(temp, 'multi_engine_groups.json')).mode & 0o777, 0o600);
     });
+    await t.test('uploads from every engine share the parent tmp and keep single-engine uploads local', () => {
+      const { Uploader } = load('logic_realize/Uploader');
+      for (const [index, member] of members.entries()) {
+        const result = Uploader.save(member.id, 'shared.txt', Buffer.from('engine-' + index));
+        assert.equal(path.dirname(result.absolutePath), path.join(rootDir, 'tmp'));
+        assert.equal(fs.readFileSync(result.absolutePath, 'utf8'), 'engine-' + index);
+        assert.equal(result.rel, 'tmp/' + result.name);
+        assert.equal(fs.existsSync(path.join(RootManager.getRoot(member.rootId).path, 'tmp', result.name)), false);
+      }
+      assert.equal(fs.readFileSync(path.join(rootDir, 'tmp', 'shared.txt'), 'utf8'), 'engine-0');
+      const single = SessionManager.createSession(members[0].rootId, '', 'claude');
+      const local = Uploader.save(single.id, 'local.txt', Buffer.from('single'));
+      assert.equal(path.dirname(local.absolutePath), path.join(RootManager.getRoot(single.rootId).path, 'tmp'));
+    });
     await t.test('parent listing hides child sessions and directories before pagination in every scope', async () => {
       const { SessionList } = load('logic_realize/SessionList');
       const catalog = SessionList._catalog; SessionList._catalog = async () => [];
