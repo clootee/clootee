@@ -6,6 +6,10 @@ const MultiUi = {
       details: ['了解详情', 'Learn more'],
       confirmRemoveGroup: ['删除此父会话及其全部引擎子会话？', 'Delete this parent session and all its engine sessions?'],
       chooseSessionEngine: ['选择本次会话的引擎', 'Choose an engine for this session'],
+      chooseDelivery: ['选择发送范围', 'Choose recipients'],
+      sendAll: ['发送给所有引擎', 'Send to all engines'],
+      sendCurrent: ['仅发送给当前引擎', 'Send only to current engine'],
+      sendAllNote: ['所有引擎同时处理本次消息', 'All engines process this message in parallel'],
       singleSession: ['单引擎会话', 'Single-engine session'],
       multiDisabled: ['多引擎（已关闭）', 'Multiple engines (disabled)'],
       multiSession: ['并行运行 {n} 个引擎', 'Run {n} engines in parallel'],
@@ -18,12 +22,12 @@ const MultiUi = {
 
       toggleFailed: ['开关未保存，请重新勾选重试。', 'The switch was not saved. Toggle it again to retry.'],
       loadingConfig: ['正在带入已保存的配置…', 'Loading saved configuration…'],
-      note: ['开启后，新建会话可选择「多引擎」；选择后每次需求会同时发给各个引擎，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'When enabled, new sessions can choose Multiple engines to send each request to all engines in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
+      note: ['开启后，新建会话可选择「多引擎」；选择后每次发送可选择全部或当前引擎，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'When enabled, new sessions can choose Multiple engines to choose all engines or the current engine for each message in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
       name: ['英文名称', 'English name'], nameNote: ['字母开头，仅英文字母、数字、下划线，最多40字符，名称不能重复。', 'Start with a letter; use letters, numbers and underscores, up to 40 characters. Names must be unique.'],
       engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型', 'Model'], base: ['自定义 Base URL', 'Custom Base URL'],
       key: ['API Key', 'API Key'], saving: ['保存中…', 'Saving…'],
       running: ['工作中', 'Working'], pending: ['等待中', 'Waiting'], paused: ['已暂停', 'Paused'], done: ['已完成', 'Done'], error: ['失败', 'Failed'], idle: ['待命', 'Ready'],
-      broadcast: ['每次发送将分发给所有引擎', 'Each message is sent to all engines'], retry: ['重试加载引擎', 'Retry loading engines'], loading: ['正在加载引擎…', 'Loading engines…'],
+      broadcast: ['每次发送时选择全部或当前引擎', 'Choose all engines or the current engine for each message'], retry: ['重试加载引擎', 'Retry loading engines'], loading: ['正在加载引擎…', 'Loading engines…'],
     };
     return copy[key]?.[LANG === 'en' ? 1 : 0] || key;
   },
@@ -76,6 +80,37 @@ const MultiUi = {
         resolve(choice);
       }, { once: true });
       dialog.showModal(); preferred?.focus();
+    });
+  },
+  chooseDelivery() {
+    if (!State.session?.multiGroup) return Promise.resolve('current');
+    if (this.deliveryPickerOpen) return Promise.resolve(null);
+    this.deliveryPickerOpen = true;
+    const focus = document.activeElement, overflow = document.body.style.overflow;
+    const dialog = document.createElement('dialog'); dialog.className = 'session-engine-picker'; dialog.id = 'multiDeliveryPicker';
+    dialog.setAttribute('aria-labelledby', 'multiDeliveryTitle');
+    const title = document.createElement('h2'); title.id = 'multiDeliveryTitle'; title.textContent = this.text('chooseDelivery'); dialog.append(title);
+    const list = document.createElement('div'); list.className = 'session-engine-choices'; dialog.append(list);
+    for (const choice of [
+      { id:'all', title:this.text('sendAll'), note:this.text('sendAllNote'), mark:'M' },
+      { id:'current', title:this.text('sendCurrent'), note:State.session.multiName || (State.session.engine === 'codex' ? 'Codex' : 'Claude Code'), mark:'1' },
+    ]) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'session-engine-choice'; button.dataset.scope = choice.id;
+      const mark = document.createElement('span'); mark.className = 'session-engine-mark'; mark.textContent = choice.mark; mark.setAttribute('aria-hidden','true');
+      const copy = document.createElement('span'); copy.className = 'session-engine-choice-copy';
+      const name = document.createElement('strong'); name.textContent = choice.title;
+      const note = document.createElement('span'); note.textContent = choice.note; copy.append(name,note); button.append(mark,copy);
+      button.onclick = () => dialog.close(choice.id); list.append(button);
+    }
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'sx-btn session-engine-cancel'; cancel.textContent = T('cancel'); cancel.onclick = () => dialog.close(); dialog.append(cancel);
+    document.body.append(dialog); document.body.style.overflow = 'hidden';
+    return new Promise(resolve => {
+      dialog.addEventListener('close', () => {
+        const scope = ['all','current'].includes(dialog.returnValue) ? dialog.returnValue : null;
+        dialog.remove(); this.deliveryPickerOpen = false; document.body.style.overflow = overflow;
+        if (focus?.isConnected) focus.focus(); resolve(scope);
+      }, { once:true });
+      dialog.showModal();
     });
   },
   rows: [], members: [], timer: null, request: 0,
@@ -359,8 +394,8 @@ const MultiUi = {
     }
     if (State.sessionId === id) await loadSessions();
   },
-  async ensureEngines() {
-    if (!State.session?.multiGroup) return EngineRecovery.ensure(State.session?.engine || State.settings.defaultEngine);
+  async ensureEngines(scope = 'all') {
+    if (scope === 'current' || !State.session?.multiGroup) return EngineRecovery.ensure(State.session?.engine || State.settings.defaultEngine);
     const members = await api('/api/multi/members?sessionId=' + encodeURIComponent(State.sessionId));
     for (const engine of new Set(members.map(m => m.engine))) if (!(await EngineRecovery.ensure(engine))) return false;
     return true;

@@ -201,6 +201,16 @@ test('named engine infrastructure', async t => {
         const single = MultiEngine.create(root.id, '', 'claude'); assert.equal(MultiEngine.members(single.id).length, 1);
       } finally { TaskQueue._tick = original; }
     });
+    await t.test('delivery scope targets only the selected engine or explicitly fans out', () => {
+      const tick=TaskQueue._tick; TaskQueue._tick=()=>{};
+      try {
+        const before=members.map(s=>SessionManager.getSession(s.id).tasks.length);
+        assert.equal(MultiEngine.submit(members[1].id,['Current only'],[],'current').length,1);
+        assert.deepEqual(members.map(s=>SessionManager.getSession(s.id).tasks.length),before.map((n,i)=>n+(i===1?1:0)));
+        assert.equal(MultiEngine.submit(members[2].id,['Everyone'],[],'all').length,3);
+        assert.throws(()=>MultiEngine.submit(first.id,['Invalid'],[],'unknown'),/Invalid delivery scope/);
+      } finally {TaskQueue._tick=tick;}
+    });
     await t.test('capacity failure prevents partial submission to the other engines', () => {
       const original = SessionManager.getSessionFull;
       const before = members.map(s => SessionManager.getSession(s.id).tasks.length);
