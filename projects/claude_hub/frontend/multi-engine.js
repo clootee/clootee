@@ -9,7 +9,7 @@ const MultiUi = {
       note: ['开启后，新会话会同时向每个引擎发送需求，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'New sessions send each request to all engines in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
       name: ['英文名称', 'English name'], nameNote: ['字母开头，仅英文字母、数字、下划线，最多40字符，名称不能重复。', 'Start with a letter; use letters, numbers and underscores, up to 40 characters. Names must be unique.'],
       engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型 ID', 'Model ID'], base: ['自定义 Base URL', 'Custom Base URL'],
-      key: ['API Key', 'API Key'], saved: ['已保存', 'Saved'], saving: ['保存中…', 'Saving…'], save: ['保存 Key 和模型配置', 'Save keys and models'],
+      key: ['API Key', 'API Key'], saving: ['保存中…', 'Saving…'],
       running: ['工作中', 'Working'], pending: ['等待中', 'Waiting'], paused: ['已暂停', 'Paused'], done: ['已完成', 'Done'], error: ['失败', 'Failed'], idle: ['待命', 'Ready'],
       broadcast: ['每次发送将分发给所有引擎', 'Each message is sent to all engines'], retry: ['重试加载引擎', 'Retry loading engines'], loading: ['正在加载引擎…', 'Loading engines…'],
     };
@@ -44,29 +44,20 @@ const MultiUi = {
         result.textContent = '';
       } catch (e) { result.textContent = e.message; } finally { add.disabled = false; }
     }; host.append(add);
-    const save = document.createElement('button'); save.type = 'button'; save.className = 'btn'; save.textContent = this.text('save');
     const result = document.createElement('div'); result.className = 'sx-note'; result.setAttribute('role', 'status');
-    save.onclick = async () => {
-      save.disabled = true; result.textContent = this.text('saving');
-      try {
-        await this.saveConfiguration();
-        result.textContent = this.text('saved');
-      } catch (e) { result.textContent = e.message; } finally { save.disabled = false; }
-    };
-    host.append(save, result);
+    host.append(result);
     const visibility = () => {
       const enabled = check.checked;
       details.hidden = !enabled;
       details.open = enabled;
       rows.hidden = !enabled;
       add.hidden = !enabled;
-      save.hidden = !enabled;
       result.hidden = !enabled;
     };
     check.onchange = async () => {
       const enabled = check.checked;
       const previous = !!State.settings.multiEngine?.enabled;
-      visibility(); check.disabled = true; save.disabled = true;
+      visibility(); check.disabled = true;
       toggleStatus.textContent = this.text('saving'); toggleStatus.hidden = false;
       const pending = api('/api/settings', { multiEngine: { enabled } }).then(saved => {
         State.settings.multiEngine = { ...(State.settings.multiEngine || { engines: [] }), enabled: saved.multiEngine.enabled };
@@ -77,7 +68,7 @@ const MultiUi = {
         check.checked = previous; visibility();
         toggleStatus.textContent = this.text('toggleFailed') + ' ' + error.message;
         return false;
-      }).finally(() => { check.disabled = false; save.disabled = false; });
+      }).finally(() => { check.disabled = false; });
       this.pendingToggle = pending;
       await pending;
       if (this.pendingToggle === pending) this.pendingToggle = null;
