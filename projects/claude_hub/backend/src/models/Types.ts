@@ -6,6 +6,8 @@ export interface RootLink {
 }
 
 export interface Root {
+  multiParentRootId?: string;
+  multiChildRootIds?: string[];
   quickStartRequestId?: string; // 新手自动创建请求：断线重试时复用该请求已建的目录
   id: string;
   name: string;
@@ -207,6 +209,10 @@ export interface MultiEngineEntry {
 }
 
 export interface Session {
+  multiRootId?: string;
+  multiParentId?: string;
+  multiParent?: boolean;
+  multiSessionIds?: string[];
   multiGroup?: string;
   multiName?: string;
   costHelper?: { model: string; cache: '1h' | '5m' | 'off' };

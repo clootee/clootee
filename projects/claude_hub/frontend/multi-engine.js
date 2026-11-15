@@ -4,6 +4,7 @@ const MultiUi = {
     const copy = {
       title: ['多引擎', 'Multiple engines'], add: ['添加引擎', 'Add engine'], remove: ['移除', 'Remove'],
       details: ['了解详情', 'Learn more'],
+      confirmRemoveGroup: ['删除此父会话及其全部引擎子会话？', 'Delete this parent session and all its engine sessions?'],
       chooseSessionEngine: ['选择本次会话的引擎', 'Choose an engine for this session'],
       singleSession: ['单引擎会话', 'Single-engine session'],
       multiDisabled: ['多引擎（已关闭）', 'Multiple engines (disabled)'],
@@ -25,6 +26,18 @@ const MultiUi = {
       broadcast: ['每次发送将分发给所有引擎', 'Each message is sent to all engines'], retry: ['重试加载引擎', 'Retry loading engines'], loading: ['正在加载引擎…', 'Loading engines…'],
     };
     return copy[key]?.[LANG === 'en' ? 1 : 0] || key;
+  },
+  displayRoot(session) {
+    return session?.multiRootId || State.roots.find(r => r.multiChildRootIds?.includes(session?.rootId))?.id || session?.rootId;
+  },
+  isSelected(row) { return row.id === State.sessionId || (!!row.multiGroup && row.multiGroup === State.session?.multiGroup); },
+  sessionTarget(row) { return row.multiGroup ? this.activeTabs?.get(row.multiGroup) || row.id : row.id; },
+  knowsMember(id) {
+    return this.members.some(m => m.id === id) || State.sessions.some(s => s.multiParent && (s.multiSessionIds || []).includes(id));
+  },
+  scheduleList() {
+    clearTimeout(this.listTimer);
+    this.listTimer = setTimeout(() => loadSessions().catch(console.warn), 200);
   },
   sessionMode(session) { return session?.multiGroup ? 'multi' : session?.engine; },
   chooseSessionEngine() {
@@ -319,7 +332,7 @@ const MultiUi = {
     try {
       const members = await api('/api/multi/members?sessionId=' + encodeURIComponent(id));
       if (version !== this.request || State.sessionId !== id) return;
-      this.members = members; host.replaceChildren(); host.setAttribute('role', 'tablist'); host.setAttribute('aria-label', this.text('title'));
+      this.members = members; this.membersGroup = State.session.multiGroup; refreshComposerControls(); host.replaceChildren(); host.setAttribute('role', 'tablist'); host.setAttribute('aria-label', this.text('title'));
       members.forEach((m, i) => {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'multi-engine-tab'; button.setAttribute('role', 'tab');
         const selected = m.id === id || (m.id.split(':')[0] === State.session?.rootId);
@@ -340,6 +353,10 @@ const MultiUi = {
   },
   async switchTab(id) {
     await selectSession(id);
+    if (State.sessionId === id && State.session?.multiGroup) {
+      if (!this.activeTabs) this.activeTabs = new Map();
+      this.activeTabs.set(State.session.multiGroup,id);
+    }
     if (State.sessionId === id) await loadSessions();
   },
   async ensureEngines() {
