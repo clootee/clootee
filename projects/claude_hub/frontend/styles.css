@@ -3563,3 +3563,5 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 
 #multiEngineSettings .multi-engine-toggle { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 #multiEngineSettings .multi-engine-toggle input { width: 18px; height: 18px; margin: 0; flex: 0 0 18px; }
+
+.multi-engine-model-input { margin-top: 6px; }

@@ -8,13 +8,14 @@ import { JsonStore } from '../helper/JsonStore';
 import { MultiEngineSettings } from '../helper/MultiEngineSettings';
 import { Paths } from '../paths';
 import { Ids } from '../helper/Ids';
-import { Engine, MultiEngineEntry, Session } from '../models/Types';
+import { Engine, EngineProviderConfig, MultiEngineEntry, Session } from '../models/Types';
 import { Settings } from './Settings';
 import { SessionManager } from './SessionManager';
 import { RootManager } from './RootManager';
 import { ProjectPrompt } from './ProjectPrompt';
 import { TaskQueue } from './TaskQueue';
 import { SessionLimit } from '../helper/SessionLimit';
+import { ModelManager } from './ModelManager';
 import { EngineConfig } from './EngineConfig';
 
 interface Member extends MultiEngineEntry { rootId: string; sessionId: string }
@@ -22,6 +23,12 @@ interface Group { id: string; rootId: string; members: Member[] }
 export class MultiEngine {
   private static file = path.join(Paths.DATA_ROOT, 'multi_engine_groups.json');
   private static groups(): Group[] { return JsonStore.read<Group[]>(this.file, []); }
+  static async models(engine: Engine, config: Pick<EngineProviderConfig, 'provider' | 'apiKey' | 'baseUrl' | 'modelsUrl'>) {
+    if (engine !== 'claude' && engine !== 'codex') throw new Error('Invalid engine');
+    if (config.provider === 'official') return { models: await ModelManager.officialModels(engine) };
+    const ids = await EngineConfig.listModels(config.provider, config.apiKey, config.baseUrl, config.modelsUrl);
+    return { models: ids.map(id => ({ id, source: 'api' as const })), recommended: EngineConfig.pickDefaultModel(config.provider, ids) };
+  }
   static parentRoot(rootId: string): string {
     return this.groups().find(g => g.members.some(m => m.rootId === rootId))?.rootId || rootId;
   }
