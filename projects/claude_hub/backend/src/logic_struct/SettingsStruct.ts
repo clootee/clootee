@@ -202,9 +202,20 @@ export class SettingsStruct {
   }
 
   // 批量更新（前端设置面板）；只接受已知字段
-  static update(patch: Partial<AppSettings>): AppSettings {
+  static update(patch: Omit<Partial<AppSettings>, 'multiEngine'> & { multiEngine?: Partial<AppSettings['multiEngine']> }): AppSettings {
     const next: Partial<AppSettings> = {};
-    if (patch.multiEngine !== undefined) next.multiEngine = MultiEngineSettings.validate(patch.multiEngine);
+    if (patch.multiEngine !== undefined) {
+      const incoming = patch.multiEngine;
+      if (!incoming || typeof incoming !== 'object') throw new Error('Invalid multi-engine settings');
+      const current = this.get().multiEngine;
+      if (incoming.engines === undefined) {
+        if (typeof incoming.enabled !== 'boolean') throw new Error('Invalid multi-engine toggle');
+        // The switch is independent of configuration drafts, including first-time setup.
+        next.multiEngine = { enabled: incoming.enabled, engines: current.engines };
+      } else {
+        next.multiEngine = MultiEngineSettings.validate({ enabled: incoming.enabled ?? current.enabled, engines: incoming.engines });
+      }
+    }
     if (patch.costOptimization !== undefined) next.costOptimization = CostPolicy.sanitize(patch.costOptimization);
     if (patch.claudePromptCache !== undefined) {
       if (!PromptCache.valid(patch.claudePromptCache)) throw new Error('Invalid Claude prompt cache mode');

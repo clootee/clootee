@@ -28,6 +28,25 @@ EventBus.broadcast = () => {};
 
 test('named engine infrastructure', async t => {
   try {
+    await t.test('toggle and credential updates persist independently, including initial setup', () => {
+      const before = structuredClone(settings), original = Settings._patch;
+      Settings._patch = patch => Object.assign(settings, patch);
+      try {
+        settings.multiEngine = { enabled:false, engines:[] };
+        assert.equal(Settings.update({multiEngine:{enabled:true}}).multiEngine.enabled, true);
+        assert.deepEqual(settings.multiEngine.engines, []);
+        assert.throws(() => Settings.update({multiEngine:{engines:[entries[0]]}}), /2–10/);
+        Settings.update({multiEngine:{engines:entries}});
+        Settings.update({multiEngine:{enabled:false}});
+        assert.deepEqual(settings.multiEngine.engines, entries);
+        const edited = structuredClone(entries); edited[0].config.apiKey = 'edited-fixture';
+        Settings.update({multiEngine:{engines:edited}});
+        assert.equal(settings.multiEngine.enabled, false);
+        assert.equal(settings.multiEngine.engines[0].config.apiKey, 'edited-fixture');
+        Settings.update({multiEngine:{enabled:true}});
+        assert.equal(settings.multiEngine.engines[0].config.apiKey, 'edited-fixture');
+      } finally { Settings._patch = original; Object.assign(settings, before); }
+    });
     await t.test('validates names, duplicate names, count and provider requirements', () => {
       assert.equal(MultiEngineSettings.validate(settings.multiEngine).engines.length, 3);
       for (const name of ['../bad','中文','bad-name','_bad','CON','a/b']) assert.throws(() => MultiEngineSettings.validate({ enabled: true, engines: [{ ...entries[0], name }, entries[1]] }));
