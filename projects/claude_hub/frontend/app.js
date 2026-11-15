@@ -6649,6 +6649,7 @@ function showMarkdownLink(link) {
     const target = document.createElement('a');
     target.className = 'ml-action ml-download'; target.textContent = T('messageLinkOpen');
     target.href = href; target.target = '_blank'; target.rel = 'noopener noreferrer'; primary.appendChild(target);
+    button(secondary, T('messageLinkCopyLink'), (btn) => copyText(href, btn, T('messageLinkCopyLink')));
   }
   button(secondary, T('messageLinkCopyText'), (btn) => copyText(link.textContent, btn, T('messageLinkCopyText')));
   dialog.append(head, detail, primary, secondary, status);
