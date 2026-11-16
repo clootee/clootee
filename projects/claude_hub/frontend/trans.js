@@ -1434,6 +1434,11 @@ const DICT = {
     en: 'File: {name}\nSize: {size}; sent by browser: {sent}\nElapsed: {seconds}s; stage: {phase}\nResponse: {status}',
     zh: '文件：{name}\n大小：{size}；浏览器已发送：{sent}\n耗时：{seconds} 秒；阶段：{phase}\n响应：{status}',
   },
+  uploadReadingFile: { en: 'reading the selected image', zh: '读取所选图片中' },
+  uploadFileReadFailed: {
+    en: 'The browser could not read the selected image; uploading has not started. Save it to your device, then select it again from Files instead of Recent/Photos. File error:',
+    zh: '浏览器无法读取所选图片，尚未开始上传。请先将图片保存到手机本地，再从“文件”中重新选择，避免使用相册或最近项目中的临时文件。文件读取错误：',
+  },
   uploadSending: { en: 'sending file', zh: '发送文件中' },
   uploadAwaitingResponse: { en: 'waiting for server confirmation', zh: '等待服务器确认' },
   uploadNoStatus: { en: 'no HTTP status received (XHR status 0)', zh: '未收到 HTTP 状态码（XHR status 0）' },

@@ -4446,12 +4446,13 @@ function uploadOne(file, fname, onProgress) {
     const started = Date.now();
     let sent = 0;
     let bodySent = false;
+    let readingFile = false;
     const mb = (n) => (n / 1024 / 1024).toFixed(2) + ' MiB';
     const fail = (reason) => {
       const values = {
         name: fname, size: mb(file.size), sent: mb(sent),
         seconds: ((Date.now() - started) / 1000).toFixed(1),
-        phase: T(bodySent ? 'uploadAwaitingResponse' : 'uploadSending'),
+        phase: T(readingFile ? 'uploadReadingFile' : (bodySent ? 'uploadAwaitingResponse' : 'uploadSending')),
         status: xhr.status ? 'HTTP ' + xhr.status : T('uploadNoStatus'),
       };
       const details = T('uploadDiagnostics').replace(/\{(\w+)\}/g, (_, key) => values[key]);
@@ -4484,7 +4485,28 @@ function uploadOne(file, fname, onProgress) {
     xhr.onerror = () => fail(T(navigator.onLine === false ? 'uploadOffline' : 'uploadNetworkError'));
     xhr.ontimeout = () => fail(T('uploadTimeout'));
     xhr.onabort = () => reject(new Error('__canceled__'));
-    try { xhr.send(file); } catch (e) { fail(T('uploadStartFailed') + ': ' + e.message); }
+    const prepareAndSend = async () => {
+      let body = file;
+      // Snapshot modest images before sending. Mobile photo providers can revoke/change
+      // File handles; an in-memory Blob avoids rereading that handle during transport.
+      // Larger files retain the streaming path rather than allocating hundreds of MiB.
+      if (file.type && file.type.startsWith('image/') && file.size <= 20 * 1024 * 1024) {
+        readingFile = true;
+        try {
+          const bytes = await file.arrayBuffer();
+          if (bytes.byteLength !== file.size) throw new Error('File size changed while reading');
+          body = new Blob([bytes], { type: file.type });
+        } catch (e) {
+          if (Upload.canceled) { reject(new Error('__canceled__')); return; }
+          fail(T('uploadFileReadFailed') + '\n' + (e.name || 'Error') + ': ' + e.message);
+          return;
+        }
+        readingFile = false;
+      }
+      if (Upload.canceled) { reject(new Error('__canceled__')); return; }
+      try { xhr.send(body); } catch (e) { fail(T('uploadStartFailed') + ': ' + e.message); }
+    };
+    prepareAndSend();
   });
 }
 
