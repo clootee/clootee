@@ -4443,22 +4443,48 @@ function uploadOne(file, fname, onProgress) {
         '&name=' + encodeURIComponent(fname),
     );
     xhr.setRequestHeader('x-auth-token', TOKEN);
+    const started = Date.now();
+    let sent = 0;
+    let bodySent = false;
+    const mb = (n) => (n / 1024 / 1024).toFixed(2) + ' MiB';
+    const fail = (reason) => {
+      const values = {
+        name: fname, size: mb(file.size), sent: mb(sent),
+        seconds: ((Date.now() - started) / 1000).toFixed(1),
+        phase: T(bodySent ? 'uploadAwaitingResponse' : 'uploadSending'),
+        status: xhr.status ? 'HTTP ' + xhr.status : T('uploadNoStatus'),
+      };
+      const details = T('uploadDiagnostics').replace(/\{(\w+)\}/g, (_, key) => values[key]);
+      reject(new Error(reason + '\n\n' + details));
+    };
     xhr.upload.onprogress = (e) => {
+      sent = e.loaded;
       if (e.lengthComputable) onProgress(e.loaded / e.total * 100);
     };
+    xhr.upload.onload = () => { bodySent = true; sent = file.size; };
     xhr.onload = () => {
-      if (xhr.status === 413) {
-        reject(new Error(T('uploadTooLarge')));
-        return;
-      }
       let json = null;
       try { json = JSON.parse(xhr.responseText); } catch (e) {}
-      if (!json || !json.success) reject(new Error((json && json.error) || ('HTTP ' + xhr.status)));
-      else resolve(json.data);
+      if (xhr.status >= 200 && xhr.status < 300 && json && json.success) {
+        resolve(json.data);
+        return;
+      }
+      let reason = T(xhr.status === 413 ? 'uploadTooLarge' : 'uploadRejected');
+      if (json && json.error) {
+        reason += '\n' + (typeof json.error === 'string' ? json.error : JSON.stringify(json.error)).slice(0, 800);
+      } else if (xhr.responseText) {
+        // Parse inert text only; never render a gateway error page in the app.
+        const doc = new DOMParser().parseFromString(xhr.responseText.slice(0, 16000), 'text/html');
+        doc.querySelectorAll('script, style').forEach((el) => el.remove());
+        const response = (doc.body.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 800);
+        reason += '\n' + (response || T('uploadInvalidResponse'));
+      } else reason += '\n' + T('uploadInvalidResponse');
+      fail(reason);
     };
-    xhr.onerror = () => reject(new Error('network error'));
+    xhr.onerror = () => fail(T(navigator.onLine === false ? 'uploadOffline' : 'uploadNetworkError'));
+    xhr.ontimeout = () => fail(T('uploadTimeout'));
     xhr.onabort = () => reject(new Error('__canceled__'));
-    xhr.send(file);
+    try { xhr.send(file); } catch (e) { fail(T('uploadStartFailed') + ': ' + e.message); }
   });
 }
 
