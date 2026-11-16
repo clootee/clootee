@@ -450,7 +450,13 @@
               <!-- 模型与思考强度：每个服务商各自保存一套（互不干扰）。
                    原版订阅也可以选模型与强度；换服务商 / 填好 Key 后会自动拉取并选中推荐模型 -->
               <div id="claudeModelBox">
-                <label class="sx-lbl"><span id="claudeModelLbl">模型</span> <span class="sx-tag" id="mdlClaudeProvider"></span></label>
+                <div class="multi-engine-model-head">
+                  <label class="sx-lbl"><span id="claudeModelLbl">模型</span> <span class="sx-tag" id="mdlClaudeProvider"></span></label>
+                  <button type="button" class="sx-btn multi-engine-model-fetch" id="claudeModelsBtn">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14-5.3L3 9M3 4v5h5M4 13a8 8 0 0 0 14 5.3L21 15M16 15h5v5" /></svg>
+                    <span id="claudeModelsBtnLabel">拉取模型</span>
+                  </button>
+                </div>
                 <select class="sx-input" id="claudeModelSelect"></select>
                 <!-- 自定义服务商：模型列表未必拉得到，允许直接手填（候选仍以 datalist 提示） -->
                 <input class="sx-input" id="claudeModelInput" list="claudeModelList" spellcheck="false" hidden />
@@ -473,19 +479,7 @@
                   </div>
                   <div class="sx-note" id="claudeCtxWindowNote"></div>
                 </div>
-                <div class="sx-adv">
-                  <button class="sx-adv-head" id="claudeAdvHead" type="button">
-                    <span class="sx-adv-arrow" id="claudeAdvArrow">▸</span><span id="claudeAdvLabel"></span>
-                  </button>
-                  <div class="sx-adv-body" id="claudeAdvBody" hidden>
-                    <div class="sx-row">
-                      <button class="sx-btn" id="claudeModelsBtn">重新拉取模型</button>
-                      <button class="sx-btn" id="mdlClaudeDetectBtn">检测当前模型</button>
-                      <button class="sx-btn" id="mdlClaudeListBtn">检测可用模型</button>
-                    </div>
-                    <label class="sx-chk"><input type="checkbox" id="mdlClaudeVerifyChk" /><span class="sx-chk-txt"><b id="mdlClaudeVerifyTitle">逐个真实验证可用性</b><em id="mdlClaudeVerifyDesc">每个候选发一次极小请求，较慢但更准确</em></span></label>
-                  </div>
-                </div>
+
               </div>
               <div class="sx-note" id="mdlClaudeStatus"></div>
               <div class="sx-note" id="claudeProviderStatus"></div>
@@ -526,7 +520,13 @@
                 <input class="sx-input" id="codexApiKey" type="text" placeholder="sk-…（填好后会自动检测并选一个模型）" />
               </div>
               <div id="codexModelBox">
-                <label class="sx-lbl"><span id="codexModelLbl">模型</span> <span class="sx-tag" id="mdlCodexProvider"></span></label>
+                <div class="multi-engine-model-head">
+                  <label class="sx-lbl"><span id="codexModelLbl">模型</span> <span class="sx-tag" id="mdlCodexProvider"></span></label>
+                  <button type="button" class="sx-btn multi-engine-model-fetch" id="codexModelsBtn">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14-5.3L3 9M3 4v5h5M4 13a8 8 0 0 0 14 5.3L21 15M16 15h5v5" /></svg>
+                    <span id="codexModelsBtnLabel">拉取模型</span>
+                  </button>
+                </div>
                 <select class="sx-input" id="codexModelSelect"></select>
                 <input class="sx-input" id="codexModelInput" list="codexModelList" spellcheck="false" hidden />
                 <datalist id="codexModelList"></datalist>
@@ -534,18 +534,7 @@
                 <label class="sx-lbl" id="codexEffortLbl">思考强度</label>
                 <select class="sx-input" id="codexEffortSelect"></select>
                 <div class="sx-note" id="codexEffortNote">Codex 只有低/中/高三档，选「极高/最高」会按「高」执行。</div>
-                <div class="sx-adv">
-                  <button class="sx-adv-head" id="codexAdvHead" type="button">
-                    <span class="sx-adv-arrow" id="codexAdvArrow">▸</span><span id="codexAdvLabel"></span>
-                  </button>
-                  <div class="sx-adv-body" id="codexAdvBody" hidden>
-                    <div class="sx-row">
-                      <button class="sx-btn" id="codexModelsBtn">重新拉取模型</button>
-                      <button class="sx-btn" id="mdlCodexDetectBtn">检测当前模型</button>
-                      <button class="sx-btn" id="mdlCodexListBtn">检测可用模型</button>
-                    </div>
-                  </div>
-                </div>
+
               </div>
               <div class="sx-note" id="mdlCodexStatus"></div>
               <div class="sx-note sx-pre" id="codexProviderStatus"></div>
