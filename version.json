@@ -1,10 +1,10 @@
 {
-  "version": "3.1.41",
+  "version": "3.1.42",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-15",
+  "releasedAt": "2026-11-16",
   "notesI18n": {
-    "zh": "新增独立配置的多引擎并行会话、会话内引擎切换、按次选择发送范围与费用汇总；优化设置、默认引擎和桌面交互。",
-    "en": "Add parallel multi-engine sessions with frozen configurations, engine tabs, per-message recipients and cost totals; improve settings, default engines and desktop interactions."
+    "zh": "统一引擎模型拉取按钮，优化多引擎费用明细与汇总同步，修复多引擎附件共享路径。",
+    "en": "Unify model refresh buttons, synchronize multi-engine usage details and cost totals, and fix shared attachment paths across engines."
   }
 }
