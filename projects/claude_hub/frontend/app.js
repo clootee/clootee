@@ -7612,20 +7612,18 @@ function bind() {
   // 新手引导（onboard.js）
   $('onboardBack').addEventListener('click', onboardBack);
   $('onboardNext').addEventListener('click', onboardNext);
-  // 引擎板块（pane-engine）内：两个引擎折叠块 + 各自的「高级选项」折叠
+  // 引擎板块（pane-engine）内：两个引擎折叠块
   $('engAccClaudeHead').addEventListener('click', () => toggleAcc('claude'));
   $('engAccCodexHead').addEventListener('click', () => toggleAcc('codex'));
-  $('claudeAdvHead').addEventListener('click', () => toggleAdv('claude'));
-  $('codexAdvHead').addEventListener('click', () => toggleAdv('codex'));
   // 服务商 → 模型联动：换服务商即清空并自动检测选中推荐模型；Key 填完（失焦/回车）也自动补
   $('claudeProviderSelect').addEventListener('change', onClaudeProviderChange);
   $('claudeApiKey').addEventListener('change', () => onApiKeySettled('claude'));
   $('claudeApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('claude'); });
-  $('claudeModelsBtn').addEventListener('click', fetchClaudeModels);
+  $('claudeModelsBtn').addEventListener('click', () => refreshEngineModels('claude'));
   $('codexProviderSelect').addEventListener('change', () => onEngineProviderChange('codex'));
   $('codexApiKey').addEventListener('change', () => onApiKeySettled('codex'));
   $('codexApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('codex'); });
-  $('codexModelsBtn').addEventListener('click', () => fetchEngineModels('codex'));
+  $('codexModelsBtn').addEventListener('click', () => refreshEngineModels('codex'));
   // 引擎块没有自己的保存按钮了（全板块只有一个，在 footer），靠脏标记告诉用户「这块动了还没存」。
   // 「脏」只由用户操作产生：换服务商在 onEngineProviderChange 里标，Key/地址/手填模型在这里标；
   // 思考强度与原版订阅的模型下拉是即时落盘的，不算脏，故不在监听之列。
@@ -7674,10 +7672,6 @@ function bind() {
   // 思考强度：两个引擎各一个下拉，''=自动
   $('claudeEffortSelect').addEventListener('change', () => onEffortSelect('claude'));
   $('codexEffortSelect').addEventListener('change', () => onEffortSelect('codex'));
-  $('mdlClaudeDetectBtn').addEventListener('click', () => detectCurrentModel('claude'));
-  $('mdlCodexDetectBtn').addEventListener('click', () => detectCurrentModel('codex'));
-  $('mdlClaudeListBtn').addEventListener('click', () => detectAvailableModels('claude'));
-  $('mdlCodexListBtn').addEventListener('click', () => detectAvailableModels('codex'));
   $('pwChangeBtn').addEventListener('click', changePassword);
   for (const id of ['pwOld', 'pwNew', 'pwConfirm', 'lanPwOld', 'lanPwNew', 'lanPwNew2']) {
     $(id).addEventListener('input', () => setPaneNotice(null));
@@ -8472,16 +8466,10 @@ function applyEnginePaneText() {
         ? `${T('engCtxWindowNote')} ${T('engCtxWindowDefault').replace('{n}', formatCtxWindow(def))}`
         : T('engCtxWindowNote');
     }
-    $(`${engine}AdvLabel`).textContent = T('advOptions');
-    $(`${engine}ModelsBtn`).textContent = T('engRefetchModels');
+    $(`${engine}ModelsBtnLabel`).textContent = T($(`${engine}ModelsBtn`).disabled ? 'engFetchingModels' : 'engRefetchModels');
     // 引擎块没有自己的保存按钮了，统一用板块底部那个（见 saveEnginePane）
-    $(`mdl${cap}DetectBtn`).textContent = T('engDetectCurrent');
-    $(`mdl${cap}ListBtn`).textContent = T('engDetectAvailable');
     syncModelProviderTag(engine);
   }
-  // 「逐个真实验证」只有 claude 有（原版订阅没有模型列表接口，只能挨个试）
-  $('mdlClaudeVerifyTitle').textContent = T('engVerifyTitle');
-  $('mdlClaudeVerifyDesc').textContent = T('engVerifyDesc');
   // 登录卡整块都是拼出来的文案，切语言要重画（走缓存，不再拉一次 auth status）
   // （Health.loginBox 也可能指向引导页那个框，那时别拿引擎板块的可见性去判断）
   const login = providerUi('claude').login;
@@ -8537,8 +8525,6 @@ function fillEnginePane() {
   renderEngineDirty();
   $('defaultEngineSelect').value = State.settings.defaultEngine;
   $('defaultEngineNote').textContent = defaultEngineNoteText();
-  setAdvOpen('claude', false);
-  setAdvOpen('codex', false);
   // 默认展开当前默认引擎那一块，另一块收起
   const claudeFirst = State.settings.defaultEngine !== 'codex';
   setAccOpen('claude', claudeFirst);
@@ -8983,19 +8969,6 @@ async function installTool(tool, target, btn) {
   }
 }
 
-// ── 引擎折叠块内的「高级选项」（检测按钮/逐个验证），默认收起 ──
-function advUi(engine) {
-  const cap = engine === 'claude' ? 'Claude' : 'Codex';
-  return { arrow: $(`${engine}AdvArrow`), body: $(`${engine}AdvBody`), cap };
-}
-function setAdvOpen(engine, open) {
-  const u = advUi(engine);
-  u.body.hidden = !open;
-  u.arrow.textContent = open ? '▾' : '▸';
-}
-function toggleAdv(engine) {
-  setAdvOpen(engine, advUi(engine).body.hidden);
-}
 function accUi(engine) {
   const cap = engine === 'claude' ? 'Claude' : 'Codex';
   return { arrow: $(`engAcc${cap}Arrow`), body: $(`engAcc${cap}Body`), sum: $(`engAcc${cap}Sum`) };
@@ -9205,7 +9178,7 @@ async function detectCurrentModel(engine) {
 
 // 检测可用模型；结果写回候选下拉
 async function detectAvailableModels(engine) {
-  const verify = engine === 'claude' && $('mdlClaudeVerifyChk').checked;
+  const verify = engine === 'claude' && $('mdlClaudeVerifyChk')?.checked;
   setModelStatus(engine, verify ? T('mdlVerifying') : T('mdlListing'), null);
   try {
     const r = await api('/api/model/available', { engine, verify });
@@ -9613,7 +9586,23 @@ async function fetchEngineModels(engine, auto = false) {
     say(T('modelFetchFail').replace('{err}', e.message), false);
   }
 }
-function fetchClaudeModels() { return fetchEngineModels('claude'); }
+async function refreshEngineModels(engine) {
+  const button = $(`${engine}ModelsBtn`);
+  if (button.disabled) return;
+  const label = $(`${engine}ModelsBtnLabel`);
+  button.disabled = true;
+  button.classList.add('is-loading');
+  button.setAttribute('aria-busy', 'true');
+  label.textContent = T('engFetchingModels');
+  try {
+    await fetchEngineModels(engine);
+  } finally {
+    button.disabled = false;
+    button.classList.remove('is-loading');
+    button.setAttribute('aria-busy', 'false');
+    label.textContent = T('engRefetchModels');
+  }
+}
 
 // 保存一个引擎块的服务商配置。返回 null＝成功；返回 {msg}＝失败（原因同时写进块内与 footer）。
 // 由板块保存（saveEnginePane）调用，没有自己的按钮。

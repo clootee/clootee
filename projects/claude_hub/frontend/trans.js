@@ -1230,8 +1230,8 @@ const DICT = {
     zh: '服务商返回了空模型列表——请确认这个 API Key 属于该服务商且已开通模型权限。',
   },
   modelPickFirst: {
-    en: 'Could not settle on a model. Open Advanced → “Re-fetch models” and pick one, then save.',
-    zh: '没能定下模型。请展开「高级选项」→「重新拉取模型」选一个后再保存。',
+    en: 'Could not settle on a model. Click “Fetch models” next to Model and pick one, then save.',
+    zh: '没能定下模型。请点击模型旁的「拉取模型」，选一个后再保存。',
   },
   // ── AI 引擎板块：服务商 / 模型 / 思考强度（静态文案 + 运行时提示）──
   // 服务商展示名：下拉选项、模型旁的小标、折叠标题摘要三处共用同一份，避免各写各的
@@ -1333,7 +1333,8 @@ const DICT = {
     en: '1M is the largest window Claude Code accepts — the least frequent compaction.',
     zh: '1M 是 Claude Code 允许的最大窗口，压缩频率最低。',
   },
-  engRefetchModels: { en: 'Re-fetch models', zh: '重新拉取模型' },
+  engRefetchModels: { en: 'Fetch models', zh: '拉取模型' },
+  engFetchingModels: { en: 'Fetching…', zh: '拉取中…' },
   engDetectCurrent: { en: 'Detect current model', zh: '检测当前模型' },
   engDetectAvailable: { en: 'Detect available models', zh: '检测可用模型' },
   engVerifyTitle: { en: 'Verify each candidate for real', zh: '逐个真实验证可用性' },
