@@ -438,8 +438,8 @@ const DICT = {
   },
   guideMenuLearnT: { en: 'Beginner course (from zero)', zh: '小白教程（零基础）' },
   guideMenuLearnD: {
-    en: '8 chapters, quizzes, hands-on tasks — learn to get real work done with Claude Code.',
-    zh: '8 章知识点 + 测验 + 实操，一步步学会用 Claude Code 干真实工作。',
+    en: 'Learn on clootee.com: sign up or sign in to access all 9 chapters, quizzes and AI practice.',
+    zh: '前往 clootee.com，注册 / 登录后学习 9 章课程、测验和 AI 实操。',
   },
   // ── 使用指南 ──
   guideTitle: { en: '📖 Quick Start Guide', zh: '📖 使用指南' },

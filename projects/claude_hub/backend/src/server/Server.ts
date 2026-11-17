@@ -210,7 +210,6 @@ export class Server {
       this._ok(res, { providers: EngineConfig.providerList() }),
     );
     // ── Clootee 默认服务商（console.clootee.com）：一键开通 / 余额 / 用量 / 充值入口 ──
-    app.post('/api/console/tutorial/chat', (req, res) => this._wrapAsync(res, 'console.tutorial.chat', () => ConsoleAccount.tutorialChat(req.body.messages, req.body.temperature)));
     app.post('/api/console/login/code', (req,res)=>this._wrapAsync(res,'console.login.code',()=>ConsoleAccount.sendEmailCode(String(req.body.email||''),String(req.body.lang||''))));
     app.post('/api/console/login/email', (req,res)=>this._wrapAsync(res,'console.login.email',()=>ConsoleAccount.loginWithEmail(String(req.body.email||''),String(req.body.code||''),String(req.body.lang||''))));
     app.post('/api/console/login/start', (_req,res)=>this._wrapAsync(res,'console.login.start',()=>ConsoleAccount.beginLogin()));
@@ -824,8 +823,7 @@ export class Server {
       }),
     );
 
-    // 注：小白教程的 AI 小助手不在这里。MiniMax 官方接口已放行 CORS，教程页直接从浏览器调用，
-    // 后端不参与，也就没有「忘了重启就失灵」这回事。见 frontend/learn-assist.js。
+    // 小白教程由 clootee.com 托管；客户端不包含课程或教学问答接口。
 
     // 绑定失败（最常见是 EADDRINUSE：端口被别的进程、或上一个没死干净的自己占着）时，
     // 不能只在 stderr 甩一句 "address already in use"——要把占用方是谁写进生命周期日志。

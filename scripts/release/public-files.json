@@ -39,8 +39,6 @@
     "projects/claude_hub/out_end/bootstrap.bat",
     "projects/claude_hub/out_end/bootstrap.sh",
     "projects/claude_hub/out_end/bootstrap-node.ps1",
-    "projects/claude_hub/frontend/assist/README.md",
-    "projects/claude_hub/frontend/assist/docs.md",
     "scripts/node-env.bat",
     "scripts/node-env.sh",
     "scripts/build-web.cjs",

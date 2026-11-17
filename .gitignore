@@ -34,7 +34,6 @@ data/
 *.md
 !README.md
 !README_zh.md
-!projects/claude_hub/frontend/assist/docs.md
 special.md
 speical.md
 CLAUDE.md
@@ -95,3 +94,7 @@ desktop.ini
 
 # Per-installation service PID and lifecycle lock
 /run/
+
+# Course content lives in the private Clootee web service.
+/projects/claude_hub/frontend/learn*
+/projects/claude_hub/frontend/assist/

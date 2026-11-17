@@ -653,10 +653,10 @@ function closeGuideMenu() {
   const p = $('guideMenu');
   if (p && !p.hidden) p.hidden = true;
 }
-// 小白教程是独立页面，另开标签页，不打断当前会话
+// 小白教程由官网托管，注册 / 登录后学习；客户端只保留外部入口。
 function openLearnCourse() {
   closeGuideMenu();
-  window.open('learn.html', '_blank', 'noopener');
+  window.open(`https://clootee.com/learn/?lang=${currentLang() === 'zh' ? 'zh' : 'en'}`, '_blank', 'noopener,noreferrer');
 }
 
 // ── 使用指南 ──
