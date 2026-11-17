@@ -8342,11 +8342,66 @@ function startServerHealth() {
   refresh();
 }
 
+let subscriptionGeneration = 0;
+async function refreshSubscriptionUsage() {
+  const generation = ++subscriptionGeneration;
+  const box = $('subscriptionUsage');
+  const zh = T('serverHealth') === 'Linux 服务器';
+  box.querySelector('summary').textContent = zh ? '用量 · 订阅余量' : 'Usage · Subscription remaining';
+  try { box.open = localStorage.getItem('subscriptionUsageCollapsed') !== '1'; } catch {}
+  box.ontoggle = () => { try { localStorage.setItem('subscriptionUsageCollapsed', box.open ? '0' : '1'); } catch {} };
+  const grid = box.querySelector('div');
+  grid.textContent = zh ? '正在获取余量…' : 'Loading remaining usage…';
+  try {
+    const data = await api('/api/subscription/usage');
+    if (generation !== subscriptionGeneration) return;
+    grid.replaceChildren();
+    for (const account of data.accounts) {
+      const cell = document.createElement('div');
+      cell.className = 'server-health-metric';
+      const title = document.createElement('b');
+      title.textContent = account.name;
+      cell.append(title);
+      if (account.status !== 'ok') {
+        const status = document.createElement('small');
+        status.textContent = account.status === 'expired'
+          ? (zh ? '登录已过期，请重新登录' : 'Sign in again')
+          : (zh ? '暂无法获取订阅余量' : 'Subscription usage unavailable');
+        cell.append(status);
+      }
+      const labels = { five_hour: zh ? '5小时' : '5 hours', seven_day: zh ? '每周' : 'Weekly',
+        primary_window: zh ? '主要额度' : 'Primary', secondary_window: zh ? '次要额度' : 'Secondary',
+        extra_usage: zh ? '额外额度' : 'Extra usage' };
+      for (const row of account.rows) {
+        const label = labels[row.label] || row.label;
+        const text = document.createElement('small');
+        text.textContent = label + ' · ' + (zh ? '剩余 ' : '') + row.remaining.toFixed(0) + '%' + (zh ? '' : ' left');
+        const meter = document.createElement('meter');
+        meter.min = 0; meter.max = 100; meter.value = row.remaining;
+        meter.setAttribute('aria-label', text.textContent);
+        if (row.reset && Number.isFinite(Date.parse(row.reset))) {
+          text.title = (zh ? '重置时间：' : 'Resets: ') + new Date(row.reset).toLocaleString();
+        }
+        cell.append(text, meter);
+      }
+      if (account.credits !== undefined) {
+        const extra = document.createElement('small');
+        extra.textContent = (zh ? '额外积分余量：' : 'Extra credits: ') + account.credits;
+        cell.append(extra);
+      }
+      grid.append(cell);
+    }
+  } catch {
+    grid.textContent = zh ? '余量获取失败，请重新打开重试' : 'Could not load usage. Reopen to retry.';
+  }
+}
+
 function openSettings() {
   closeDrawer(); // 移动端：打开设置前先收起左侧抽屉，避免遮挡
   renderSettingsNav();
   $('settingsOverlay').hidden = false;
   startServerHealth();
+  refreshSubscriptionUsage();
 }
 function closeSettings() {
   $('settingsOverlay').hidden = true;

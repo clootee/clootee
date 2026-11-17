@@ -3600,3 +3600,8 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 @media (max-width: 768px) { .session-engine-cancel { min-height: 44px; } }
 
 .multi-engine-model-head > .sx-lbl { margin: 0; }
+
+#subscriptionUsage summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+#subscriptionUsage .server-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 8px; gap: 12px; }
+#subscriptionUsage .server-health-metric b { font-size: 12px; }
+#subscriptionUsage meter { width: 100%; height: 8px; margin: 2px 0 5px; }

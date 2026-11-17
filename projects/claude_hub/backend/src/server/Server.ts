@@ -7,6 +7,7 @@ import { WebSocketServer } from 'ws';
 import { AppConfig } from '../config/AppConfig';
 import { PackageInfo } from '../helper/PackageInfo';
 import { Paths } from '../paths';
+import { SubscriptionUsage } from '../helper/SubscriptionUsage';
 import { ServerHealth } from '../helper/ServerHealth';
 import { Logger } from '../helper/Logger';
 import { LifeGuard } from '../logic_realize/LifeGuard';
@@ -181,6 +182,7 @@ export class Server {
     );
 
     // ── 全局设置（默认引擎 / 局域网访问 / 优先内置引擎）──
+    app.get('/api/subscription/usage', (_req, res) => this._wrapAsync(res, 'subscription.usage', () => SubscriptionUsage.get()));
     app.get('/api/system/health', (_req, res) => this._wrapAsync(res, 'system.health', () => ServerHealth.get()));
     app.get('/api/settings', (_req, res) => this._ok(res, Settings.get()));
     app.post('/api/settings', (req, res) =>
