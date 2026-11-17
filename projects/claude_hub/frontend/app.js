@@ -654,9 +654,29 @@ function closeGuideMenu() {
   if (p && !p.hidden) p.hidden = true;
 }
 // 小白教程由官网托管，注册 / 登录后学习；客户端只保留外部入口。
-function openLearnCourse() {
+let courseOpening = false;
+async function openLearnCourse() {
   closeGuideMenu();
-  window.open(`https://clootee.com/learn/?lang=${currentLang() === 'zh' ? 'zh' : 'en'}`, '_blank', 'noopener,noreferrer');
+  if (courseOpening) return;
+  const desktop = !!window.clooteeDesktop;
+  const tab = desktop ? null : window.open('about:blank', '_blank');
+  if (!desktop && !tab) { alert(T('coursePopupBlocked')); return; }
+  if (tab) {
+    tab.opener = null;
+    tab.document.title = 'Clootee';
+    tab.document.body.textContent = T('courseOpening');
+  }
+  courseOpening = true;
+  try {
+    const result = await api('/api/console/course/link', { lang: currentLang() });
+    const url = new URL(result.url);
+    if (url.origin !== 'https://clootee.com' || !['/learn/', '/learn/connect'].includes(url.pathname)) throw new Error(T('apiUnexpectedResponse'));
+    if (tab && !tab.closed) tab.location.replace(url.href);
+    else if (desktop) window.open(url.href, '_blank', 'noopener,noreferrer');
+  } catch (error) {
+    if (tab && !tab.closed) tab.close();
+    alert(error.message);
+  } finally { courseOpening = false; }
 }
 
 // ── 使用指南 ──

@@ -98,7 +98,8 @@
     "scripts/release/root-template-failure.test.cjs",
     "projects/claude_hub/backend/test/api_cost.js",
     "projects/claude_hub/backend/test/api_cost_frontend.js",
-    "scripts/release/multi-engine.test.cjs"
+    "scripts/release/multi-engine.test.cjs",
+    "scripts/release/course-entry.test.cjs"
   ],
   "trees": {
     "projects/claude_hub/backend/src/": [

@@ -436,10 +436,12 @@ const DICT = {
     en: 'One page: what every button does. 3 minutes.',
     zh: '一页说清每个按钮干什么，3 分钟看完。',
   },
+  courseOpening: { en: 'Opening your Clootee course…', zh: '正在进入 Clootee 课程…' },
+  coursePopupBlocked: { en: 'Allow new tabs for this site, then open the course again.', zh: '请允许本站打开新标签页，然后重新点击小白教程。' },
   guideMenuLearnT: { en: 'Beginner course (from zero)', zh: '小白教程（零基础）' },
   guideMenuLearnD: {
-    en: 'Learn on clootee.com: sign up or sign in to access all 9 chapters, quizzes and AI practice.',
-    zh: '前往 clootee.com，注册 / 登录后学习 9 章课程、测验和 AI 实操。',
+    en: 'Learn on clootee.com. Already signed in to Clootee? Go straight to all 9 chapters, quizzes and AI practice.',
+    zh: '前往 clootee.com 学习 9 章课程、测验和 AI 实操；工具内已登录可直接进入。',
   },
   // ── 使用指南 ──
   guideTitle: { en: '📖 Quick Start Guide', zh: '📖 使用指南' },
