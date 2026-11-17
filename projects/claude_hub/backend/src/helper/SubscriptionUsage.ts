@@ -4,6 +4,7 @@ import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { EngineConfig } from '../logic_realize/EngineConfig';
 import { Settings } from '../logic_realize/Settings';
+import { HttpJson } from './HttpJson';
 import { CodexStoreHelper } from './CodexStoreHelper';
 
 export class SubscriptionUsage {
@@ -52,10 +53,11 @@ export class SubscriptionUsage {
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
       if (name === 'Claude') headers['anthropic-beta'] = 'oauth-2025-04-20';
       if (account) headers['ChatGPT-Account-Id'] = account;
-      const response = await fetch(name === 'Claude' ? 'https://api.anthropic.com/api/oauth/usage' : 'https://chatgpt.com/backend-api/wham/usage',
-        { headers, signal: AbortSignal.timeout(10000), redirect: 'error' });
-      if (!response.ok) return { name, status: response.status === 401 ? 'expired' : 'error', rows };
-      const data = await response.json() as any;
+      const response = await HttpJson.get(name === 'Claude' ? 'https://api.anthropic.com/api/oauth/usage' : 'https://chatgpt.com/backend-api/wham/usage',
+        headers, 10000);
+      if (response.status < 200 || response.status >= 300) return { name, status: response.status === 401 ? 'expired' : 'error', rows };
+      const data = response.json;
+      if (!data || typeof data !== 'object') return { name, status: 'error', rows };
       const add = (label: string, used: unknown, reset?: string) => {
         if (typeof used === 'number' && Number.isFinite(used)) rows.push({ label, remaining: Math.max(0, Math.min(100, 100 - used)), reset });
       };
