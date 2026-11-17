@@ -8346,6 +8346,7 @@ let subscriptionGeneration = 0;
 async function refreshSubscriptionUsage() {
   const generation = ++subscriptionGeneration;
   const box = $('subscriptionUsage');
+  box.hidden = true;
   const zh = T('serverHealth') === 'Linux 服务器';
   box.querySelector('summary').textContent = zh ? '用量 · 订阅余量' : 'Usage · Subscription remaining';
   try { box.open = localStorage.getItem('subscriptionUsageCollapsed') !== '1'; } catch {}
@@ -8355,6 +8356,7 @@ async function refreshSubscriptionUsage() {
   try {
     const data = await api('/api/subscription/usage');
     if (generation !== subscriptionGeneration) return;
+    box.hidden = data.accounts.length === 0;
     grid.replaceChildren();
     for (const account of data.accounts) {
       const cell = document.createElement('div');
@@ -8507,7 +8509,7 @@ async function leavePane(close) {
 }
 // 返回板块列表（回到列表前刷新摘要，让「引擎：Claude」这类当前状态是最新的）
 function backToSettingsNav() {
-  return leavePane(renderSettingsNav);
+  return leavePane(() => { renderSettingsNav(); refreshSubscriptionUsage(); });
 }
 // 直接关掉整个设置（也先保存，避免改了没生效）
 function closeSettingsPane() {

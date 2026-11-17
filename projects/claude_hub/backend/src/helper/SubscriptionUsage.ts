@@ -2,22 +2,31 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
+import { EngineConfig } from '../logic_realize/EngineConfig';
 import { Settings } from '../logic_realize/Settings';
 import { CodexStoreHelper } from './CodexStoreHelper';
 
 export class SubscriptionUsage {
-  private static cache: { at: number; data: unknown } | undefined;
-  private static pending: Promise<unknown> | undefined;
+  private static cache = new Map<string, { at: number; data: unknown }>();
+  private static pending = new Map<string, Promise<unknown>>();
   static async get(): Promise<unknown> {
-    if (this.cache && Date.now() - this.cache.at < 120000) return this.cache.data;
-    if (this.pending) return this.pending;
-    this.pending = Promise.all(['ChatGPT', 'Claude'].map(name => this.read(name)))
+    const config = EngineConfig.get();
+    const names = [
+      ...(config.codex.provider === 'official' ? ['ChatGPT'] : []),
+      ...(config.claude.provider === 'official' ? ['Claude'] : []),
+    ];
+    const key = JSON.stringify([Settings.effectiveHomeDir(), names]);
+    const cached = this.cache.get(key);
+    if (cached && Date.now() - cached.at < 120000) return cached.data;
+    if (this.pending.has(key)) return this.pending.get(key);
+    const pending = Promise.all(names.map(name => this.read(name)))
       .then(accounts => {
         const data = { accounts, updatedAt: new Date().toISOString() };
-        this.cache = { at: Date.now(), data };
+        this.cache.set(key, { at: Date.now(), data });
         return data;
-      }).finally(() => { this.pending = undefined; });
-    return this.pending;
+      }).finally(() => { this.pending.delete(key); });
+    this.pending.set(key, pending);
+    return pending;
   }
   private static async read(name: string): Promise<unknown> {
     const rows: { label: string; remaining: number; reset?: string }[] = [];
