@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import * as os from 'os';
 import {
+  CLOOTEE_DEFAULT_MODEL,
   ConsoleAccountStruct,
   ConsoleRecord,
   ConsoleStatus,
@@ -18,6 +19,17 @@ import { ErrorHandler } from '../helper/ErrorHandler';
 const TIMEOUT_MS = 15_000;
 
 export class ConsoleAccount extends ConsoleAccountStruct {
+  static async tutorialChat(messages: unknown, temperature: unknown): Promise<unknown> {
+    if (!Array.isArray(messages) || !messages.length || messages.length > 81 ||
+        messages.some(m => !m || !['system', 'user', 'assistant'].includes(m.role) || typeof m.content !== 'string') ||
+        JSON.stringify(messages).length > 120000) throw new Error('Invalid tutorial messages');
+    const token = await this.ensureToken();
+    return this._call('POST', '/v1/chat/completions', token, {
+      model: CLOOTEE_DEFAULT_MODEL, messages, stream: false, max_tokens: 4096,
+      temperature: typeof temperature === 'number' && Number.isFinite(temperature) ? Math.max(0, Math.min(1, temperature)) : 0.3,
+    }, undefined, 120000);
+  }
+
   static signOut(): { ok: boolean } {
     this._loginRequests.clear();
     EngineConfig.disconnectClootee();
@@ -172,7 +184,7 @@ export class ConsoleAccount extends ConsoleAccountStruct {
     }
   }
 
-  private static async _call(method: string, p: string, token: string, body?: unknown, session?: {cookie:string}): Promise<any> {
+  private static async _call(method: string, p: string, token: string, body?: unknown, session?: {cookie:string}, timeoutMs = TIMEOUT_MS): Promise<any> {
     const emailCode = p === '/api/auth/code';
     const requestId = crypto.randomUUID();
     const started = Date.now();
@@ -191,7 +203,7 @@ export class ConsoleAccount extends ConsoleAccountStruct {
       let res: Response;
       try {
         res = await fetch(`${CLOOTEE_CONSOLE_BASE}${p}`, {
-          method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(TIMEOUT_MS),
+          method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (e: any) {
         details.networkCode = String(e?.cause?.code || e?.name || 'network_error').slice(0, 80);

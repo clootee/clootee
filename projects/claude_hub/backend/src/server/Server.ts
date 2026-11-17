@@ -210,6 +210,7 @@ export class Server {
       this._ok(res, { providers: EngineConfig.providerList() }),
     );
     // ── Clootee 默认服务商（console.clootee.com）：一键开通 / 余额 / 用量 / 充值入口 ──
+    app.post('/api/console/tutorial/chat', (req, res) => this._wrapAsync(res, 'console.tutorial.chat', () => ConsoleAccount.tutorialChat(req.body.messages, req.body.temperature)));
     app.post('/api/console/login/code', (req,res)=>this._wrapAsync(res,'console.login.code',()=>ConsoleAccount.sendEmailCode(String(req.body.email||''),String(req.body.lang||''))));
     app.post('/api/console/login/email', (req,res)=>this._wrapAsync(res,'console.login.email',()=>ConsoleAccount.loginWithEmail(String(req.body.email||''),String(req.body.code||''),String(req.body.lang||''))));
     app.post('/api/console/login/start', (_req,res)=>this._wrapAsync(res,'console.login.start',()=>ConsoleAccount.beginLogin()));
