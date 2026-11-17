@@ -123,16 +123,31 @@ const MultiUi = {
     host.querySelectorAll('.multi-engine-card').forEach(card => card.abortModels?.());
     host.replaceChildren();
     host.setAttribute('aria-label', this.text('title'));
+    const accordion = document.createElement('div'); accordion.className = 'eng-acc';
+    const header = document.createElement('button'); header.type = 'button'; header.className = 'eng-acc-head';
+    header.id = 'multiEngineSettingsHead'; header.setAttribute('aria-controls', 'multiEngineSettingsBody');
+    const arrow = document.createElement('span'); arrow.className = 'eng-acc-arrow'; arrow.setAttribute('aria-hidden', 'true');
+    const title = document.createElement('span'); title.className = 'eng-acc-title'; title.textContent = this.text('title');
+    header.append(arrow, title);
+    const body = document.createElement('div'); body.id = 'multiEngineSettingsBody'; body.className = 'eng-acc-body';
+    const updateExpanded = () => {
+      body.hidden = !this.settingsExpanded;
+      header.setAttribute('aria-expanded', String(!body.hidden));
+      arrow.textContent = body.hidden ? '▸' : '▾';
+    };
+    header.onclick = () => { this.settingsExpanded = !this.settingsExpanded; updateExpanded(); };
+    updateExpanded();
+    accordion.append(header, body); host.append(accordion);
     const toggle = document.createElement('label'); toggle.className = 'sx-lbl multi-engine-toggle';
     const check = document.createElement('input'); check.type = 'checkbox'; check.id = 'multiEngineEnabled';
     check.checked = !!State.settings.multiEngine?.enabled;
-    toggle.append(check, ' ' + this.text('title')); host.append(toggle);
-    const toggleStatus = document.createElement('div'); toggleStatus.className = 'sx-note'; toggleStatus.setAttribute('role', 'status'); toggleStatus.hidden = true; host.append(toggleStatus);
+    toggle.append(check, ' ' + this.text('title')); body.append(toggle);
+    const toggleStatus = document.createElement('div'); toggleStatus.className = 'sx-note'; toggleStatus.setAttribute('role', 'status'); toggleStatus.hidden = true; body.append(toggleStatus);
     const details = document.createElement('details'); details.className = 'multi-engine-help';
     const summary = document.createElement('summary'); summary.textContent = this.text('details');
     const description = document.createElement('div'); description.className = 'sx-note'; description.textContent = this.text('note');
-    details.append(summary, description); host.append(details);
-    const rows = document.createElement('div'); rows.id = 'multiEngineRows'; host.append(rows);
+    details.append(summary, description); body.append(details);
+    const rows = document.createElement('div'); rows.id = 'multiEngineRows'; body.append(rows);
     const entries = State.settings.multiEngine?.engines || [];
     entries.forEach(e => this.addRow(e));
     const add = document.createElement('button'); add.type = 'button'; add.className = 'btn'; add.textContent = this.text('add');
@@ -145,9 +160,9 @@ const MultiUi = {
         this.addRow({ engine, config: this.currentConfiguration(engine, saved) });
         result.textContent = '';
       } catch (e) { result.textContent = e.message; } finally { add.disabled = false; }
-    }; host.append(add);
+    }; body.append(add);
     const result = document.createElement('div'); result.className = 'sx-note'; result.setAttribute('role', 'status');
-    host.append(result);
+    body.append(result);
     const visibility = () => {
       const enabled = check.checked;
       details.hidden = !enabled;
