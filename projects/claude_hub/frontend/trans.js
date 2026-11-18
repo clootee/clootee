@@ -1320,9 +1320,10 @@ const DICT = {
     en: 'Higher effort means longer thinking and higher cost. “Auto” = let the engine decide.',
     zh: '强度越高思考越久、消耗越多；「自动」= 交给引擎决定。',
   },
+  srcCodexSelected: { en: 'saved workspace model for new tasks', zh: '工作台为新任务指定的模型' },
   engEffortNoteCodex: {
-    en: 'Codex only has low/medium/high — picking “Very high/Max” runs as “High”.',
-    zh: 'Codex 只有低/中/高三档，选「极高/最高」会按「高」执行。',
+    en: 'This workspace sends “Very high” and “Max” to Codex as “High”.',
+    zh: '当前工作台会把「极高」和「最高」按「高」传给 Codex。',
   },
   engCtxWindowLabel: { en: 'Context window (tokens)', zh: '上下文窗口（tokens）' },
   engCtxWindowPh: { en: 'Blank = follow the provider default', zh: '留空=跟随服务商默认' },

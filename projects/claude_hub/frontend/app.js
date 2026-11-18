@@ -8690,9 +8690,8 @@ function fillEnginePane() {
   const claudeFirst = State.settings.defaultEngine !== 'codex';
   setAccOpen('claude', claudeFirst);
   setAccOpen('codex', !claudeFirst);
-  loadClaudeProvider();
-  loadEngineProvider('codex');
-  loadModelState();
+  setModelStatus('codex', T('mdlDetecting'), null);
+  Promise.all([loadClaudeProvider(), loadEngineProvider('codex')]).then(loadModelState);
 }
 // 「默认引擎」下面那行说明：只装了一个引擎时，额外说清默认引擎已自动跟着它走
 function defaultEngineNoteText() {
@@ -9176,7 +9175,7 @@ const MODEL_ALIAS_KEY = {
 // 「检测当前模型」的来源/失败原因：后端下发稳定编码，认不出的原样展示（多为引擎或网络的原始报错）
 const DETECT_SRC_KEY = {
   'claude-init': 'srcClaudeInit', 'codex-toml': 'srcCodexToml',
-  'codex-catalog': 'srcCodexCatalog', codex: 'srcCodex',
+  'codex-selected': 'srcCodexSelected', 'codex-catalog': 'srcCodexCatalog', codex: 'srcCodex',
 };
 const DETECT_ERR_KEY = {
   'init-no-model': 'errInitNoModel',
@@ -9276,7 +9275,9 @@ function renderModelSection(engine, s) {
   setModelValue(engine, s.selected || '');
   renderEffortSelect(engine, s);
   const d = s.detected;
-  if (d) {
+  if (engine === 'codex') {
+    detectCurrentModel(engine, s);
+  } else if (d) {
     setModelStatus(
       engine,
       d.ok
@@ -9292,6 +9293,7 @@ function renderModelSection(engine, s) {
 
 function setModelStatus(engine, text, ok) {
   const el = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  el.dataset.revision = String(Number(el.dataset.revision || 0) + 1);
   el.className = 'sx-note' + (ok === true ? ' ok' : ok === false ? ' err' : '');
   el.textContent = text;
 }
@@ -9321,10 +9323,17 @@ async function onModelSelect(engine) {
 }
 
 // 检测当前实际生效的模型（真实探测引擎）
-async function detectCurrentModel(engine) {
+async function detectCurrentModel(engine, currentState) {
   setModelStatus(engine, T('mdlDetecting'), null);
+  const status = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  const revision = status.dataset.revision;
   try {
-    const d = await api('/api/model/detect', { engine });
+    // The runner passes the saved model via -m. Only Auto needs the CLI default.
+    const saved = engine === 'codex' ? (currentState || (await api('/api/model/state')).codex) : null;
+    const d = saved?.selected
+      ? { ok: true, model: saved.selected, source: 'codex-selected' }
+      : await api('/api/model/detect', { engine });
+    if (status.dataset.revision !== revision) return;
     setModelStatus(
       engine,
       d && d.ok
@@ -9332,8 +9341,8 @@ async function detectCurrentModel(engine) {
         : T('mdlDetectFail').replace('{err}', detectErrorLabel(d && d.error)),
       !!(d && d.ok),
     );
-    await loadModelState();
   } catch (e) {
+    if (status.dataset.revision !== revision) return;
     setModelStatus(engine, T('mdlDetectFail').replace('{err}', e.message), false);
   }
 }
@@ -9587,7 +9596,7 @@ function onClaudeProviderChange() { onEngineProviderChange('claude'); }
 
 // 模型跟随服务商自动定档：没有选定模型时自动拉取候选并选中服务商推荐的那个。
 // 只改表单里的下拉，不落盘——落盘仍由「保存」按钮完成（否则会把新模型配到旧的已保存服务商上）。
-async function autoPickModel(engine) {
+async function autoPickModel(engine, preserveAuto = false) {
   const u = providerUi(engine);
   const provider = u.select.value;
   if (provider === 'official') {
@@ -9597,8 +9606,10 @@ async function autoPickModel(engine) {
     try {
       const r = await api('/api/model/available', { engine, verify: false });
       const models = r && r.models ? r.models : [];
+      if (u.select.value !== provider || modelValue(engine)) return;
       if (models.length > 0) {
         fillModelChoices(engine, models, true);
+        if (preserveAuto) return;
         // 默认选中 opus（如果有）
         const defaultModel = models.find(m => m.id === 'opus') || models[0];
         if (defaultModel) {
@@ -9660,7 +9671,7 @@ async function loadEngineProvider(engine) {
     renderAccSummary(engine);
     // 原版订阅也可以选择模型：如果没有选定模型，自动填充内置候选列表
     if (c.provider === 'official' && !c.model) {
-      autoPickModel(engine);
+      await autoPickModel(engine, engine === 'codex');
     }
     // 已存了第三方服务商与 Key、却没有模型（历史配置/上次没选完）→ 进面板就自动补一个
     if (c.provider !== 'official' && c.apiKey && !c.model) autoPickModel(engine);
