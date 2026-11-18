@@ -6730,8 +6730,9 @@ function showMarkdownLink(link) {
     btn.type = 'button'; btn.className = 'ml-action ' + className; btn.textContent = label;
     btn.onclick = () => action(btn); parent.appendChild(btn); return btn;
   };
+  let preview;
   if (path) {
-    const rootId = State.rootId;
+    const rootId = activeWorkRootId();
     const root = State.roots.find((r) => r.id === rootId);
     const base = (root?.path || '').replace(/\\/g, '/').replace(/\/$/, '');
     let rel = path.replace(/(?::\d+(?::\d+)?)$/, '');
@@ -6741,6 +6742,19 @@ function showMarkdownLink(link) {
     if (/^(?:[a-z]:\/|\/)/i.test(rel)) {
       status.textContent = T('messageLinkOutsideRoot'); status.hidden = false;
     } else {
+      const kind = kindOf(rel.split('.').pop());
+      if (kind === 'img' || kind === 'pdf') {
+        preview = document.createElement(kind === 'img' ? 'img' : 'iframe');
+        preview.className = 'ml-preview';
+        if (kind === 'img') preview.alt = title.textContent;
+        else preview.title = title.textContent;
+        preview.addEventListener('error', () => {
+          preview.hidden = true;
+          status.textContent = T('previewFail'); status.hidden = false;
+        });
+        preview.src = fmFileUrl(rel, false);
+        dialog.classList.add('ml-with-preview');
+      }
       if (State.settings.platform === 'win32') {
         if (/\.(?:pptx?|ppsx?|docx?|xlsx?|pdf|txt|md|csv|rtf|odt|ods|odp|png|jpe?g|gif|webp|bmp|svg|mp3|wav|mp4|mov)$/i.test(rel)) {
           button(primary, T('messageLinkOpenFile'), async (btn) => {
@@ -6775,7 +6789,9 @@ function showMarkdownLink(link) {
     button(secondary, T('messageLinkCopyLink'), (btn) => copyText(href, btn, T('messageLinkCopyLink')));
   }
   button(secondary, T('messageLinkCopyText'), (btn) => copyText(link.textContent, btn, T('messageLinkCopyText')));
-  dialog.append(head, detail, primary, secondary, status);
+  dialog.appendChild(head);
+  if (preview) dialog.appendChild(preview);
+  dialog.append(detail, primary, secondary, status);
   dialog.addEventListener('close', () => { dialog.remove(); link.focus(); });
   dialog.addEventListener('click', (event) => { if (event.target === dialog) {
     const rect = dialog.getBoundingClientRect();
