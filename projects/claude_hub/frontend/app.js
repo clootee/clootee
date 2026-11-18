@@ -262,6 +262,12 @@ async function api(path, body, authRetried = false, signal) {
   }
   const json = await res.json();
   if (!json.success) {
+    if (path === '/api/engine/update' && json.adminRequired) {
+      if (!window.isSecureContext) throw new Error('请通过 HTTPS 或本机地址打开此页面，再授权更新');
+      const admin = await askEngineAdmin(body.engine, body.admin ? json.error : '');
+      if (!admin) throw new Error('已取消管理员授权');
+      return api(path, { engine: body.engine, admin }, true, signal);
+    }
     const message = json.locked ? T('lockedHint') : (json.error || 'request failed');
     if (!path.startsWith('/api/engine/') && EngineRecovery.missingEngine(message)) {
       await EngineRecovery.fromError(message);
@@ -7697,6 +7703,12 @@ function bind() {
   $('onboardBack').addEventListener('click', onboardBack);
   $('onboardNext').addEventListener('click', onboardNext);
   // 引擎板块（pane-engine）内：两个引擎折叠块
+  document.querySelectorAll('[data-engine-pane]').forEach(btn => {
+    btn.onclick = () => leavePane(() => openSettingsPane(btn.dataset.enginePane));
+  });
+  document.querySelectorAll('[data-engine-update]').forEach(btn => {
+    btn.onclick = () => updateEngine(btn.dataset.engineUpdate, btn, $(btn.dataset.engineUpdate + 'UpdateStatus'));
+  });
   $('engAccClaudeHead').addEventListener('click', () => toggleAcc('claude'));
   $('engAccCodexHead').addEventListener('click', () => toggleAcc('codex'));
   // 服务商 → 模型联动：换服务商即清空并自动检测选中推荐模型；Key 填完（失焦/回车）也自动补
@@ -9023,7 +9035,7 @@ function tcRow(t) {
   const btns = [];
   if (t.globalInstallable)
     btns.push(
-      `<button class="sx-btn" data-tc-install="${t.id}" data-tc-target="global">${t.system.found ? '更新本机版' : '安装到本机（全局）'}</button>`,
+      `<button class="sx-btn" data-tc-install="${t.id}" data-tc-target="global">${['claude', 'codex'].includes(t.id) ? '安装 / 更新到最新版' : t.system.found ? '更新本机版' : '安装到本机（全局）'}</button>`,
     );
   if (t.bundlable)
     btns.push(
@@ -9088,6 +9100,7 @@ async function setToolPref(tool, pref) {
 async function installTool(tool, target, btn) {
   let box = btn?.closest('.tc-item')?.querySelector('[data-tc-status]');
   if (!box) box = document.querySelector(`[data-tc-status="${tool}"]`) || $('tcStatus');
+  if (['claude', 'codex'].includes(tool)) return updateEngine(tool, btn, box, true);
   box.hidden = false;
   box.className = 'sx-note sx-pre';
   const label = target === 'global' ? '安装到本机' : '下载内置版';
@@ -9793,20 +9806,51 @@ async function saveEngineProvider(engine) {
 }
 
 // ── 手动安装/更新引擎（npm 全局安装，源自动选官方或国内镜像中更快的那个）──
-async function updateEngine(engine) {
-  const box = $('updateStatus');
+function askEngineAdmin(engine, reason) {
+  const dialog = $('engineAdminDialog');
+  const form = $('engineAdminForm');
+  if (dialog.open) throw new Error('请先完成当前管理员授权');
+  $('engineAdminReason').textContent = reason || `${engineBlockLabel(engine)} 无法写入安装目录。请授权创建服务账号可写的目录，然后继续更新。`;
+  form.reset();
+  return new Promise(resolve => {
+    const cancel = $('engineAdminCancel');
+    const finish = credentials => {
+      form.reset();
+      form.onsubmit = cancel.onclick = dialog.oncancel = null;
+      dialog.close();
+      resolve(credentials);
+    };
+    form.onsubmit = event => {
+      event.preventDefault();
+      finish({ username: form.elements.username.value.trim(), password: form.elements.password.value });
+    };
+    cancel.onclick = () => finish(null);
+    dialog.oncancel = event => { event.preventDefault(); finish(null); };
+    dialog.showModal();
+  });
+}
+
+async function updateEngine(engine, btn, box, runtime = false) {
+  btn.disabled = true;
+  box.hidden = false;
   box.className = 'sx-note sx-pre';
-  // 引擎包 400-500MB，用实时进度代替一句「请稍候」，否则看起来像卡死
-  const stop = startEngineInstallProgress(box, `正在安装/更新 ${engine}，请勿关闭页面`);
+  const label = engineBlockLabel(engine);
+  const stop = startEngineInstallProgress(box, `正在安装 / 更新 ${label}`);
   try {
-    const r = await api('/api/engine/update', { engine });
-    stop();
+    const result = await api('/api/engine/update', { engine });
+    if (runtime) {
+      await renderToolchain();
+      box = document.querySelector(`[data-tc-status="${engine}"]`) || box;
+    }
+    box.hidden = false;
     box.className = 'sx-note sx-pre ok';
-    box.textContent = `${engine} 更新完成：${(r && r.pkg) || ''}\n源：${(r && r.registry) || ''}\n${(r && r.log) || ''}`;
+    box.textContent = `${label} 更新完成。\n${result.version || ''}`;
   } catch (e) {
-    stop();
     box.className = 'sx-note sx-pre err';
-    box.textContent = `${engine} 更新失败：${e.message}\n可自己在终端执行：npm install -g ${engine === 'codex' ? '@openai/codex' : '@anthropic-ai/claude-code'}`;
+    box.textContent = `${label} 更新未完成：${e.message}`;
+  } finally {
+    stop();
+    btn.disabled = false;
   }
 }
 

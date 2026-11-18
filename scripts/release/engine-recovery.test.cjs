@@ -166,3 +166,24 @@ test('batch deletion isolates failures and rejects malformed requests', () => {
   assert.deepEqual(Array.from(result.failed), ['missing']);
   assert.throws(() => f.Queue.removeSessions(null), /invalid ids/);
 });
+
+test('Linux credentials are accepted only after an engine write failure and successful retry clears it',
+  { skip: process.platform !== 'linux' || process.getuid() === 0 }, async () => {
+    const { EngineUpdater, EngineWriteDenied } = require('../../projects/claude_hub/backend/dist/logic_realize/EngineUpdater');
+    const calls = [];
+    let failure = new Error('network unavailable');
+    class Updater extends EngineUpdater {
+      static async prepareInstallDir(username) { calls.push(username); }
+      static async update(engine) { if (failure) throw failure; return { engine }; }
+    }
+    const admin = { username: 'admin', password: 'test-only' };
+    await assert.rejects(Updater.requestUpdate('codex'), /network unavailable/);
+    await assert.rejects(Updater.requestUpdate('codex', admin), /先尝试/);
+    failure = new EngineWriteDenied('EACCES');
+    await assert.rejects(Updater.requestUpdate('codex'), EngineWriteDenied);
+    await assert.rejects(Updater.requestUpdate('claude', admin), /先尝试/);
+    failure = null;
+    assert.deepEqual(await Updater.requestUpdate('codex', admin), { engine: 'codex' });
+    assert.deepEqual(calls, ['admin']);
+    await assert.rejects(Updater.requestUpdate('codex', admin), /先尝试/);
+  });

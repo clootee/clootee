@@ -31,7 +31,7 @@ import { Settings } from '../logic_realize/Settings';
 import { CodexProfile } from '../logic_realize/CodexProfile';
 import { CodexLogin } from '../logic_realize/CodexLogin';
 import { EngineConfig } from '../logic_realize/EngineConfig';
-import { EngineUpdater } from '../logic_realize/EngineUpdater';
+import { EngineUpdater, EngineWriteDenied, EngineAuthDenied } from '../logic_realize/EngineUpdater';
 import { Toolchain } from '../logic_realize/Toolchain';
 import { EngineStatus } from '../logic_realize/EngineStatus';
 import { Connectivity } from '../logic_realize/Connectivity';
@@ -335,13 +335,24 @@ export class Server {
 
     // 安装 / 更新 claude / codex 到最新版（npm 全局安装，源在官方与国内镜像间竞速选出）
     // 下载动辄几百 MB，逐行把 npm 输出广播出去，前端据此显示进度，避免看起来像卡死
-    app.post('/api/engine/update', (req, res) =>
-      this._wrapAsync(res, 'engine.update', () =>
-        EngineUpdater.update(String(req.body.engine || ''), (line) =>
-          EventBus.broadcast({ kind: 'engineInstall', engine: String(req.body.engine || ''), line }),
-        ),
-      ),
-    );
+    app.post('/api/engine/update', async (req, res) => {
+      const { engine, admin } = req.body || {};
+      if (admin && !(LocalAccess.isLocal(req) || req.secure ||
+          (['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress || '') &&
+            req.headers['x-forwarded-proto'] === 'https'))) {
+        res.status(403).json({ success: false, error: '请通过 HTTPS 或本机地址提交服务器凭据' });
+        return;
+      }
+      try {
+        const result = await EngineUpdater.requestUpdate(engine, admin, line =>
+          EventBus.broadcast({ kind: 'engineInstall', engine, line }));
+        this._ok(res, result);
+      } catch (error) {
+        const canAuthorize = process.platform === 'linux' && (error instanceof EngineWriteDenied || error instanceof EngineAuthDenied);
+        res.status(canAuthorize ? 409 : 400).json({ success: false, adminRequired: canAuthorize,
+          error: error instanceof Error ? error.message : '引擎更新失败' });
+      }
+    });
 
     // ── 软件本身的版本更新（版本清单 version.json 为准，git commit 兜底）──
     // 有更新时前端提示确认（强制更新则弹不可关闭的窗），确认后拉取 + 触发重新编译与重启

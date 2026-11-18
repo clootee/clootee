@@ -36,8 +36,8 @@ export class EngineStatus extends EngineStatusStruct {
       const out = String(execSync(cmd, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] }));
       // out_end 内置也会出现在 PATH 里（start.bat 会把它加进去）→ 排除掉
       const lines = out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-      const outEndDir = OutEnd.toolsDir().toLowerCase();
-      return lines.some((l) => !l.toLowerCase().startsWith(outEndDir));
+      const managed = [OutEnd.toolsDir(), OutEnd.installDir()].map(dir => dir.toLowerCase());
+      return lines.some(line => !managed.some(dir => line.toLowerCase().startsWith(dir)));
     } catch {
       return false;
     }

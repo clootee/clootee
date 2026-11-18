@@ -11,6 +11,7 @@ export interface UpdateResult {
   ok: boolean;
   engine: string;
   pkg: string;
+  version: string;
   log: string; // npm 输出摘要（尾部）
   registry: string; // 实际使用的 npm 源（便于失败时给出「换源重试」的提示）
 }
@@ -29,7 +30,7 @@ export class EngineUpdaterStruct {
 
   // 安装/更新指定引擎到最新版（npm 全局）。onProgress 有值时逐行回传 npm 输出。
   static async update(engine: string, onProgress?: UpdateProgress): Promise<UpdateResult> {
-    if (!PKG[engine]) throw new Error(`update: invalid engine=${engine}`);
+    if (engine !== 'claude' && engine !== 'codex') throw new Error(`update: invalid engine=${engine}`);
     const active = this._updates.get(engine);
     if (active) return active;
     // Settings, onboarding and runtime recovery share one npm installation queue.
@@ -51,11 +52,11 @@ export class EngineUpdaterStruct {
     CodexBin.clearCache();
     // 「装没装」的探测结果是进程级缓存的，装完必须作废，否则界面还显示未安装
     EngineStatus.invalidate();
-    await this._verify(engine);
-    return { ok: true, engine, pkg, log, registry };
+    const version = await this._verify(engine);
+    return { ok: true, engine, pkg, log, registry, version };
   }
 
-  protected static _verify(_engine: string): Promise<void> {
+  protected static _verify(_engine: string): Promise<string> {
     throw new Error('Not implemented');
   }
 
