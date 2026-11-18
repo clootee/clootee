@@ -8409,10 +8409,18 @@ async function refreshSubscriptionUsage() {
         const meter = document.createElement('meter');
         meter.min = 0; meter.max = 100; meter.value = row.remaining;
         meter.setAttribute('aria-label', text.textContent);
-        if (row.reset && Number.isFinite(Date.parse(row.reset))) {
-          text.title = (zh ? '重置时间：' : 'Resets: ') + new Date(row.reset).toLocaleString();
-        }
         cell.append(text, meter);
+        if (row.reset && Number.isFinite(Date.parse(row.reset))) {
+          const reset = document.createElement('small');
+          const time = document.createElement('time');
+          time.dateTime = row.reset;
+          time.textContent = new Date(row.reset).toLocaleString(zh ? 'zh-CN' : 'en-US', {
+            year: 'numeric', month: 'short', day: 'numeric', weekday: 'short',
+            hour: '2-digit', minute: '2-digit',
+          });
+          reset.append(zh ? '下次刷新：' : 'Next reset: ', time);
+          cell.append(reset);
+        }
       }
       if (account.credits !== undefined) {
         const extra = document.createElement('small');
