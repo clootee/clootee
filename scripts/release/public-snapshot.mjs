@@ -11,6 +11,8 @@ const privateName = /(?:^|\.)(?:special|speical|claude|agents|mem|struct|memory)
 const privateParts = new Set(['.git', '.claude', '.codex', '.secrets', '.state', 'data', 'logs', 'traces', 'deploy', 'test', 'e2e', 'test-results', 'playwright-report', 'knowledge_ai']);
 export function privatePath(name) {
   const normalized = name.replaceAll('\\', '/');
+  // Hosted course content must never enter client source, history or packages.
+  if (/^projects\/claude_hub\/frontend\/(?:learn(?:[.\/-]|$)|assist(?:\/|$))/.test(normalized)) return true;
   if (publicTests.has(normalized)) return false;
   const parts = normalized.split('/');
   return parts.some(p => privateParts.has(p.toLowerCase()) || p.startsWith('.env') || privateName.test(p)

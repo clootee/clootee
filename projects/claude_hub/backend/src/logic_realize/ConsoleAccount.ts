@@ -18,6 +18,22 @@ import { ErrorHandler } from '../helper/ErrorHandler';
 const TIMEOUT_MS = 15_000;
 
 export class ConsoleAccount extends ConsoleAccountStruct {
+  static async courseLink(lang: string): Promise<{ url: string }> {
+    const language = lang === 'zh' ? 'zh' : 'en';
+    const base = `https://clootee.com/learn/?lang=${language}`;
+    const token = this._readRecord().token;
+    if (!token) return { url: base };
+    let result: { ticket?: string };
+    try {
+      result = await this._call('POST', '/learn/api/handoff', token, {});
+    } catch (error: any) {
+      if (error?.status === 401) return { url: base };
+      throw error;
+    }
+    if (!/^ct_[A-Za-z0-9_-]{43}$/.test(String(result?.ticket || ''))) throw new Error('Invalid Clootee course sign-in response');
+    return { url: `https://clootee.com/learn/connect?lang=${language}#ticket=${result.ticket}` };
+  }
+
   static signOut(): { ok: boolean } {
     this._loginRequests.clear();
     EngineConfig.disconnectClootee();

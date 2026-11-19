@@ -1,10 +1,10 @@
 {
-  "version": "3.1.44",
+  "version": "3.1.45",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-19",
   "notesI18n": {
-    "zh": "拉取模型前检查引擎版本，可选择更新后拉取或直接拉取。修复切换到原版订阅时模型列表加载失败。",
-    "en": "Check the engine version before fetching models and choose whether to update. Fix model discovery when switching to an official subscription."
+    "zh": "Claude 和 Codex 按需拉取模型列表，更新后验证实际使用的引擎版本，并显示订阅用量重置日期。",
+    "en": "Fetch Claude and Codex model catalogs on demand, verify active engine updates, and show subscription usage reset dates."
   }
 }

@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
   <link rel="stylesheet" href="dog.css?v=20261110d" />
-  <link rel="stylesheet" href="styles.css?v=20261115multi12" />
+  <link rel="stylesheet" href="styles.css?v=20261118preview" />
 </head>
 <body class="dark">
   <div id="gitInstallStatus" class="sx-note sx-pre" role="status" aria-live="polite" hidden style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(620px,90vw);max-height:35vh;overflow:auto;padding:16px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:12px;z-index:10050"></div>
@@ -389,6 +389,7 @@
       </div>
       <div class="sx-body">
         <section class="server-health" id="serverHealth" hidden></section>
+        <details class="server-health" id="subscriptionUsage"><summary></summary><div class="server-health-grid"></div></details>
         <div class="sx-nav" id="settingsNav"></div>
         <div class="sx-logout-row" hidden>
           <button id="logoutBtn" class="sx-logout-btn"></button>
@@ -409,6 +410,7 @@
 
         <!-- ═══ 板块：AI 引擎 · 服务商 · 模型 ═══ -->
         <div class="sx-pane" id="pane-engine" hidden>
+          <button type="button" class="sx-btn" data-engine-pane="runtime">运行环境与版本检测 ›</button>
           <label class="sx-lbl" id="defaultEngineLabel"></label>
           <select class="sx-input" id="defaultEngineSelect"></select>
           <div class="sx-note" id="defaultEngineNote"></div>
@@ -421,6 +423,8 @@
               <span class="eng-acc-sum" id="engAccClaudeSum"></span>
             </button>
             <div class="eng-acc-body" id="engAccClaudeBody">
+              <button type="button" class="sx-btn" data-engine-update="claude">安装 / 更新 Claude Code 到最新版</button>
+              <div class="sx-note sx-pre" id="claudeUpdateStatus" role="status" hidden></div>
               <label class="sx-lbl" id="claudeProviderLbl">服务商</label>
               <select class="sx-input" id="claudeProviderSelect">
                 <option value="official">原版（订阅登录，未登录会引导登录）</option>
@@ -494,6 +498,8 @@
               <span class="eng-acc-sum" id="engAccCodexSum"></span>
             </button>
             <div class="eng-acc-body" id="engAccCodexBody" hidden>
+              <button type="button" class="sx-btn" data-engine-update="codex">安装 / 更新 Codex 到最新版</button>
+              <div class="sx-note sx-pre" id="codexUpdateStatus" role="status" hidden></div>
               <label class="sx-lbl" id="codexProviderLbl">服务商</label>
               <select class="sx-input" id="codexProviderSelect">
                 <option value="official">原版 ChatGPT（账号登录）</option>
@@ -533,7 +539,7 @@
                 <div class="sx-note" id="codexModelHint" hidden></div>
                 <label class="sx-lbl" id="codexEffortLbl">思考强度</label>
                 <select class="sx-input" id="codexEffortSelect"></select>
-                <div class="sx-note" id="codexEffortNote">Codex 只有低/中/高三档，选「极高/最高」会按「高」执行。</div>
+                <div class="sx-note" id="codexEffortNote">当前工作台会把「极高」和「最高」按「高」传给 Codex。</div>
 
               </div>
               <div class="sx-note" id="mdlCodexStatus"></div>
@@ -672,9 +678,10 @@
 
         <!-- ═══ 板块：运行环境（node / git / claude / codex：本机 or 内置）═══ -->
         <div class="sx-pane" id="pane-runtime" hidden>
+          <button type="button" class="sx-btn" data-engine-pane="engine">AI 引擎设置 ›</button>
           <div class="sx-note">
             这里管理软件运行所需的四件套。<b>Node / Git 有内置版，随软件自带、不需要安装</b>；本机已装的会被<b>优先使用</b>（默认「自动」）。
-            <b>Claude Code / Codex 不内置</b>，点「安装到本机（全局）」即用 npm 全局安装（自动在官方源与国内镜像里挑更快的那个）。
+            <b>Claude Code / Codex 不内置</b>，可在下方安装或更新到最新版（自动在官方源与国内镜像里挑更快的那个）。
           </div>
           <!-- 网络体检：有没有外网、能不能连上 Claude；连不上时当场给出路 -->
           <div id="hcBox"></div>
@@ -691,7 +698,6 @@
           </div>
           <div id="tcList"></div>
           <div class="sx-note sx-pre" id="tcStatus"></div>
-          <div class="sx-note sx-pre" id="updateStatus" hidden></div>
 
           <!-- 高级：以哪个系统用户运行 claude/codex（仅 Linux/macOS；Windows 无此机制，不显示）。
                默认收起：大多数人不需要碰，只有本工具以 root 起服务时才需要留意。 -->
@@ -1220,6 +1226,23 @@
     </div>
   </dialog>
 
+  <dialog id="engineAdminDialog" class="batch-cost-modal" aria-labelledby="engineAdminTitle">
+    <form id="engineAdminForm" autocomplete="off">
+      <h3 id="engineAdminTitle">服务器管理员授权</h3>
+      <p id="engineAdminReason"></p>
+      <label class="sx-lbl">服务器用户名（root 或可使用 sudo 的账号）
+        <input class="sx-input" name="username" required maxlength="64" spellcheck="false" autofocus>
+      </label>
+      <label class="sx-lbl">服务器密码
+        <input class="sx-input" type="password" name="password" required maxlength="1024" autocomplete="off">
+      </label>
+      <div class="modal-actions">
+        <button type="button" id="engineAdminCancel">取消</button>
+        <button type="submit" class="primary">授权并重试</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="engineRecoveryModal" class="batch-cost-modal" aria-labelledby="engineRecoveryTitle" aria-describedby="engineRecoveryNote">
     <div class="engine-dialog-heading"><h3 id="engineRecoveryTitle"></h3><button type="button" id="engineRecoveryDismiss">×</button></div>
     <p id="engineRecoveryNote"></p>
@@ -1230,7 +1253,7 @@
     </div>
   </dialog>
 
-  <script src="trans.js?v=20261115multi12"></script>
+  <script src="trans.js?v=20261117sso"></script>
   <script src="workspace.js?v=20261029sessionfix"></script>
   <script src="rootwizard.js?v=20261110permission"></script>
   <script src="health.js?v=20261104runtime"></script>
@@ -1252,7 +1275,7 @@
   <script src="cost-optimization.js?v=20261015a"></script>
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
-  <script src="multi-engine.js?v=20261115multi12"></script>
-  <script src="app.js?v=20261116upload1"></script>
+  <script src="multi-engine.js?v=20261117collapse"></script>
+  <script src="app.js?v=20261118usage"></script>
 </body>
 </html>

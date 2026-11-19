@@ -262,6 +262,12 @@ async function api(path, body, authRetried = false, signal) {
   }
   const json = await res.json();
   if (!json.success) {
+    if (path === '/api/engine/update' && json.adminRequired) {
+      if (!window.isSecureContext) throw new Error('请通过 HTTPS 或本机地址打开此页面，再授权更新');
+      const admin = await askEngineAdmin(body.engine, body.admin ? json.error : '');
+      if (!admin) throw new Error('已取消管理员授权');
+      return api(path, { engine: body.engine, admin }, true, signal);
+    }
     const message = json.locked ? T('lockedHint') : (json.error || 'request failed');
     if (!path.startsWith('/api/engine/') && EngineRecovery.missingEngine(message)) {
       await EngineRecovery.fromError(message);
@@ -653,10 +659,30 @@ function closeGuideMenu() {
   const p = $('guideMenu');
   if (p && !p.hidden) p.hidden = true;
 }
-// 小白教程是独立页面，另开标签页，不打断当前会话
-function openLearnCourse() {
+// 小白教程由官网托管，注册 / 登录后学习；客户端只保留外部入口。
+let courseOpening = false;
+async function openLearnCourse() {
   closeGuideMenu();
-  window.open('learn.html', '_blank', 'noopener');
+  if (courseOpening) return;
+  const desktop = !!window.clooteeDesktop;
+  const tab = desktop ? null : window.open('about:blank', '_blank');
+  if (!desktop && !tab) { alert(T('coursePopupBlocked')); return; }
+  if (tab) {
+    tab.opener = null;
+    tab.document.title = 'Clootee';
+    tab.document.body.textContent = T('courseOpening');
+  }
+  courseOpening = true;
+  try {
+    const result = await api('/api/console/course/link', { lang: currentLang() });
+    const url = new URL(result.url);
+    if (url.origin !== 'https://clootee.com' || !['/learn/', '/learn/connect'].includes(url.pathname)) throw new Error(T('apiUnexpectedResponse'));
+    if (tab && !tab.closed) tab.location.replace(url.href);
+    else if (desktop) window.open(url.href, '_blank', 'noopener,noreferrer');
+  } catch (error) {
+    if (tab && !tab.closed) tab.close();
+    alert(error.message);
+  } finally { courseOpening = false; }
 }
 
 // ── 使用指南 ──
@@ -4443,22 +4469,70 @@ function uploadOne(file, fname, onProgress) {
         '&name=' + encodeURIComponent(fname),
     );
     xhr.setRequestHeader('x-auth-token', TOKEN);
+    const started = Date.now();
+    let sent = 0;
+    let bodySent = false;
+    let readingFile = false;
+    const mb = (n) => (n / 1024 / 1024).toFixed(2) + ' MiB';
+    const fail = (reason) => {
+      const values = {
+        name: fname, size: mb(file.size), sent: mb(sent),
+        seconds: ((Date.now() - started) / 1000).toFixed(1),
+        phase: T(readingFile ? 'uploadReadingFile' : (bodySent ? 'uploadAwaitingResponse' : 'uploadSending')),
+        status: xhr.status ? 'HTTP ' + xhr.status : T('uploadNoStatus'),
+      };
+      const details = T('uploadDiagnostics').replace(/\{(\w+)\}/g, (_, key) => values[key]);
+      reject(new Error(reason + '\n\n' + details));
+    };
     xhr.upload.onprogress = (e) => {
+      sent = e.loaded;
       if (e.lengthComputable) onProgress(e.loaded / e.total * 100);
     };
+    xhr.upload.onload = () => { bodySent = true; sent = file.size; };
     xhr.onload = () => {
-      if (xhr.status === 413) {
-        reject(new Error(T('uploadTooLarge')));
-        return;
-      }
       let json = null;
       try { json = JSON.parse(xhr.responseText); } catch (e) {}
-      if (!json || !json.success) reject(new Error((json && json.error) || ('HTTP ' + xhr.status)));
-      else resolve(json.data);
+      if (xhr.status >= 200 && xhr.status < 300 && json && json.success) {
+        resolve(json.data);
+        return;
+      }
+      let reason = T(xhr.status === 413 ? 'uploadTooLarge' : 'uploadRejected');
+      if (json && json.error) {
+        reason += '\n' + (typeof json.error === 'string' ? json.error : JSON.stringify(json.error)).slice(0, 800);
+      } else if (xhr.responseText) {
+        // Parse inert text only; never render a gateway error page in the app.
+        const doc = new DOMParser().parseFromString(xhr.responseText.slice(0, 16000), 'text/html');
+        doc.querySelectorAll('script, style').forEach((el) => el.remove());
+        const response = (doc.body.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 800);
+        reason += '\n' + (response || T('uploadInvalidResponse'));
+      } else reason += '\n' + T('uploadInvalidResponse');
+      fail(reason);
     };
-    xhr.onerror = () => reject(new Error('network error'));
+    xhr.onerror = () => fail(T(navigator.onLine === false ? 'uploadOffline' : 'uploadNetworkError'));
+    xhr.ontimeout = () => fail(T('uploadTimeout'));
     xhr.onabort = () => reject(new Error('__canceled__'));
-    xhr.send(file);
+    const prepareAndSend = async () => {
+      let body = file;
+      // Snapshot modest images before sending. Mobile photo providers can revoke/change
+      // File handles; an in-memory Blob avoids rereading that handle during transport.
+      // Larger files retain the streaming path rather than allocating hundreds of MiB.
+      if (file.type && file.type.startsWith('image/') && file.size <= 20 * 1024 * 1024) {
+        readingFile = true;
+        try {
+          const bytes = await file.arrayBuffer();
+          if (bytes.byteLength !== file.size) throw new Error('File size changed while reading');
+          body = new Blob([bytes], { type: file.type });
+        } catch (e) {
+          if (Upload.canceled) { reject(new Error('__canceled__')); return; }
+          fail(T('uploadFileReadFailed') + '\n' + (e.name || 'Error') + ': ' + e.message);
+          return;
+        }
+        readingFile = false;
+      }
+      if (Upload.canceled) { reject(new Error('__canceled__')); return; }
+      try { xhr.send(body); } catch (e) { fail(T('uploadStartFailed') + ': ' + e.message); }
+    };
+    prepareAndSend();
   });
 }
 
@@ -6664,8 +6738,9 @@ function showMarkdownLink(link) {
     btn.type = 'button'; btn.className = 'ml-action ' + className; btn.textContent = label;
     btn.onclick = () => action(btn); parent.appendChild(btn); return btn;
   };
+  let preview;
   if (path) {
-    const rootId = State.rootId;
+    const rootId = activeWorkRootId();
     const root = State.roots.find((r) => r.id === rootId);
     const base = (root?.path || '').replace(/\\/g, '/').replace(/\/$/, '');
     let rel = path.replace(/(?::\d+(?::\d+)?)$/, '');
@@ -6675,6 +6750,19 @@ function showMarkdownLink(link) {
     if (/^(?:[a-z]:\/|\/)/i.test(rel)) {
       status.textContent = T('messageLinkOutsideRoot'); status.hidden = false;
     } else {
+      const kind = kindOf(rel.split('.').pop());
+      if (kind === 'img' || kind === 'pdf') {
+        preview = document.createElement(kind === 'img' ? 'img' : 'iframe');
+        preview.className = 'ml-preview';
+        if (kind === 'img') preview.alt = title.textContent;
+        else preview.title = title.textContent;
+        preview.addEventListener('error', () => {
+          preview.hidden = true;
+          status.textContent = T('previewFail'); status.hidden = false;
+        });
+        preview.src = fmFileUrl(rel, false);
+        dialog.classList.add('ml-with-preview');
+      }
       if (State.settings.platform === 'win32') {
         if (/\.(?:pptx?|ppsx?|docx?|xlsx?|pdf|txt|md|csv|rtf|odt|ods|odp|png|jpe?g|gif|webp|bmp|svg|mp3|wav|mp4|mov)$/i.test(rel)) {
           button(primary, T('messageLinkOpenFile'), async (btn) => {
@@ -6709,7 +6797,9 @@ function showMarkdownLink(link) {
     button(secondary, T('messageLinkCopyLink'), (btn) => copyText(href, btn, T('messageLinkCopyLink')));
   }
   button(secondary, T('messageLinkCopyText'), (btn) => copyText(link.textContent, btn, T('messageLinkCopyText')));
-  dialog.append(head, detail, primary, secondary, status);
+  dialog.appendChild(head);
+  if (preview) dialog.appendChild(preview);
+  dialog.append(detail, primary, secondary, status);
   dialog.addEventListener('close', () => { dialog.remove(); link.focus(); });
   dialog.addEventListener('click', (event) => { if (event.target === dialog) {
     const rect = dialog.getBoundingClientRect();
@@ -7615,6 +7705,12 @@ function bind() {
   $('onboardBack').addEventListener('click', onboardBack);
   $('onboardNext').addEventListener('click', onboardNext);
   // 引擎板块（pane-engine）内：两个引擎折叠块
+  document.querySelectorAll('[data-engine-pane]').forEach(btn => {
+    btn.onclick = () => leavePane(() => openSettingsPane(btn.dataset.enginePane));
+  });
+  document.querySelectorAll('[data-engine-update]').forEach(btn => {
+    btn.onclick = () => updateEngine(btn.dataset.engineUpdate, btn, $(btn.dataset.engineUpdate + 'UpdateStatus'));
+  });
   $('engAccClaudeHead').addEventListener('click', () => toggleAcc('claude'));
   $('engAccCodexHead').addEventListener('click', () => toggleAcc('codex'));
   // 服务商 → 模型联动：换服务商即清空并自动检测选中推荐模型；Key 填完（失焦/回车）也自动补
@@ -8272,11 +8368,76 @@ function startServerHealth() {
   refresh();
 }
 
+let subscriptionGeneration = 0;
+async function refreshSubscriptionUsage() {
+  const generation = ++subscriptionGeneration;
+  const box = $('subscriptionUsage');
+  box.hidden = true;
+  const zh = T('serverHealth') === 'Linux 服务器';
+  box.querySelector('summary').textContent = zh ? '用量 · 订阅余量' : 'Usage · Subscription remaining';
+  try { box.open = localStorage.getItem('subscriptionUsageCollapsed') !== '1'; } catch {}
+  box.ontoggle = () => { try { localStorage.setItem('subscriptionUsageCollapsed', box.open ? '0' : '1'); } catch {} };
+  const grid = box.querySelector('div');
+  grid.textContent = zh ? '正在获取余量…' : 'Loading remaining usage…';
+  try {
+    const data = await api('/api/subscription/usage');
+    if (generation !== subscriptionGeneration) return;
+    box.hidden = data.accounts.length === 0;
+    grid.replaceChildren();
+    for (const account of data.accounts) {
+      const cell = document.createElement('div');
+      cell.className = 'server-health-metric';
+      const title = document.createElement('b');
+      title.textContent = account.name;
+      cell.append(title);
+      if (account.status !== 'ok') {
+        const status = document.createElement('small');
+        status.textContent = account.status === 'expired'
+          ? (zh ? '登录已过期，请重新登录' : 'Sign in again')
+          : (zh ? '暂无法获取订阅余量' : 'Subscription usage unavailable');
+        cell.append(status);
+      }
+      const labels = { five_hour: zh ? '5小时' : '5 hours', seven_day: zh ? '每周' : 'Weekly',
+        primary_window: zh ? '主要额度' : 'Primary', secondary_window: zh ? '次要额度' : 'Secondary',
+        extra_usage: zh ? '额外额度' : 'Extra usage' };
+      for (const row of account.rows) {
+        const label = labels[row.label] || row.label;
+        const text = document.createElement('small');
+        text.textContent = label + ' · ' + (zh ? '剩余 ' : '') + row.remaining.toFixed(0) + '%' + (zh ? '' : ' left');
+        const meter = document.createElement('meter');
+        meter.min = 0; meter.max = 100; meter.value = row.remaining;
+        meter.setAttribute('aria-label', text.textContent);
+        cell.append(text, meter);
+        if (row.reset && Number.isFinite(Date.parse(row.reset))) {
+          const reset = document.createElement('small');
+          const time = document.createElement('time');
+          time.dateTime = row.reset;
+          time.textContent = new Date(row.reset).toLocaleString(zh ? 'zh-CN' : 'en-US', {
+            year: 'numeric', month: 'short', day: 'numeric', weekday: 'short',
+            hour: '2-digit', minute: '2-digit',
+          });
+          reset.append(zh ? '下次刷新：' : 'Next reset: ', time);
+          cell.append(reset);
+        }
+      }
+      if (account.credits !== undefined) {
+        const extra = document.createElement('small');
+        extra.textContent = (zh ? '额外积分余量：' : 'Extra credits: ') + account.credits;
+        cell.append(extra);
+      }
+      grid.append(cell);
+    }
+  } catch {
+    grid.textContent = zh ? '余量获取失败，请重新打开重试' : 'Could not load usage. Reopen to retry.';
+  }
+}
+
 function openSettings() {
   closeDrawer(); // 移动端：打开设置前先收起左侧抽屉，避免遮挡
   renderSettingsNav();
   $('settingsOverlay').hidden = false;
   startServerHealth();
+  refreshSubscriptionUsage();
 }
 function closeSettings() {
   $('settingsOverlay').hidden = true;
@@ -8382,7 +8543,7 @@ async function leavePane(close) {
 }
 // 返回板块列表（回到列表前刷新摘要，让「引擎：Claude」这类当前状态是最新的）
 function backToSettingsNav() {
-  return leavePane(renderSettingsNav);
+  return leavePane(() => { renderSettingsNav(); refreshSubscriptionUsage(); });
 }
 // 直接关掉整个设置（也先保存，避免改了没生效）
 function closeSettingsPane() {
@@ -8527,9 +8688,8 @@ function fillEnginePane() {
   const claudeFirst = State.settings.defaultEngine !== 'codex';
   setAccOpen('claude', claudeFirst);
   setAccOpen('codex', !claudeFirst);
-  loadClaudeProvider();
-  loadEngineProvider('codex');
-  loadModelState();
+  setModelStatus('codex', T('mdlDetecting'), null);
+  Promise.all([loadClaudeProvider(), loadEngineProvider('codex')]).then(loadModelState);
 }
 // 「默认引擎」下面那行说明：只装了一个引擎时，额外说清默认引擎已自动跟着它走
 function defaultEngineNoteText() {
@@ -8880,7 +9040,7 @@ function tcRow(t) {
   const btns = [];
   if (t.globalInstallable)
     btns.push(
-      `<button class="sx-btn" data-tc-install="${t.id}" data-tc-target="global">${t.system.found ? '更新本机版' : '安装到本机（全局）'}</button>`,
+      `<button class="sx-btn" data-tc-install="${t.id}" data-tc-target="global">${['claude', 'codex'].includes(t.id) ? '安装 / 更新到最新版' : t.system.found ? '更新本机版' : '安装到本机（全局）'}</button>`,
     );
   if (t.bundlable)
     btns.push(
@@ -8945,6 +9105,7 @@ async function setToolPref(tool, pref) {
 async function installTool(tool, target, btn) {
   let box = btn?.closest('.tc-item')?.querySelector('[data-tc-status]');
   if (!box) box = document.querySelector(`[data-tc-status="${tool}"]`) || $('tcStatus');
+  if (['claude', 'codex'].includes(tool)) return updateEngine(tool, btn, box, true);
   box.hidden = false;
   box.className = 'sx-note sx-pre';
   const label = target === 'global' ? '安装到本机' : '下载内置版';
@@ -9012,7 +9173,7 @@ const MODEL_ALIAS_KEY = {
 // 「检测当前模型」的来源/失败原因：后端下发稳定编码，认不出的原样展示（多为引擎或网络的原始报错）
 const DETECT_SRC_KEY = {
   'claude-init': 'srcClaudeInit', 'codex-toml': 'srcCodexToml',
-  'codex-catalog': 'srcCodexCatalog', codex: 'srcCodex',
+  'codex-selected': 'srcCodexSelected', 'codex-catalog': 'srcCodexCatalog', codex: 'srcCodex',
 };
 const DETECT_ERR_KEY = {
   'init-no-model': 'errInitNoModel',
@@ -9124,7 +9285,9 @@ function renderModelSection(engine, s) {
   setModelValue(engine, s.selected || '');
   renderEffortSelect(engine, s);
   const d = s.detected;
-  if (d) {
+  if (engine === 'codex') {
+    detectCurrentModel(engine, s);
+  } else if (d) {
     setModelStatus(
       engine,
       d.ok
@@ -9140,6 +9303,7 @@ function renderModelSection(engine, s) {
 
 function setModelStatus(engine, text, ok) {
   const el = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  el.dataset.revision = String(Number(el.dataset.revision || 0) + 1);
   el.className = 'sx-note' + (ok === true ? ' ok' : ok === false ? ' err' : '');
   el.textContent = text;
 }
@@ -9169,10 +9333,17 @@ async function onModelSelect(engine) {
 }
 
 // 检测当前实际生效的模型（真实探测引擎）
-async function detectCurrentModel(engine) {
+async function detectCurrentModel(engine, currentState) {
   setModelStatus(engine, T('mdlDetecting'), null);
+  const status = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  const revision = status.dataset.revision;
   try {
-    const d = await api('/api/model/detect', { engine });
+    // The runner passes the saved model via -m. Only Auto needs the CLI default.
+    const saved = engine === 'codex' ? (currentState || (await api('/api/model/state')).codex) : null;
+    const d = saved?.selected
+      ? { ok: true, model: saved.selected, source: 'codex-selected' }
+      : await api('/api/model/detect', { engine });
+    if (status.dataset.revision !== revision) return;
     setModelStatus(
       engine,
       d && d.ok
@@ -9180,8 +9351,8 @@ async function detectCurrentModel(engine) {
         : T('mdlDetectFail').replace('{err}', detectErrorLabel(d && d.error)),
       !!(d && d.ok),
     );
-    await loadModelState();
   } catch (e) {
+    if (status.dataset.revision !== revision) return;
     setModelStatus(engine, T('mdlDetectFail').replace('{err}', e.message), false);
   }
 }
@@ -9662,20 +9833,51 @@ async function saveEngineProvider(engine) {
 }
 
 // ── 手动安装/更新引擎（npm 全局安装，源自动选官方或国内镜像中更快的那个）──
-async function updateEngine(engine) {
-  const box = $('updateStatus');
+function askEngineAdmin(engine, reason) {
+  const dialog = $('engineAdminDialog');
+  const form = $('engineAdminForm');
+  if (dialog.open) throw new Error('请先完成当前管理员授权');
+  $('engineAdminReason').textContent = reason || `${engineBlockLabel(engine)} 无法写入安装目录。请授权创建服务账号可写的目录，然后继续更新。`;
+  form.reset();
+  return new Promise(resolve => {
+    const cancel = $('engineAdminCancel');
+    const finish = credentials => {
+      form.reset();
+      form.onsubmit = cancel.onclick = dialog.oncancel = null;
+      dialog.close();
+      resolve(credentials);
+    };
+    form.onsubmit = event => {
+      event.preventDefault();
+      finish({ username: form.elements.username.value.trim(), password: form.elements.password.value });
+    };
+    cancel.onclick = () => finish(null);
+    dialog.oncancel = event => { event.preventDefault(); finish(null); };
+    dialog.showModal();
+  });
+}
+
+async function updateEngine(engine, btn, box, runtime = false) {
+  btn.disabled = true;
+  box.hidden = false;
   box.className = 'sx-note sx-pre';
-  // 引擎包 400-500MB，用实时进度代替一句「请稍候」，否则看起来像卡死
-  const stop = startEngineInstallProgress(box, `正在安装/更新 ${engine}，请勿关闭页面`);
+  const label = engineBlockLabel(engine);
+  const stop = startEngineInstallProgress(box, `正在安装 / 更新 ${label}`);
   try {
-    const r = await api('/api/engine/update', { engine });
-    stop();
+    const result = await api('/api/engine/update', { engine });
+    if (runtime) {
+      await renderToolchain();
+      box = document.querySelector(`[data-tc-status="${engine}"]`) || box;
+    }
+    box.hidden = false;
     box.className = 'sx-note sx-pre ok';
-    box.textContent = `${engine} 更新完成：${(r && r.pkg) || ''}\n源：${(r && r.registry) || ''}\n${(r && r.log) || ''}`;
+    box.textContent = `${label} 更新完成。\n${result.version || ''}`;
   } catch (e) {
-    stop();
     box.className = 'sx-note sx-pre err';
-    box.textContent = `${engine} 更新失败：${e.message}\n可自己在终端执行：npm install -g ${engine === 'codex' ? '@openai/codex' : '@anthropic-ai/claude-code'}`;
+    box.textContent = `${label} 更新未完成：${e.message}`;
+  } finally {
+    stop();
+    btn.disabled = false;
   }
 }
 

@@ -4,6 +4,7 @@
 //   out_end/tools/                npm --prefix 安装目标（Windows: claude.cmd/codex.cmd 直接在此；
 //                                 node_modules 在 tools/node_modules。Unix: bin/claude、lib/node_modules）
 // 所有方法返回真实存在的绝对路径或 null，从不抛错——未 bootstrap 时优雅返回 null，回退系统安装。
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Paths } from '../paths';
@@ -15,6 +16,17 @@ export class OutEnd {
 
   static toolsDir(): string {
     return path.join(this.dir(), 'tools');
+  }
+
+  // A system administrator can provision a service-owned prefix outside a read-only installation.
+  static adminToolsDir(): string {
+    const instance = createHash('sha256').update(this.dir()).digest('hex').slice(0, 20);
+    return `/var/lib/clootee-engines-${process.getuid!()}-${instance}`;
+  }
+
+  static installDir(): string {
+    if (process.platform === 'linux' && fs.existsSync(this.adminToolsDir())) return this.adminToolsDir();
+    return this.toolsDir();
   }
 
   static nodeDir(): string {
@@ -46,6 +58,8 @@ export class OutEnd {
         : [path.join(this.gitDir(), 'bin')],
       tools: win ? [this.toolsDir()] : [path.join(this.toolsDir(), 'bin')],
     };
+    if (tool === 'tools' && this.installDir() !== this.toolsDir())
+      map.tools.unshift(path.join(this.installDir(), 'bin'));
     return map[tool].filter((d) => fs.existsSync(d));
   }
 
@@ -83,7 +97,7 @@ export class OutEnd {
     const cands =
       process.platform === 'win32'
         ? [path.join(this.toolsDir(), `${name}.cmd`)]
-        : [path.join(this.toolsDir(), 'bin', name)];
+        : [path.join(this.installDir(), 'bin', name), path.join(this.toolsDir(), 'bin', name)];
     for (const c of cands) if (fs.existsSync(c)) return c;
     return null;
   }

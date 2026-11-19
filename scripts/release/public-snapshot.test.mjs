@@ -59,3 +59,21 @@ test('only explicitly reviewed cost tests are public; other test content remains
     assert.equal(privatePath(name), true, name);
   }
 });
+
+
+test('hosted courses are excluded from source, historical paths and payloads', () => {
+  for (const name of ['projects/claude_hub/frontend/learn',
+    'projects/claude_hub/frontend/learn.html', 'projects/claude_hub/frontend/learn-assist.js',
+    'projects/claude_hub/frontend/learn/ch01.js', 'projects/claude_hub/frontend/learn/ch09.js',
+    'projects/claude_hub/frontend/assist/docs.md']) {
+    assert.equal(privatePath(name), true, name);
+    assert.equal(publicPath(name), false, name);
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-course-boundary-'));
+  try {
+    const file = path.join(dir, 'projects/claude_hub/frontend/learn/ch01.js');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'private course');
+    assert.throws(() => checkPayload(dir), /private payload path/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

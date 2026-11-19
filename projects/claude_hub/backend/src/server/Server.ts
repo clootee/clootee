@@ -7,6 +7,7 @@ import { WebSocketServer } from 'ws';
 import { AppConfig } from '../config/AppConfig';
 import { PackageInfo } from '../helper/PackageInfo';
 import { Paths } from '../paths';
+import { SubscriptionUsage } from '../helper/SubscriptionUsage';
 import { ServerHealth } from '../helper/ServerHealth';
 import { Logger } from '../helper/Logger';
 import { LifeGuard } from '../logic_realize/LifeGuard';
@@ -30,7 +31,7 @@ import { Settings } from '../logic_realize/Settings';
 import { CodexProfile } from '../logic_realize/CodexProfile';
 import { CodexLogin } from '../logic_realize/CodexLogin';
 import { EngineConfig } from '../logic_realize/EngineConfig';
-import { EngineUpdater } from '../logic_realize/EngineUpdater';
+import { EngineUpdater, EngineWriteDenied, EngineAuthDenied } from '../logic_realize/EngineUpdater';
 import { Toolchain } from '../logic_realize/Toolchain';
 import { EngineStatus } from '../logic_realize/EngineStatus';
 import { Connectivity } from '../logic_realize/Connectivity';
@@ -181,6 +182,7 @@ export class Server {
     );
 
     // ── 全局设置（默认引擎 / 局域网访问 / 优先内置引擎）──
+    app.get('/api/subscription/usage', (_req, res) => this._wrapAsync(res, 'subscription.usage', () => SubscriptionUsage.get()));
     app.get('/api/system/health', (_req, res) => this._wrapAsync(res, 'system.health', () => ServerHealth.get()));
     app.get('/api/settings', (_req, res) => this._ok(res, Settings.get()));
     app.post('/api/settings', (req, res) =>
@@ -210,6 +212,7 @@ export class Server {
       this._ok(res, { providers: EngineConfig.providerList() }),
     );
     // ── Clootee 默认服务商（console.clootee.com）：一键开通 / 余额 / 用量 / 充值入口 ──
+    app.post('/api/console/course/link', (req, res) => this._wrapAsync(res, 'console.course.link', () => ConsoleAccount.courseLink(String(req.body.lang || ''))));
     app.post('/api/console/login/code', (req,res)=>this._wrapAsync(res,'console.login.code',()=>ConsoleAccount.sendEmailCode(String(req.body.email||''),String(req.body.lang||''))));
     app.post('/api/console/login/email', (req,res)=>this._wrapAsync(res,'console.login.email',()=>ConsoleAccount.loginWithEmail(String(req.body.email||''),String(req.body.code||''),String(req.body.lang||''))));
     app.post('/api/console/login/start', (_req,res)=>this._wrapAsync(res,'console.login.start',()=>ConsoleAccount.beginLogin()));
@@ -335,13 +338,24 @@ export class Server {
     app.post('/api/engine/version-check', (req, res) =>
       this._wrapAsync(res, 'engine.versionCheck', () => EngineUpdater.checkVersion(req.body.engine)),
     );
-    app.post('/api/engine/update', (req, res) =>
-      this._wrapAsync(res, 'engine.update', () =>
-        EngineUpdater.update(String(req.body.engine || ''), (line) =>
-          EventBus.broadcast({ kind: 'engineInstall', engine: String(req.body.engine || ''), line }),
-        ),
-      ),
-    );
+    app.post('/api/engine/update', async (req, res) => {
+      const { engine, admin } = req.body || {};
+      if (admin && !(LocalAccess.isLocal(req) || req.secure ||
+          (['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress || '') &&
+            req.headers['x-forwarded-proto'] === 'https'))) {
+        res.status(403).json({ success: false, error: '请通过 HTTPS 或本机地址提交服务器凭据' });
+        return;
+      }
+      try {
+        const result = await EngineUpdater.requestUpdate(engine, admin, line =>
+          EventBus.broadcast({ kind: 'engineInstall', engine, line }));
+        this._ok(res, result);
+      } catch (error) {
+        const canAuthorize = process.platform === 'linux' && (error instanceof EngineWriteDenied || error instanceof EngineAuthDenied);
+        res.status(canAuthorize ? 409 : 400).json({ success: false, adminRequired: canAuthorize,
+          error: error instanceof Error ? error.message : '引擎更新失败' });
+      }
+    });
 
     // ── 软件本身的版本更新（版本清单 version.json 为准，git commit 兜底）──
     // 有更新时前端提示确认（强制更新则弹不可关闭的窗），确认后拉取 + 触发重新编译与重启
@@ -826,8 +840,7 @@ export class Server {
       }),
     );
 
-    // 注：小白教程的 AI 小助手不在这里。MiniMax 官方接口已放行 CORS，教程页直接从浏览器调用，
-    // 后端不参与，也就没有「忘了重启就失灵」这回事。见 frontend/learn-assist.js。
+    // 小白教程由 clootee.com 托管；客户端不包含课程或教学问答接口。
 
     // 绑定失败（最常见是 EADDRINUSE：端口被别的进程、或上一个没死干净的自己占着）时，
     // 不能只在 stderr 甩一句 "address already in use"——要把占用方是谁写进生命周期日志。
