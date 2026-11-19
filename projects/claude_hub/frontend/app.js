@@ -4730,12 +4730,23 @@ function initDragUpload() {
 // ── 粘贴上传：从剪贴板取图片（截图/复制的图片）直接上传，正常文本粘贴放行 ──
 async function onPasteImage(e) {
   if (!State.sessionId) return;
-  const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
-  const imgs = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'));
-  if (!imgs.length) return;
+  const cd = e.clipboardData;
+  if (!cd) return;
+  // 任意类型的文件都收（资源管理器里复制的文件、截图、复制的图片…）。
+  // 优先用 files（多文件最可靠），个别浏览器只在 items 里给，兜底取一次。
+  let files = Array.from(cd.files || []);
+  if (!files.length) {
+    files = Array.from(cd.items || [])
+      .filter((it) => it.kind === 'file')
+      .map((it) => it.getAsFile())
+      .filter(Boolean);
+  }
+  if (!files.length) return; // 纯文本粘贴放行
+  // Excel/Word 等复制的是文字，但剪贴板会附带一张渲染图：此时用户要的是文字，不当附件。
+  const onlyImages = files.every((f) => (f.type || '').startsWith('image/'));
+  if (onlyImages && (cd.getData('text/plain') || '').trim()) return;
   e.preventDefault();
-  const files = imgs.map((it) => it.getAsFile()).filter(Boolean);
-  if (files.length) await uploadFiles(files);
+  await uploadFiles(files);
 }
 
 // ── 截屏：屏幕共享抓一帧 → 预览（裁剪 + 圈/框/箭头/文字标注）→ 确定后上传 ──
