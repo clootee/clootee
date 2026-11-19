@@ -296,6 +296,9 @@ const MultiUi = {
       modelController = new AbortController(); card.dataset.modelsLoading = 'true';
       setFetching(true); say(this.text('fetchingModels'), 'loading');
       try {
+        await prepareModelFetch(request.engine, message => say(message, 'loading'), modelController.signal);
+        if (version !== modelVersion || signature !== fingerprint() || !card.isConnected) return;
+        say(this.text('fetchingModels'), 'loading');
         const response = await api('/api/engine/models', request, false, modelController.signal);
         if (version !== modelVersion || signature !== fingerprint() || !card.isConnected) return;
         const models = (response.models || []).map(m => typeof m === 'string' ? { id: m } : m).filter(m => m?.id);

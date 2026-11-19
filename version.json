@@ -1,10 +1,10 @@
 {
-  "version": "3.1.42",
+  "version": "3.1.44",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-16",
+  "releasedAt": "2026-11-19",
   "notesI18n": {
-    "zh": "统一引擎模型拉取按钮，优化多引擎费用明细与汇总同步，修复多引擎附件共享路径。",
-    "en": "Unify model refresh buttons, synchronize multi-engine usage details and cost totals, and fix shared attachment paths across engines."
+    "zh": "拉取模型前检查引擎版本，可选择更新后拉取或直接拉取。修复切换到原版订阅时模型列表加载失败。",
+    "en": "Check the engine version before fetching models and choose whether to update. Fix model discovery when switching to an official subscription."
   }
 }

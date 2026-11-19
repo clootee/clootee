@@ -18,7 +18,7 @@ export interface UpdateResult {
 // 安装过程中的实时输出回调（Server 用它把进度广播给前端；不传则静默）
 export type UpdateProgress = (line: string) => void;
 
-const PKG: Record<string, string> = {
+export const PKG: Record<string, string> = {
   claude: '@anthropic-ai/claude-code',
   codex: '@openai/codex',
 };
