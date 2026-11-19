@@ -187,3 +187,19 @@ Linux 启动器独立于主服务运行，主服务退出后仍保留原访问�
 
 桌面安装版首次配置时启用登录自动启动；关闭窗口后服务留在托盘运行，
 在托盘选择「退出并停止服务」才会停止。在系统中禁用自动启动后，后续打开不会强行重新开启。
+
+## 定时唤醒会话
+
+源码安装可用 Python 3 标准库启动本机定时服务：
+
+```sh
+python3 scripts/wakeup/server.py
+```
+
+默认监听 `127.0.0.1:19873`，向同机 8970 端口的 Clootee 投递。可用 `--port`、`--hub-port` 和 `--data` 指定端口和实例的数据目录。让进程随系统启动即可持续接单。预约写入该实例的 SQLite 文件，服务重新启动后会处理已到期的预约。
+
+可将这段提示词交给会话里的 AI：
+
+> 需要定时继续工作时，向 http://127.0.0.1:19873/v1/wakeups 发送 POST JSON。rootId、sessionId、token 分别从当前进程的 CLOOTEE_ROOT_ID、CLOOTEE_SESSION_ID、CLOOTEE_EXTERNAL_TOKEN 读取。prompt 写唤醒后要执行的具体事项。相对时间填 afterSeconds（正整数秒），固定时间填 at（未来的 Unix 毫秒时间戳），二选一。为每次预约生成唯一的 Idempotency-Key 请求头，重试沿用原键和原参数。检查 HTTP 状态和响应中的 id、at、status，保存 id，勿输出 token。
+
+例如请求参数为 `{"prompt":"检查本轮构建是否完成并汇报","afterSeconds":30}`，再从环境补齐三个会话字段。固定时间请先根据用户的时区换算。首次预约返回 201，重复预约返回 200。查询时向 `/v1/wakeups/status` POST 同样的会话字段和 `id`。`pending` 表示等待，`queued` 表示 Clootee 已接收并返回 taskId，会话忙时在当前任务之后处理。投递沿用外部消息接口的行为，原会话已删除时由同一项目的新会话接收。令牌被更换或入口被关闭时状态为 `revoked`，投递被拒为 `failed`，发送中断且无法确定是否入队为 `unknown`，此时请先检查会话队列。
