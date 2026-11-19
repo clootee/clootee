@@ -1,6 +1,7 @@
 // 引擎安装/更新（实现）：spawn `npm install -g`。跨平台：Windows 用 npm.cmd(shell)，其余用 npm。
 // npm 源由 RegistryPicker 决定（用户配置 > 竞速最快 > 官方），首选源失败时自动换另一个公共源重试一次。
 // 安装到应用可写的 out_end/tools，复用启动安装器的位置，不需要写系统全局目录。
+import { SemVer } from '../helper/SemVer';
 import { promisify } from 'util';
 import { spawn, execFile } from 'child_process';
 import * as fs from 'fs';
@@ -9,7 +10,7 @@ import { OutEnd } from '../helper/OutEnd';
 import { ClaudeBin } from '../helper/ClaudeBin';
 import { CodexBin } from '../helper/CodexBin';
 import { AppConfig } from '../config/AppConfig';
-import { EngineUpdaterStruct, UpdateProgress } from '../logic_struct/EngineUpdaterStruct';
+import { EngineUpdaterStruct, UpdateProgress, PKG } from '../logic_struct/EngineUpdaterStruct';
 import { Logger } from '../helper/Logger';
 import { RegistryPicker, OFFICIAL_REGISTRY, MIRROR_REGISTRY } from '../helper/RegistryPicker';
 
@@ -79,6 +80,23 @@ export class EngineUpdater extends EngineUpdaterStruct {
         else reject(new EngineAuthDenied('服务器授权失败，请检查账号密码及 sudo 权限后重试'));
       });
     });
+  }
+
+  static async checkVersion(engine: string) {
+    if (engine !== 'claude' && engine !== 'codex') throw new Error('Invalid engine');
+    const resolved = engine === 'claude'
+      ? ClaudeBin.resolve(AppConfig.CLAUDE_BIN, true)
+      : CodexBin.resolve(AppConfig.CODEX_BIN, true);
+    const { stdout } = await promisify(execFile)(resolved.bin, [...resolved.prefixArgs, '--version'],
+      { windowsHide: true, timeout: 10000 });
+    const current = stdout.match(/\b\d+\.\d+\.\d+(?:-[\w.-]+)?\b/)?.[0];
+    if (!current) throw new Error('Cannot read installed CLI version');
+    const registry = (await this._pickRegistry()).replace(/\/+$/, '');
+    const response = await fetch(registry + '/' + PKG[engine] + '/latest', { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error('Registry HTTP ' + response.status);
+    const latest = SemVer.parse((await response.json()).version);
+    if (!latest) throw new Error('Cannot read latest CLI version');
+    return { current, latest, hasUpdate: SemVer.gt(latest, current) };
   }
 
   protected static _verify(engine: string): Promise<string> {

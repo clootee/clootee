@@ -9604,7 +9604,7 @@ async function autoPickModel(engine, preserveAuto = false) {
     if (modelValue(engine)) return; // 已有模型就不动
     // 从后端获取可用模型列表（对于 official，返回内置候选）
     try {
-      const r = await api('/api/model/available', { engine, verify: false });
+      const r = await api('/api/engine/models', { engine, provider: 'official' });
       const models = r && r.models ? r.models : [];
       if (u.select.value !== provider || modelValue(engine)) return;
       if (models.length > 0) {
@@ -9701,7 +9701,7 @@ async function fetchEngineModels(engine, auto = false) {
     clearModelChoices(engine);
     say(auto ? T('modelAutoDetecting') : T('modelFetching'), null);
     try {
-      const r = await api('/api/model/available', { engine, verify: false });
+      const r = await api('/api/engine/models', { engine, provider: 'official' });
       const models = r && r.models ? r.models : [];
       if (!models.length) throw new Error(T('modelEmptyList'));
       fillModelChoices(engine, models, true);
@@ -9759,6 +9759,51 @@ async function fetchEngineModels(engine, auto = false) {
     say(T('modelFetchFail').replace('{err}', e.message), false);
   }
 }
+function chooseModelFetch(name, version, signal) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'message-link-dialog';
+  const title = T('modelUpdateTitle').replace('{name}', name);
+  dialog.setAttribute('aria-label', title);
+  dialog.innerHTML = `<div class="ml-head"><span class="ml-badge" aria-hidden="true">↑</span><h3></h3></div>
+    <p class="ml-path"></p><p class="model-update-note"></p><form method="dialog" class="ml-primary">
+    <button class="ml-action ml-folder" value="fetch" autofocus></button>
+    <button class="ml-action ml-download" value="update"></button></form>`;
+  dialog.querySelector('h3').textContent = title;
+  dialog.querySelector('.ml-path').textContent = version.current + ' → ' + version.latest;
+  dialog.querySelector('.model-update-note').textContent = T('modelUpdateCli');
+  dialog.querySelector('[value="fetch"]').textContent = T('modelDirectFetch');
+  dialog.querySelector('[value="update"]').textContent = T('modelUpdateFetch');
+  document.body.append(dialog);
+  return new Promise(resolve => {
+    const abort = () => dialog.close();
+    dialog.addEventListener('close', () => {
+      signal?.removeEventListener('abort', abort);
+      dialog.remove();
+      resolve(dialog.returnValue);
+    }, { once: true });
+    dialog.showModal();
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+async function prepareModelFetch(engine, status, signal) {
+  const name = engine === 'claude' ? 'Claude Code' : 'Codex';
+  status(T('modelCheckingCli').replace('{name}', name));
+  let version;
+  try {
+    version = await api('/api/engine/version-check', { engine }, false, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.warn('CLI version check failed', engine, error);
+    return;
+  }
+  if (signal?.aborted || !version.hasUpdate) return;
+  const choice = await chooseModelFetch(name, version, signal);
+  if (!choice) throw new DOMException(T('cancel'), 'AbortError');
+  if (choice === 'update') {
+    status(T('modelUpdatingCli').replace('{name}', name));
+    await api('/api/engine/update', { engine }, false, signal);
+  }
+}
 async function refreshEngineModels(engine) {
   const button = $(`${engine}ModelsBtn`);
   if (button.disabled) return;
@@ -9768,7 +9813,11 @@ async function refreshEngineModels(engine) {
   button.setAttribute('aria-busy', 'true');
   label.textContent = T('engFetchingModels');
   try {
+    await prepareModelFetch(engine, message => { label.textContent = message; });
+    label.textContent = T('engFetchingModels');
     await fetchEngineModels(engine);
+  } catch (error) {
+    setModelStatus(engine, error.message, false);
   } finally {
     button.disabled = false;
     button.classList.remove('is-loading');

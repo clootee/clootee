@@ -1,10 +1,10 @@
 {
-  "version": "3.1.43",
+  "version": "3.1.44",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-18",
+  "releasedAt": "2026-11-19",
   "notesI18n": {
-    "zh": "在 AI 引擎设置中直接更新 Codex 和 Claude Code。Linux 遇到安装目录权限不足时，可通过服务器管理员授权重试。",
-    "en": "Update Codex and Claude Code directly from AI Engine settings. On Linux, retry with server administrator authorization when the installation directory is not writable."
+    "zh": "拉取模型前检查引擎版本，可选择更新后拉取或直接拉取。修复切换到原版订阅时模型列表加载失败。",
+    "en": "Check the engine version before fetching models and choose whether to update. Fix model discovery when switching to an official subscription."
   }
 }
