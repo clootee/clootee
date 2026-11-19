@@ -45,17 +45,22 @@ export class EngineUpdaterStruct {
     if (!pkg) throw new Error(`update: invalid engine=${engine}`);
     const registry = await this._pickRegistry();
     onProgress?.(`npm registry: ${registry}`);
-    const log = await this._npmInstall(pkg, registry, onProgress);
+    const prefix = this._installPrefix(engine);
+    const log = await this._npmInstall(pkg, registry, prefix, onProgress);
     // 安装后清缓存，让下次解析拿到新版本
     ClaudeBin.clearCache();
     CodexBin.clearCache();
     // 「装没装」的探测结果是进程级缓存的，装完必须作废，否则界面还显示未安装
     EngineStatus.invalidate();
-    await this._verify(engine);
+    await this._verify(engine, prefix);
     return { ok: true, engine, pkg, log, registry };
   }
 
-  protected static _verify(_engine: string): Promise<void> {
+  protected static _installPrefix(_engine: string): string {
+    throw new Error('Not implemented');
+  }
+
+  protected static _verify(_engine: string, _prefix: string): Promise<void> {
     throw new Error('Not implemented');
   }
 
@@ -68,6 +73,7 @@ export class EngineUpdaterStruct {
   protected static _npmInstall(
     _pkg: string,
     _registry: string,
+    _prefix: string,
     _onProgress?: UpdateProgress
   ): Promise<string> {
     throw new Error('Not implemented');

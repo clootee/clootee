@@ -6241,6 +6241,8 @@ async function checkAppUpdate() {
 // onFail 用于失败后解禁发起按钮——两处的按钮不是同一个，交给调用方处理。
 function confirmAppUpdateOverwrite() {
   const modal = $('updateConflictModal');
+  $('updConflictDismiss').setAttribute('aria-label', T('close'));
+  $('updConflictDismiss').onclick = () => $('updConflictCancel').click();
   $('updConflictTitle').textContent = T('updateConflictTitle');
   $('updConflictNote').textContent = T('updateConflictNote');
   $('updConflictCancel').textContent = T('updateConflictCancel');
@@ -7617,12 +7619,8 @@ function bind() {
   $('engAccCodexHead').addEventListener('click', () => toggleAcc('codex'));
   // 服务商 → 模型联动：换服务商即清空并自动检测选中推荐模型；Key 填完（失焦/回车）也自动补
   $('claudeProviderSelect').addEventListener('change', onClaudeProviderChange);
-  $('claudeApiKey').addEventListener('change', () => onApiKeySettled('claude'));
-  $('claudeApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('claude'); });
   $('claudeModelsBtn').addEventListener('click', () => refreshEngineModels('claude'));
   $('codexProviderSelect').addEventListener('change', () => onEngineProviderChange('codex'));
-  $('codexApiKey').addEventListener('change', () => onApiKeySettled('codex'));
-  $('codexApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('codex'); });
   $('codexModelsBtn').addEventListener('click', () => refreshEngineModels('codex'));
   // 引擎块没有自己的保存按钮了（全板块只有一个，在 footer），靠脏标记告诉用户「这块动了还没存」。
   // 「脏」只由用户操作产生：换服务商在 onEngineProviderChange 里标，Key/地址/手填模型在这里标；
@@ -9059,26 +9057,38 @@ function modelValue(engine) {
   const u = providerUi(engine);
   return modelIsFree(engine) ? u.modelInput.value.trim() : u.model.value;
 }
+function syncModelControls(engine) {
+  const u = providerUi(engine);
+  const empty = !u.modelList.options.length && !modelValue(engine);
+  const free = modelIsFree(engine);
+  u.model.hidden = empty || free;
+  u.modelInput.hidden = empty || !free;
+  u.modelHint.hidden = empty || !free;
+  u.modelBox.querySelector('.multi-engine-model-head label').hidden = empty;
+}
 function setModelValue(engine, model) {
   const u = providerUi(engine);
   u.model.value = model || '';
   u.modelInput.value = model || '';
+  syncModelControls(engine);
 }
 function clearModelChoices(engine) {
   const u = providerUi(engine);
   u.model.innerHTML = '';
   u.modelList.innerHTML = '';
+  syncModelControls(engine);
 }
 // opts 为 [{id,label,source,verified,note}]；withAuto=true 时首项是「自动」（值为空）
 function fillModelChoices(engine, opts, withAuto) {
   const u = providerUi(engine);
   clearModelChoices(engine);
-  if (withAuto) u.model.appendChild(new Option(T('effAuto'), ''));
+  if (withAuto && opts.length) u.model.appendChild(new Option(T('effAuto'), ''));
   for (const o of opts) {
     const text = modelOptionText(o);
     u.model.appendChild(new Option(text, o.id));
     u.modelList.appendChild(new Option(text, o.id));
   }
+  syncModelControls(engine);
 }
 
 // ── 模型选择（claude / codex 各自一套；''=自动）──
@@ -9259,7 +9269,6 @@ async function renderClooteeAccount(engine) {
         for (const eng of ['claude', 'codex']) {
           if (providerUi(eng).select.value === 'clootee') renderClooteeAccount(eng);
         }
-        if (!signedIn && u.select.value === 'clootee') await autoPickModel(engine);
       } catch (e) {
         ErrorHandler.handle(e, 'renderClooteeAccount');
         if (box.querySelector('[data-error]')) box.querySelector('[data-error]').textContent = e.message;
@@ -9342,12 +9351,7 @@ function syncProviderVisibility(engine) {
     }
   }
 
-  // 模型选择框始终显示，允许原版订阅也选择模型；
-  // 自定义服务商换成可手填的输入框（拉不到模型列表时也能用）
-  const free = modelIsFree(engine);
-  u.model.hidden = free;
-  u.modelInput.hidden = !free;
-  u.modelHint.hidden = !free;
+  syncModelControls(engine);
   // 只有原版才是订阅登录，第三方走 API Key，没有账号可言 —— 整块登录卡都不出现
   if (u.login) {
     u.login.hidden = provider !== 'official' && provider !== 'clootee';
@@ -9412,8 +9416,6 @@ async function onEngineProviderChange(engine) {
     const def = providerDefaultContextWindow(provider);
     if (def) u.ctxWin.value = String(def);
   }
-  // 没有选定模型才自动定档（不覆盖用户上次的选择）
-  if (!modelValue(engine)) autoPickModel(engine);
 }
 // 「模型」标签旁的服务商小标要跟着表单里选中的服务商走
 // （否则会一直显示上次已保存的那个，和下面的模型对不上）
@@ -9422,50 +9424,6 @@ function syncModelProviderTag(engine) {
   $(`mdl${cap}Provider`).textContent = providerLabel(providerUi(engine).select.value);
 }
 function onClaudeProviderChange() { onEngineProviderChange('claude'); }
-
-// 模型跟随服务商自动定档：没有选定模型时自动拉取候选并选中服务商推荐的那个。
-// 只改表单里的下拉，不落盘——落盘仍由「保存」按钮完成（否则会把新模型配到旧的已保存服务商上）。
-async function autoPickModel(engine) {
-  const u = providerUi(engine);
-  const provider = u.select.value;
-  if (provider === 'official') {
-    // 原版订阅也可以选择模型：如果没有选定模型，自动填充内置候选列表
-    if (modelValue(engine)) return; // 已有模型就不动
-    // 从后端获取可用模型列表（对于 official，返回内置候选）
-    try {
-      const r = await api('/api/engine/models', { engine, provider: 'official' });
-      const models = r && r.models ? r.models : [];
-      if (models.length > 0) {
-        fillModelChoices(engine, models, true);
-        // 默认选中 opus（如果有）
-        const defaultModel = models.find(m => m.id === 'opus') || models[0];
-        if (defaultModel) {
-          setModelValue(engine, defaultModel.id);
-          setModelStatus(engine, T('mdlAutoPickedOne').replace('{model}', modelOptionText(defaultModel)), true);
-        }
-      }
-    } catch (e) {
-      setModelStatus(engine, T('mdlListFail').replace('{err}', e.message), false);
-    }
-    return;
-  }
-  if (modelValue(engine)) return; // 已有模型就不动，避免覆盖用户的选择
-  // clootee 的 Key 由本机自动领取（后端补），不要求用户填
-  if (!u.key.value.trim() && provider !== 'clootee') {
-    setModelStatus(engine, T('modelNeedKey'), null);
-    return;
-  }
-  if (provider === 'custom' && !u.base.value.trim()) {
-    setModelStatus(engine, T('modelNeedBase'), null);
-    return;
-  }
-  await fetchEngineModels(engine, true);
-}
-// API Key 填完（失焦/回车）时：若还没有模型就自动检测一次
-function onApiKeySettled(engine) {
-  if (modelValue(engine)) return;
-  autoPickModel(engine);
-}
 
 async function loadEngineProvider(engine) {
   const u = providerUi(engine);
@@ -9496,12 +9454,6 @@ async function loadEngineProvider(engine) {
         .replace('{provider}', providerLabel(c.provider))
         .replace('{model}', c.model || '');
     renderAccSummary(engine);
-    // 原版订阅也可以选择模型：如果没有选定模型，自动填充内置候选列表
-    if (c.provider === 'official' && !c.model) {
-      autoPickModel(engine);
-    }
-    // 已存了第三方服务商与 Key、却没有模型（历史配置/上次没选完）→ 进面板就自动补一个
-    if (c.provider !== 'official' && c.apiKey && !c.model) autoPickModel(engine);
   } catch (e) {
     EngineLoaded[engine] = false;
     u.status.className = 'sx-note err';
@@ -9522,7 +9474,7 @@ async function fetchEngineModels(engine, auto = false) {
     u.status.className = 'sx-note' + (ok === true ? ' ok' : ok === false ? ' err' : '');
     u.status.textContent = text;
   };
-  // 原版订阅：走 /api/model/available 获取内置候选列表
+  // 原版订阅：读取所选引擎的模型目录
   if (provider === 'official') {
     const prev = modelValue(engine);
     clearModelChoices(engine);
@@ -9591,12 +9543,15 @@ function chooseModelFetch(name, version, signal) {
   dialog.className = 'message-link-dialog';
   const title = T('modelUpdateTitle').replace('{name}', name);
   dialog.setAttribute('aria-label', title);
-  dialog.innerHTML = `<div class="ml-head"><span class="ml-badge" aria-hidden="true">↑</span><h3></h3></div>
+  dialog.innerHTML = `<div class="ml-head"><span class="ml-badge" aria-hidden="true">↑</span><h3></h3><button type="button" class="ml-close">×</button></div>
     <p class="ml-path"></p><p class="model-update-note"></p><form method="dialog" class="ml-primary">
     <button class="ml-action ml-folder" value="fetch" autofocus></button>
     <button class="ml-action ml-download" value="update"></button></form>`;
   dialog.querySelector('h3').textContent = title;
   dialog.querySelector('.ml-path').textContent = version.current + ' → ' + version.latest;
+  const close = dialog.querySelector('.ml-close');
+  close.setAttribute('aria-label', T('close'));
+  close.onclick = () => dialog.close();
   dialog.querySelector('.model-update-note').textContent = T('modelUpdateCli');
   dialog.querySelector('[value="fetch"]').textContent = T('modelDirectFetch');
   dialog.querySelector('[value="update"]').textContent = T('modelUpdateFetch');
@@ -9627,8 +9582,16 @@ async function prepareModelFetch(engine, status, signal) {
   const choice = await chooseModelFetch(name, version, signal);
   if (!choice) throw new DOMException(T('cancel'), 'AbortError');
   if (choice === 'update') {
-    status(T('modelUpdatingCli').replace('{name}', name));
-    await api('/api/engine/update', { engine }, false, signal);
+    const message = T('modelUpdatingCli').replace('{name}', name);
+    const started = Date.now();
+    const progress = () => status(message + ' ' + T('engInstElapsed').replace('{s}', Math.floor((Date.now() - started) / 1000)));
+    progress();
+    const timer = setInterval(progress, 1000);
+    try { await api('/api/engine/update', { engine }, false, signal); }
+    finally { clearInterval(timer); }
+
+    const checked = await api('/api/engine/version-check', { engine }, false, signal);
+    if (checked.hasUpdate) throw new Error(T('modelUpdateIncomplete').replace('{current}', checked.current).replace('{latest}', checked.latest));
   }
 }
 async function refreshEngineModels(engine) {
@@ -9644,7 +9607,7 @@ async function refreshEngineModels(engine) {
     label.textContent = T('engFetchingModels');
     await fetchEngineModels(engine);
   } catch (error) {
-    setModelStatus(engine, error.message, false);
+    if (error.name !== 'AbortError') setModelStatus(engine, error.message, false);
   } finally {
     button.disabled = false;
     button.classList.remove('is-loading');
@@ -9670,8 +9633,6 @@ async function saveEngineProvider(engine) {
     }
   }
 
-  // 第三方缺模型时先自动补一次（多数情况用户根本不用管模型），补不上才报错
-  if (provider !== 'official' && !modelValue(engine)) await autoPickModel(engine);
   const model = modelValue(engine);
   if (provider !== 'official' && !model) {
     u.status.className = 'sx-note err';

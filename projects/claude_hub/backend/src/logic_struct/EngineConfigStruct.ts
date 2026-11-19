@@ -283,7 +283,7 @@ export class EngineConfigStruct {
       baseUrl: provider === 'custom' ? slot.baseUrl || '' : '',
       modelsUrl: provider === 'custom' ? slot.modelsUrl || '' : '',
       contextWindow: this._cleanContextWindow(slot.contextWindow),
-      models: Array.isArray(slot.models) ? slot.models : undefined,
+      models: Array.isArray(slot.models) ? slot.models.filter(m => m && m.source !== 'builtin' && m.source !== 'detected') : undefined,
       detected: slot.detected,
     };
   }

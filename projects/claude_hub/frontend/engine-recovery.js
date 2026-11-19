@@ -41,6 +41,9 @@ const EngineRecovery = {
     const progress = $('engineRecoveryProgress');
     const install = $('engineRecoveryInstall');
     const close = $('engineRecoveryClose');
+    const dismiss = $('engineRecoveryDismiss');
+    dismiss.setAttribute('aria-label', T('close'));
+    dismiss.onclick = () => close.click();
     const focus = document.activeElement;
     const previousOverflow = document.body.style.overflow;
     let busy = false, completed = false;
@@ -51,7 +54,7 @@ const EngineRecovery = {
     install.hidden = false;
     install.disabled = false;
     close.textContent = T('engineRecoveryLater');
-    close.disabled = false;
+    dismiss.disabled = close.disabled = false;
     progress.hidden = true;
     this.pending = new Promise(resolve => {
       dialog.oncancel = event => { if (busy) event.preventDefault(); };
@@ -66,7 +69,7 @@ const EngineRecovery = {
         if (busy) return;
         busy = true;
         install.disabled = true;
-        close.disabled = true;
+        dismiss.disabled = close.disabled = true;
         progress.hidden = false;
         let stop = () => {};
         try {
@@ -96,7 +99,7 @@ const EngineRecovery = {
           stop();
           busy = false;
           install.disabled = false;
-          close.disabled = false;
+          dismiss.disabled = close.disabled = false;
           (completed ? close : install).focus();
         }
       };

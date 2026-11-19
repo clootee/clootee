@@ -3600,3 +3600,6 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 @media (max-width: 768px) { .session-engine-cancel { min-height: 44px; } }
 
 .multi-engine-model-head > .sx-lbl { margin: 0; }
+
+.engine-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.engine-dialog-heading button { font-size: 20px; line-height: 1; }
