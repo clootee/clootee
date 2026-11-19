@@ -6,6 +6,7 @@ import { EngineConfig } from '../logic_realize/EngineConfig';
 import { Settings } from '../logic_realize/Settings';
 import { HttpJson } from './HttpJson';
 import { CodexStoreHelper } from './CodexStoreHelper';
+import { ClaudeStoreHelper } from './ClaudeStoreHelper';
 
 export class SubscriptionUsage {
   private static cache = new Map<string, { at: number; data: unknown }>();
@@ -23,7 +24,8 @@ export class SubscriptionUsage {
     const pending = Promise.all(names.map(name => this.read(name)))
       .then(accounts => {
         const data = { accounts, updatedAt: new Date().toISOString() };
-        this.cache.set(key, { at: Date.now(), data });
+        // 只缓存全部成功的结果：失败（网络抖动、凭据刚被刷新）下次打开设置就该立刻重试
+        if (accounts.every((a: any) => a.status === 'ok')) this.cache.set(key, { at: Date.now(), data });
         return data;
       }).finally(() => { this.pending.delete(key); });
     this.pending.set(key, pending);
@@ -42,22 +44,23 @@ export class SubscriptionUsage {
       } else {
         let raw: string;
         try {
-          raw = fs.readFileSync(path.join(process.env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), '.credentials.json'), 'utf8');
+          raw = fs.readFileSync(path.join(ClaudeStoreHelper.configDir(home), '.credentials.json'), 'utf8');
         } catch (e) {
-          if (process.platform !== 'darwin') throw e;
+          // Windows / Linux 把凭据放在文件里；只有 macOS 在钥匙串。文件不存在时不要把 ENOENT 当成别的错误
+          if (process.platform !== 'darwin') return { name, status: 'unavailable', reason: 'no-credentials', rows };
           raw = execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { encoding: 'utf8', timeout: 3000 });
         }
         token = JSON.parse(raw).claudeAiOauth?.accessToken;
       }
-      if (!token) return { name, status: 'unavailable', rows };
+      if (!token) return { name, status: 'unavailable', reason: 'no-token', rows };
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
       if (name === 'Claude') headers['anthropic-beta'] = 'oauth-2025-04-20';
       if (account) headers['ChatGPT-Account-Id'] = account;
       const response = await HttpJson.get(name === 'Claude' ? 'https://api.anthropic.com/api/oauth/usage' : 'https://chatgpt.com/backend-api/wham/usage',
         headers, 10000);
-      if (response.status < 200 || response.status >= 300) return { name, status: response.status === 401 ? 'expired' : 'error', rows };
+      if (response.status < 200 || response.status >= 300) return { name, status: response.status === 401 ? 'expired' : 'error', reason: `http-${response.status}`, rows };
       const data = response.json;
-      if (!data || typeof data !== 'object') return { name, status: 'error', rows };
+      if (!data || typeof data !== 'object') return { name, status: 'error', reason: 'bad-response', rows };
       const add = (label: string, used: unknown, reset?: string) => {
         if (typeof used === 'number' && Number.isFinite(used)) rows.push({ label, remaining: Math.max(0, Math.min(100, 100 - used)), reset });
       };
@@ -77,7 +80,10 @@ export class SubscriptionUsage {
         if (data.credits?.unlimited === true) credits = 'unlimited';
         else if (data.credits?.balance != null) credits = String(data.credits.balance);
       }
-      return { name, status: rows.length || credits !== undefined ? 'ok' : 'unavailable', rows, credits };
-    } catch { return { name, status: 'unavailable', rows }; }
+      return { name, status: rows.length || credits !== undefined ? 'ok' : 'unavailable', reason: rows.length || credits !== undefined ? undefined : 'empty-usage', rows, credits };
+    } catch (e: any) {
+      // 错误码（ENOENT / ETIMEDOUT / ENOTFOUND…）原样带出，用户才能分清是没登录还是网络不通
+      return { name, status: 'unavailable', reason: String(e?.code || e?.message || 'error').slice(0, 120), rows };
+    }
   }
 }

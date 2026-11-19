@@ -8377,16 +8377,25 @@ function startServerHealth() {
 }
 
 let subscriptionGeneration = 0;
+// 后端下发稳定原因码；认不出的（多为系统/网络原始错误码，如 ETIMEDOUT）原样展示
+const SUBSCRIPTION_REASON = {
+  'no-credentials': ['Not signed in on this computer (no credentials file)', '本机尚未登录（找不到凭据文件）'],
+  'no-token': ['No access token in the credentials', '凭据中没有访问令牌'],
+  'empty-usage': ['The service returned no usage data', '服务未返回用量数据'],
+  'bad-response': ['Unexpected response from the service', '服务返回了无法识别的内容'],
+  ENOENT: ['Not signed in on this computer (no credentials file)', '本机尚未登录（找不到凭据文件）'],
+};
 async function refreshSubscriptionUsage() {
   const generation = ++subscriptionGeneration;
   const box = $('subscriptionUsage');
   box.hidden = true;
-  const zh = T('serverHealth') === 'Linux 服务器';
+  const zh = LANG === 'zh';
   box.querySelector('summary').textContent = zh ? '用量 · 订阅余量' : 'Usage · Subscription remaining';
   try { box.open = localStorage.getItem('subscriptionUsageCollapsed') !== '1'; } catch {}
   box.ontoggle = () => { try { localStorage.setItem('subscriptionUsageCollapsed', box.open ? '0' : '1'); } catch {} };
   const grid = box.querySelector('div');
   grid.textContent = zh ? '正在获取余量…' : 'Loading remaining usage…';
+  box.hidden = false; // 拉取过程与失败都要让用户看到，而不是整块消失
   try {
     const data = await api('/api/subscription/usage');
     if (generation !== subscriptionGeneration) return;
@@ -8404,6 +8413,11 @@ async function refreshSubscriptionUsage() {
           ? (zh ? '登录已过期，请重新登录' : 'Sign in again')
           : (zh ? '暂无法获取订阅余量' : 'Subscription usage unavailable');
         cell.append(status);
+        if (account.reason) {
+          const why = document.createElement('small');
+          why.textContent = (zh ? '原因：' : 'Reason: ') + (SUBSCRIPTION_REASON[account.reason] ? SUBSCRIPTION_REASON[account.reason][zh ? 1 : 0] : account.reason);
+          cell.append(why);
+        }
       }
       const labels = { five_hour: zh ? '5小时' : '5 hours', seven_day: zh ? '每周' : 'Weekly',
         primary_window: zh ? '主要额度' : 'Primary', secondary_window: zh ? '次要额度' : 'Secondary',
@@ -8436,6 +8450,7 @@ async function refreshSubscriptionUsage() {
       grid.append(cell);
     }
   } catch {
+    if (generation !== subscriptionGeneration) return;
     grid.textContent = zh ? '余量获取失败，请重新打开重试' : 'Could not load usage. Reopen to retry.';
   }
 }
