@@ -73,13 +73,18 @@ test('named engine infrastructure', async t => {
     });
     await t.test('model discovery uses each instance credential without changing main provider caches', async () => {
       const { ModelManager } = load('logic_realize/ModelManager');
-      const originals = { list:EngineConfig.listModels, cache:EngineConfig.setCache, catalog:ModelManager._codexCatalog };
+      const originals = { list:EngineConfig.listModels, cache:EngineConfig.setCache, catalog:ModelManager._codexCatalog, claudeCatalog:ModelManager._claudeCatalog };
       const calls = [];
       EngineConfig.listModels = async (provider, key, base, modelsUrl) => { calls.push({ provider, key, base, modelsUrl }); return [key+'-first',key+'-second']; };
       EngineConfig.setCache = () => { throw new Error('Discovery must not change main cache'); };
       ModelManager._codexCatalog = async () => {
         assert.equal(EngineConfig.get().codex.provider, 'official');
         return [{id:'native-codex',source:'catalog'}];
+      };
+      // The official Claude catalog is read from the real CLI, which CI runners do not have installed.
+      ModelManager._claudeCatalog = async () => {
+        assert.equal(EngineConfig.get().claude.provider, 'official');
+        return [{id:'native-claude',source:'catalog'}];
       };
       try {
         const [one,two] = await Promise.all([MultiEngine.models('codex',{...config(0),modelsUrl:'https://example.com/models'}),MultiEngine.models('codex',config(1))]);
@@ -89,7 +94,7 @@ test('named engine infrastructure', async t => {
         assert.equal((await MultiEngine.models('codex',{provider:'official',apiKey:''})).models[0].id,'native-codex');
         assert.ok((await MultiEngine.models('claude',{provider:'official',apiKey:''})).models.length>0);
         await assert.rejects(MultiEngine.models('invalid',{provider:'official',apiKey:''}),/Invalid engine/);
-      } finally { EngineConfig.listModels=originals.list;EngineConfig.setCache=originals.cache;ModelManager._codexCatalog=originals.catalog; }
+      } finally { EngineConfig.listModels=originals.list;EngineConfig.setCache=originals.cache;ModelManager._codexCatalog=originals.catalog;ModelManager._claudeCatalog=originals.claudeCatalog; }
     });
     await t.test('validates names, duplicate names, count and provider requirements', () => {
       assert.equal(MultiEngineSettings.validate(settings.multiEngine).engines.length, 3);
