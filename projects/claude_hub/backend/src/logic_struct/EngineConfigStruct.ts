@@ -595,17 +595,17 @@ export class EngineConfigStruct {
     if (raw && typeof raw === 'object' && raw.slots && typeof raw.slots === 'object') {
       for (const [k, v] of Object.entries(raw.slots as Record<string, any>)) {
         if (!isProvider(k) || !v || typeof v !== 'object') continue;
-        slots[k] = this._normalizeSlot(k as EngineProvider, v);
+        slots[k] = this._normalizeSlot(k as EngineProvider, v, false);
       }
     } else if (raw && typeof raw === 'object') {
       // 旧版扁平结构 → 迁移到当前服务商那一槽
-      slots[provider] = this._normalizeSlot(provider, raw);
+      slots[provider] = this._normalizeSlot(provider, raw, true);
     }
     if (!slots[provider]) slots[provider] = emptySlot();
     return { provider, slots };
   }
 
-  private static _normalizeSlot(provider: EngineProvider, v: any): ProviderSlot {
+  private static _normalizeSlot(provider: EngineProvider, v: any, legacyFlat: boolean): ProviderSlot {
     const isOfficial = provider === 'official';
     // official 槽强制无 Key：历史脏数据（official 却存着第三方 Key）在这里被清掉
     const apiKey = isOfficial ? '' : String(v.apiKey || '');
@@ -620,7 +620,10 @@ export class EngineConfigStruct {
       // 选定模型若不在原版自身的候选里 → 一并丢弃（不要求这条记录还带过第三方 Key）。
       // 旧写法只在 `v.apiKey` 存在时才丢，漏了 Key 已被清空的情况：别的服务商的模型名
       // （如 deepseek-flash）会残留在原版槽里，codex 拿它去打 ChatGPT 账号会直接 400 失败。
-      if (model && legit.length && !legit.some((m) => m.id === model)) model = '';
+      // 仅限旧版扁平结构（所有服务商共用一份字段，模型名可能是别家残留的）。
+      // 新版分槽结构里原版槽的模型一定是用户自己选的：候选目录是按需拉取、会过期的，
+      // 新发布的模型（如 claude-fable-5-2）不在旧目录里，绝不能因此把用户的选择清空。
+      if (legacyFlat && model && legit.length && !legit.some((m) => m.id === model)) model = '';
     }
     return {
       apiKey,
