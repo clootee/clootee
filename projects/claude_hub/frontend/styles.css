@@ -895,6 +895,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .fav-dir-filter .fdf-clear:hover { color: var(--red); border-color: var(--red); }
 /* 默认只显示 3 行标签：超高部分裁掉（max-height 由 JS 按实测行高设置），点「更多」展开 */
 .fav-dir-filter.collapsed { overflow: hidden; }
+.fav-dir-filter.scrollable { overflow-y: auto; }
 .fdf-more-row { display: flex; margin: -2px 0 6px; }
 .fdf-more {
   padding: 1px 8px;
@@ -3611,3 +3612,6 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 #subscriptionUsage .server-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 8px; gap: 12px; }
 #subscriptionUsage .server-health-metric b { font-size: 12px; }
 #subscriptionUsage meter { width: 100%; height: 8px; margin: 2px 0 5px; }
+
+/* 模型区与上方内容（登录卡 / API Key）之间留出间隙，拉取按钮不再贴边 */
+#claudeModelBox, #codexModelBox { margin-top: 16px; padding-top: 4px; }
