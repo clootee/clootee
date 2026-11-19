@@ -1,10 +1,10 @@
 {
-  "version": "3.1.45",
+  "version": "3.1.46",
   "minVersion": "2.0.0",
   "force": false,
   "releasedAt": "2026-11-19",
   "notesI18n": {
-    "zh": "Claude 和 Codex 按需拉取模型列表，更新后验证实际使用的引擎版本，并显示订阅用量重置日期。",
-    "en": "Fetch Claude and Codex model catalogs on demand, verify active engine updates, and show subscription usage reset dates."
+    "zh": "修复官方订阅保存新模型后下拉框消失、选择被重置为自动的问题；订阅用量在所有系统上显示失败原因；模型区间距优化。",
+    "en": "Fix the official model dropdown vanishing and the saved model resetting to Auto; show subscription usage failure reasons on every OS; add spacing above the model section."
   }
 }
