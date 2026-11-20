@@ -15,8 +15,13 @@ const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'clootee-desktop-smoke-'))
   await new Promise((resolve, reject) => {
     const installEnv = { ...process.env };
     if (process.platform === 'win32') installEnv.PATH = (process.env.PATH || '').split(path.delimiter).filter(dir => !/[\\/]git(?:[\\/]|$)/i.test(dir)).join(path.delimiter);
-    const installer = spawn(exe, ['--install-only', '--user-data-dir=' + profile], { stdio: 'inherit', env: installEnv });
-    const timer = setTimeout(() => { installer.kill(); reject(new Error('Dependency installation timed out')); }, 1200000);
+    const installer = spawn(exe, ['--install-only', '--noerrdialogs', '--user-data-dir=' + profile], { stdio: 'inherit', env: installEnv });
+    const timer = setTimeout(() => {
+      installer.kill();
+      const log = path.join(profile, 'desktop.log');
+      const tail = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').slice(-4000) : 'No desktop.log created';
+      reject(new Error('Dependency installation timed out\n' + tail));
+    }, 1200000);
     installer.once('error', e => { clearTimeout(timer); reject(e); });
     installer.once('exit', code => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error('Dependency installation failed: ' + code)); });
   });

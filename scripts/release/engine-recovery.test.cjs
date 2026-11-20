@@ -6,7 +6,7 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../../projects/claude_hub/frontend/engine-recovery.js'), 'utf8');
 function fixture({ ready = [], fail } = {}) {
   const elements = {}, calls = [], installed = new Set(ready), focus = { isConnected: true, focus() {} };
-  for (const id of ['Modal','Note','Progress','Install','Close','Title']) elements['engineRecovery' + id] = { focus() {} };
+  for (const id of ['Modal','Note','Progress','Install','Close','Dismiss','Title']) elements['engineRecovery' + id] = { focus() {}, setAttribute() {}, click() { this.onclick(); } };
   const dialog = elements.engineRecoveryModal;
   dialog.showModal = () => { dialog.open = true; };
   dialog.close = () => { dialog.open = false; dialog.onclose(); };
@@ -33,7 +33,7 @@ test('missing engines prompt before installing; cancel makes no changes', async 
   const f = fixture(); const request = f.recovery.ensure('claude'); await tick();
   assert.equal(f.dialog.open, true);
   assert.equal(f.calls.filter(([url]) => url === '/api/engine/update').length, 0);
-  f.elements.engineRecoveryClose.onclick();
+  f.elements.engineRecoveryDismiss.onclick();
   assert.equal(await request, false);
   assert.equal(f.document.body.style.overflow, 'auto');
 });
@@ -87,6 +87,7 @@ function updaterFixture({ failVerify = false } = {}) {
   const code = fs.readFileSync(path.join(__dirname, '../../projects/claude_hub/backend/dist/logic_struct/EngineUpdaterStruct.js'), 'utf8');
   vm.runInNewContext(code, context);
   class Updater extends exports.EngineUpdaterStruct {
+    static _installPrefix() { return '/test/tools'; }
     static async _pickRegistry() { return 'https://registry.example/'; }
     static async _npmInstall(pkg) { calls.push('install:' + pkg); await tick(); return 'done'; }
     static async _verify(engine) { calls.push('verify:' + engine); if (failVerify) throw Error('not runnable'); }

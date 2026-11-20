@@ -2,7 +2,10 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ModelManagerStruct, CLAUDE_BUILTIN_MODELS } from '../logic_struct/ModelManagerStruct';
+import { execFile } from 'child_process';
+import { Toolchain } from './Toolchain';
+import { MANAGED_ENV_KEYS } from '../logic_struct/EngineConfigStruct';
+import { ModelManagerStruct } from '../logic_struct/ModelManagerStruct';
 import { EngineConfig } from './EngineConfig';
 import { ClaudeBin } from '../helper/ClaudeBin';
 import { CodexBin } from '../helper/CodexBin';
@@ -71,10 +74,10 @@ export class ModelManager extends ModelManagerStruct {
       const ids = await EngineConfig.listModels(cfg.provider, cfg.apiKey, cfg.baseUrl, cfg.modelsUrl);
       return ids.map((id) => ({ id, source: 'api' as const }));
     }
-    // 原版订阅：CLI 无列表接口 → 内置候选。verify 时逐个真实极小调用确认。
-    if (!verify) return CLAUDE_BUILTIN_MODELS.map((m) => ({ ...m }));
+    const models = await this._claudeCatalog();
+    if (!verify) return models;
     const out: ModelOption[] = [];
-    for (const m of CLAUDE_BUILTIN_MODELS) {
+    for (const m of models) {
       const r = await this._probeClaude(m.id, /* killOnInit */ false);
       out.push({
         ...m,
@@ -97,12 +100,42 @@ export class ModelManager extends ModelManagerStruct {
   }
 
   // ───────────────────────── 内部：claude 探测 ─────────────────────────
+  private static async _claudeCatalog(): Promise<ModelOption[]> {
+    const resolved = ClaudeBin.resolve(AppConfig.CLAUDE_BIN, Toolchain.preferBundled('claude'));
+    const args = [...resolved.prefixArgs, '-p', '--input-format', 'stream-json', '--output-format',
+      'stream-json', '--verbose', '--strict-mcp-config', '--no-session-persistence'];
+    const run = RunAsUser.wrap(resolved.bin, args, Settings.runAsUser());
+    const env = { ...process.env };
+    for (const key of MANAGED_ENV_KEYS) delete env[key];
+    const request = { type: 'control_request', request_id: 'catalog', request: { subtype: 'initialize' } };
+    const output = await new Promise<string>((resolve, reject) => {
+      const child = execFile(run.bin, run.args, { env, cwd: this._probeCwd(), windowsHide: true,
+        timeout: 60000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => error ? reject(error) : resolve(stdout));
+      child.stdin?.on('error', reject);
+      child.stdin?.end(JSON.stringify(request) + '\n');
+    });
+    const models = new Map<string, ModelOption>();
+    for (const line of output.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      const event = JSON.parse(line);
+      if (event.type !== 'control_response' || event.response?.request_id !== request.request_id) continue;
+      for (const item of event.response.response?.models || []) {
+        const id = item?.resolvedModel || item?.value;
+        if (typeof id !== 'string' || !id.trim()) continue;
+        if (!models.has(id) || item.value !== 'default')
+          models.set(id, { id, label: item.displayName || id, source: 'catalog' });
+      }
+    }
+    if (!models.size) throw new Error('Claude Code 未返回模型目录 / empty model catalog');
+    return [...models.values()];
+  }
+
   // killOnInit=true：读到 init 帧立刻结束（只验证"当前模型是什么"，零调用）
   // killOnInit=false：跑完一次极小任务，据 result 事件/退出码判断该模型是否真的可用
   private static _probeClaude(model: string, killOnInit: boolean): Promise<ProbeResult> {
     const { bin, prefixArgs } = ClaudeBin.resolve(
       AppConfig.CLAUDE_BIN,
-      Settings.get().preferBundled,
+      Toolchain.preferBundled('claude'),
     );
     const args = [
       ...prefixArgs,
@@ -194,7 +227,7 @@ export class ModelManager extends ModelManagerStruct {
   // `codex debug models` 输出 {models:[{slug,display_name,visibility,supported_in_api,priority,...}]}
   // 注意每项还带巨大的 base_instructions，只取需要的字段。
   private static _codexCatalog(): Promise<ModelOption[]> {
-    const { bin, prefixArgs } = CodexBin.resolve(AppConfig.CODEX_BIN, Settings.get().preferBundled);
+    const { bin, prefixArgs } = CodexBin.resolve(AppConfig.CODEX_BIN, Toolchain.preferBundled('codex'));
     // 同 _probeClaude：以 root 探测会把 root 所有的 arg0 临时目录留在目标用户家目录里
     const run = RunAsUser.wrap(bin, [...prefixArgs, 'debug', 'models'], Settings.runAsUser());
     const cwd = this._probeCwd();
@@ -218,7 +251,10 @@ export class ModelManager extends ModelManagerStruct {
             settled = true;
             clearTimeout(timer);
             try {
-              resolve(this._parseCodexCatalog(out));
+              if (code !== 0) throw new Error('Catalog query failed');
+              const models = this._parseCodexCatalog(out);
+              if (!models.length) throw new Error('Codex 未返回模型目录 / empty model catalog');
+              resolve(models);
             } catch (e) {
               reject(
                 new Error(

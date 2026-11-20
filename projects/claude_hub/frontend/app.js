@@ -1907,6 +1907,7 @@ function clearFavDir() {
 
 const FDF_NAME_MAX = 20; // 标签上目录名最多 20 字符，超出截断
 const FDF_ROWS_COLLAPSED = 3; // 折叠时显示的标签行数
+const FDF_ROWS_EXPANDED = 8;
 const FDF_GAP = 4; // 与 .fav-dir-filter 的 gap 保持一致（用于算 3 行的高度）
 const FDF_DOT_MAX = 6; // 单个目录最多画几个点：再多画不下，真实数量在 title 里给
 
@@ -1983,20 +1984,27 @@ function applyFavDirCollapse() {
   const tags = box.querySelectorAll('.fdf-tag');
   if (!tags.length) {
     row.hidden = true;
-    box.classList.remove('collapsed');
+    box.classList.remove('collapsed', 'scrollable');
     box.style.maxHeight = '';
     return;
   }
   const lineH = tags[0].offsetHeight || 22;
   const padTop = parseFloat(getComputedStyle(box).paddingTop) || 0;
-  const maxH = Math.round(lineH * FDF_ROWS_COLLAPSED + FDF_GAP * (FDF_ROWS_COLLAPSED - 1) + padTop);
+  const heightForRows = (rows) => Math.round(lineH * rows + FDF_GAP * (rows - 1) + padTop);
+  const maxH = heightForRows(FDF_ROWS_COLLAPSED);
   // 先按未折叠量一次完整高度，再决定要不要裁
-  box.classList.remove('collapsed');
+  const scrollTop = box.scrollTop;
+  box.classList.remove('collapsed', 'scrollable');
   box.style.maxHeight = '';
   const overflowing = box.scrollHeight > maxH + 1;
   row.hidden = !overflowing;
   if (!overflowing) return;
   if (FavDir.expanded) {
+    if (State.listMode === 'all') {
+      box.classList.add('scrollable');
+      box.style.maxHeight = heightForRows(FDF_ROWS_EXPANDED) + 'px';
+      box.scrollTop = scrollTop;
+    }
     btn.textContent = T('dirFilterLess');
     return;
   }
@@ -4773,12 +4781,23 @@ function initDragUpload() {
 // ── 粘贴上传：从剪贴板取图片（截图/复制的图片）直接上传，正常文本粘贴放行 ──
 async function onPasteImage(e) {
   if (!State.sessionId) return;
-  const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
-  const imgs = items.filter((it) => it.kind === 'file' && it.type.startsWith('image/'));
-  if (!imgs.length) return;
+  const cd = e.clipboardData;
+  if (!cd) return;
+  // 任意类型的文件都收（资源管理器里复制的文件、截图、复制的图片…）。
+  // 优先用 files（多文件最可靠），个别浏览器只在 items 里给，兜底取一次。
+  let files = Array.from(cd.files || []);
+  if (!files.length) {
+    files = Array.from(cd.items || [])
+      .filter((it) => it.kind === 'file')
+      .map((it) => it.getAsFile())
+      .filter(Boolean);
+  }
+  if (!files.length) return; // 纯文本粘贴放行
+  // Excel/Word 等复制的是文字，但剪贴板会附带一张渲染图：此时用户要的是文字，不当附件。
+  const onlyImages = files.every((f) => (f.type || '').startsWith('image/'));
+  if (onlyImages && (cd.getData('text/plain') || '').trim()) return;
   e.preventDefault();
-  const files = imgs.map((it) => it.getAsFile()).filter(Boolean);
-  if (files.length) await uploadFiles(files);
+  await uploadFiles(files);
 }
 
 // ── 截屏：屏幕共享抓一帧 → 预览（裁剪 + 圈/框/箭头/文字标注）→ 确定后上传 ──
@@ -6366,6 +6385,8 @@ async function checkAppUpdate() {
 // onFail 用于失败后解禁发起按钮——两处的按钮不是同一个，交给调用方处理。
 function confirmAppUpdateOverwrite() {
   const modal = $('updateConflictModal');
+  $('updConflictDismiss').setAttribute('aria-label', T('close'));
+  $('updConflictDismiss').onclick = () => $('updConflictCancel').click();
   $('updConflictTitle').textContent = T('updateConflictTitle');
   $('updConflictNote').textContent = T('updateConflictNote');
   $('updConflictCancel').textContent = T('updateConflictCancel');
@@ -7764,12 +7785,8 @@ function bind() {
   $('engAccCodexHead').addEventListener('click', () => toggleAcc('codex'));
   // 服务商 → 模型联动：换服务商即清空并自动检测选中推荐模型；Key 填完（失焦/回车）也自动补
   $('claudeProviderSelect').addEventListener('change', onClaudeProviderChange);
-  $('claudeApiKey').addEventListener('change', () => onApiKeySettled('claude'));
-  $('claudeApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('claude'); });
   $('claudeModelsBtn').addEventListener('click', () => refreshEngineModels('claude'));
   $('codexProviderSelect').addEventListener('change', () => onEngineProviderChange('codex'));
-  $('codexApiKey').addEventListener('change', () => onApiKeySettled('codex'));
-  $('codexApiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') onApiKeySettled('codex'); });
   $('codexModelsBtn').addEventListener('click', () => refreshEngineModels('codex'));
   // 引擎块没有自己的保存按钮了（全板块只有一个，在 footer），靠脏标记告诉用户「这块动了还没存」。
   // 「脏」只由用户操作产生：换服务商在 onEngineProviderChange 里标，Key/地址/手填模型在这里标；
@@ -8433,16 +8450,27 @@ function startServerHealth() {
 }
 
 let subscriptionGeneration = 0;
+// 后端下发稳定原因码；认不出的（多为系统/网络原始错误码，如 ETIMEDOUT）原样展示
+const SUBSCRIPTION_REASON = {
+  'usage-unauthorized': ['The subscription usage request was denied (HTTP 401)', '订阅余量查询未获授权（HTTP 401）'],
+  'claude-signed-out': ['Claude Code reports that you are signed out', 'Claude Code 显示当前未登录'],
+  'no-credentials': ['Not signed in on this computer (no credentials file)', '本机尚未登录（找不到凭据文件）'],
+  'no-token': ['No access token in the credentials', '凭据中没有访问令牌'],
+  'empty-usage': ['The service returned no usage data', '服务未返回用量数据'],
+  'bad-response': ['Unexpected response from the service', '服务返回了无法识别的内容'],
+  ENOENT: ['Not signed in on this computer (no credentials file)', '本机尚未登录（找不到凭据文件）'],
+};
 async function refreshSubscriptionUsage() {
   const generation = ++subscriptionGeneration;
   const box = $('subscriptionUsage');
   box.hidden = true;
-  const zh = T('serverHealth') === 'Linux 服务器';
+  const zh = LANG === 'zh';
   box.querySelector('summary').textContent = zh ? '用量 · 订阅余量' : 'Usage · Subscription remaining';
   try { box.open = localStorage.getItem('subscriptionUsageCollapsed') !== '1'; } catch {}
   box.ontoggle = () => { try { localStorage.setItem('subscriptionUsageCollapsed', box.open ? '0' : '1'); } catch {} };
   const grid = box.querySelector('div');
   grid.textContent = zh ? '正在获取余量…' : 'Loading remaining usage…';
+  box.hidden = false; // 拉取过程与失败都要让用户看到，而不是整块消失
   try {
     const data = await api('/api/subscription/usage');
     if (generation !== subscriptionGeneration) return;
@@ -8455,11 +8483,18 @@ async function refreshSubscriptionUsage() {
       title.textContent = account.name;
       cell.append(title);
       if (account.status !== 'ok') {
+        // Older backends marked every Claude usage 401 as an expired login.
+        const reason = account.name === 'Claude' && account.reason === 'http-401' ? 'usage-unauthorized' : account.reason;
         const status = document.createElement('small');
-        status.textContent = account.status === 'expired'
+        status.textContent = account.status === 'expired' && reason !== 'usage-unauthorized'
           ? (zh ? '登录已过期，请重新登录' : 'Sign in again')
           : (zh ? '暂无法获取订阅余量' : 'Subscription usage unavailable');
         cell.append(status);
+        if (reason) {
+          const why = document.createElement('small');
+          why.textContent = (zh ? '原因：' : 'Reason: ') + (SUBSCRIPTION_REASON[reason] ? SUBSCRIPTION_REASON[reason][zh ? 1 : 0] : reason);
+          cell.append(why);
+        }
       }
       const labels = { five_hour: zh ? '5小时' : '5 hours', seven_day: zh ? '每周' : 'Weekly',
         primary_window: zh ? '主要额度' : 'Primary', secondary_window: zh ? '次要额度' : 'Secondary',
@@ -8471,10 +8506,18 @@ async function refreshSubscriptionUsage() {
         const meter = document.createElement('meter');
         meter.min = 0; meter.max = 100; meter.value = row.remaining;
         meter.setAttribute('aria-label', text.textContent);
-        if (row.reset && Number.isFinite(Date.parse(row.reset))) {
-          text.title = (zh ? '重置时间：' : 'Resets: ') + new Date(row.reset).toLocaleString();
-        }
         cell.append(text, meter);
+        if (row.reset && Number.isFinite(Date.parse(row.reset))) {
+          const reset = document.createElement('small');
+          const time = document.createElement('time');
+          time.dateTime = row.reset;
+          time.textContent = new Date(row.reset).toLocaleString(zh ? 'zh-CN' : 'en-US', {
+            year: 'numeric', month: 'short', day: 'numeric', weekday: 'short',
+            hour: '2-digit', minute: '2-digit',
+          });
+          reset.append(zh ? '下次刷新：' : 'Next reset: ', time);
+          cell.append(reset);
+        }
       }
       if (account.credits !== undefined) {
         const extra = document.createElement('small');
@@ -8484,6 +8527,7 @@ async function refreshSubscriptionUsage() {
       grid.append(cell);
     }
   } catch {
+    if (generation !== subscriptionGeneration) return;
     grid.textContent = zh ? '余量获取失败，请重新打开重试' : 'Could not load usage. Reopen to retry.';
   }
 }
@@ -8744,9 +8788,8 @@ function fillEnginePane() {
   const claudeFirst = State.settings.defaultEngine !== 'codex';
   setAccOpen('claude', claudeFirst);
   setAccOpen('codex', !claudeFirst);
-  loadClaudeProvider();
-  loadEngineProvider('codex');
-  loadModelState();
+  setModelStatus('codex', T('mdlDetecting'), null);
+  Promise.all([loadClaudeProvider(), loadEngineProvider('codex')]).then(loadModelState);
 }
 // 「默认引擎」下面那行说明：只装了一个引擎时，额外说清默认引擎已自动跟着它走
 function defaultEngineNoteText() {
@@ -9230,7 +9273,7 @@ const MODEL_ALIAS_KEY = {
 // 「检测当前模型」的来源/失败原因：后端下发稳定编码，认不出的原样展示（多为引擎或网络的原始报错）
 const DETECT_SRC_KEY = {
   'claude-init': 'srcClaudeInit', 'codex-toml': 'srcCodexToml',
-  'codex-catalog': 'srcCodexCatalog', codex: 'srcCodex',
+  'codex-selected': 'srcCodexSelected', 'codex-catalog': 'srcCodexCatalog', codex: 'srcCodex',
 };
 const DETECT_ERR_KEY = {
   'init-no-model': 'errInitNoModel',
@@ -9275,26 +9318,49 @@ function modelValue(engine) {
   const u = providerUi(engine);
   return modelIsFree(engine) ? u.modelInput.value.trim() : u.model.value;
 }
+function syncModelControls(engine) {
+  const u = providerUi(engine);
+  // 原版订阅的下拉永远显示：至少有「自动」，Claude 还有 opus/sonnet/haiku/fable 别名，
+  // 候选目录没拉到 / 已选模型不在目录里，都不能让用户连选择框都看不到。
+  const empty = !modelIsFree(engine) ? false : !u.modelList.options.length && !modelValue(engine);
+  const free = modelIsFree(engine);
+  u.model.hidden = empty || free;
+  u.modelInput.hidden = empty || !free;
+  u.modelHint.hidden = empty || !free;
+  u.modelBox.querySelector('.multi-engine-model-head label').hidden = empty;
+}
 function setModelValue(engine, model) {
   const u = providerUi(engine);
+  // 已选模型不在候选里（目录是按需拉取、会过期；新发布的模型尤其如此）也必须能显示出来
+  if (model && ![...u.model.options].some((o) => o.value === model)) u.model.appendChild(new Option(model, model));
   u.model.value = model || '';
   u.modelInput.value = model || '';
+  syncModelControls(engine);
 }
 function clearModelChoices(engine) {
   const u = providerUi(engine);
   u.model.innerHTML = '';
   u.modelList.innerHTML = '';
+  syncModelControls(engine);
 }
 // opts 为 [{id,label,source,verified,note}]；withAuto=true 时首项是「自动」（值为空）
+const OFFICIAL_CLAUDE_ALIASES = ['opus', 'sonnet', 'haiku', 'fable'];
+function withOfficialAliases(engine, opts) {
+  if (engine !== 'claude' || providerUi(engine).select.value !== 'official') return opts;
+  const have = new Set(opts.map((o) => o.id));
+  return [...OFFICIAL_CLAUDE_ALIASES.filter((id) => !have.has(id)).map((id) => ({ id, source: 'builtin' })), ...opts];
+}
 function fillModelChoices(engine, opts, withAuto) {
   const u = providerUi(engine);
   clearModelChoices(engine);
-  if (withAuto) u.model.appendChild(new Option(T('effAuto'), ''));
+  opts = withOfficialAliases(engine, opts);
+  if (withAuto && (opts.length || !modelIsFree(engine))) u.model.appendChild(new Option(T('effAuto'), ''));
   for (const o of opts) {
     const text = modelOptionText(o);
     u.model.appendChild(new Option(text, o.id));
     u.modelList.appendChild(new Option(text, o.id));
   }
+  syncModelControls(engine);
 }
 
 // ── 模型选择（claude / codex 各自一套；''=自动）──
@@ -9316,7 +9382,7 @@ async function loadModelState() {
 // 注意：这个下拉（claudeModelSelect/codexModelSelect）与「服务商」区共用同一个 DOM 元素，
 // 换服务商时（onEngineProviderChange）会先被清空，这里再按当前服务商的候选重新填充。
 function renderModelSection(engine, s) {
-  if (!s) return;
+  if (!s || EngineDirty[engine]) return;
   const cap = engine === 'claude' ? 'Claude' : 'Codex';
   const sel = providerUi(engine).model;
   $(`mdl${cap}Provider`).textContent = providerLabel(s.provider);
@@ -9324,13 +9390,12 @@ function renderModelSection(engine, s) {
   // 标注来源与验证结果，让用户知道这条候选有多可信
   fillModelChoices(engine, opts, true);
   // 选定值不在候选里（例如刚换服务商）时补一条，避免显示错位
-  if (s.selected && !opts.some((o) => o.id === s.selected)) {
-    sel.appendChild(new Option(`${s.selected}${T('mdlSuffixSelected')}`, s.selected));
-  }
   setModelValue(engine, s.selected || '');
   renderEffortSelect(engine, s);
   const d = s.detected;
-  if (d) {
+  if (engine === 'codex') {
+    detectCurrentModel(engine, s);
+  } else if (d && (!s.selected || d.model === s.selected)) {
     setModelStatus(
       engine,
       d.ok
@@ -9346,6 +9411,7 @@ function renderModelSection(engine, s) {
 
 function setModelStatus(engine, text, ok) {
   const el = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  el.dataset.revision = String(Number(el.dataset.revision || 0) + 1);
   el.className = 'sx-note' + (ok === true ? ' ok' : ok === false ? ' err' : '');
   el.textContent = text;
 }
@@ -9353,32 +9419,23 @@ function setModelStatus(engine, text, ok) {
 // 选定模型（含「自动」）；立即落盘，下一个任务生效
 // 自定义服务商是手填的输入框，change（失焦/回车）时同样走这里
 async function onModelSelect(engine) {
-  const model = modelValue(engine);
-  if (modelIsFree(engine)) {
-    // Save the provider, key and model together; a draft must not alter the old slot.
-    setModelStatus(engine, T('engProviderDraft'), null);
-    markEngineDirty(engine); // 手填模型只是草稿，等板块底部的「保存」一起落盘
-    renderAccSummary(engine);
-    return;
-  }
-  try {
-    await api('/api/model/select', { engine, model });
-    setModelStatus(
-      engine,
-      model ? T('mdlSelected').replace('{model}', model) : T('mdlSelectedAuto'),
-      true,
-    );
-    renderAccSummary(engine);
-  } catch (e) {
-    setModelStatus(engine, T('engSaveFail').replace('{err}', e.message), false);
-  }
+  markEngineDirty(engine);
+  setModelStatus(engine, T('engProviderDraft'), null);
+  renderAccSummary(engine);
 }
 
 // 检测当前实际生效的模型（真实探测引擎）
-async function detectCurrentModel(engine) {
+async function detectCurrentModel(engine, currentState) {
   setModelStatus(engine, T('mdlDetecting'), null);
+  const status = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  const revision = status.dataset.revision;
   try {
-    const d = await api('/api/model/detect', { engine });
+    // The runner passes the saved model via -m. Only Auto needs the CLI default.
+    const saved = engine === 'codex' ? (currentState || (await api('/api/model/state')).codex) : null;
+    const d = saved?.selected
+      ? { ok: true, model: saved.selected, source: 'codex-selected' }
+      : await api('/api/model/detect', { engine });
+    if (status.dataset.revision !== revision) return;
     setModelStatus(
       engine,
       d && d.ok
@@ -9386,8 +9443,8 @@ async function detectCurrentModel(engine) {
         : T('mdlDetectFail').replace('{err}', detectErrorLabel(d && d.error)),
       !!(d && d.ok),
     );
-    await loadModelState();
   } catch (e) {
+    if (status.dataset.revision !== revision) return;
     setModelStatus(engine, T('mdlDetectFail').replace('{err}', e.message), false);
   }
 }
@@ -9475,7 +9532,6 @@ async function renderClooteeAccount(engine) {
         for (const eng of ['claude', 'codex']) {
           if (providerUi(eng).select.value === 'clootee') renderClooteeAccount(eng);
         }
-        if (!signedIn && u.select.value === 'clootee') await autoPickModel(engine);
       } catch (e) {
         ErrorHandler.handle(e, 'renderClooteeAccount');
         if (box.querySelector('[data-error]')) box.querySelector('[data-error]').textContent = e.message;
@@ -9558,12 +9614,7 @@ function syncProviderVisibility(engine) {
     }
   }
 
-  // 模型选择框始终显示，允许原版订阅也选择模型；
-  // 自定义服务商换成可手填的输入框（拉不到模型列表时也能用）
-  const free = modelIsFree(engine);
-  u.model.hidden = free;
-  u.modelInput.hidden = !free;
-  u.modelHint.hidden = !free;
+  syncModelControls(engine);
   // 只有原版才是订阅登录，第三方走 API Key，没有账号可言 —— 整块登录卡都不出现
   if (u.login) {
     u.login.hidden = provider !== 'official' && provider !== 'clootee';
@@ -9614,22 +9665,21 @@ async function onEngineProviderChange(engine) {
     u.modelsUrl.value = slot.modelsUrl || '';
     if (u.ctxWin) u.ctxWin.value = slot.contextWindow || '';
     const opts = Array.isArray(slot.models) ? slot.models : [];
-    if (opts.length || slot.model) {
+    if (opts.length || slot.model || provider === 'official') {
       fillModelChoices(engine, opts, true);
-      if (slot.model && !opts.some((o) => o.id === slot.model))
-        u.model.appendChild(new Option(`${slot.model}${T('mdlSuffixSelected')}`, slot.model));
       setModelValue(engine, slot.model || '');
     }
     if (u.effort) u.effort.value = slot.effort || '';
     renderAccSummary(engine);
+  } else if (provider === 'official') {
+    fillModelChoices(engine, [], true);
+    setModelValue(engine, '');
   }
   // 自定义服务商从没存过窗口 → 回显出厂默认 1M（上面清空表单时把预填值也清掉了）
   if (provider === 'custom' && u.ctxWin && !String(u.ctxWin.value || '').trim()) {
     const def = providerDefaultContextWindow(provider);
     if (def) u.ctxWin.value = String(def);
   }
-  // 没有选定模型才自动定档（不覆盖用户上次的选择）
-  if (!modelValue(engine)) autoPickModel(engine);
 }
 // 「模型」标签旁的服务商小标要跟着表单里选中的服务商走
 // （否则会一直显示上次已保存的那个，和下面的模型对不上）
@@ -9638,50 +9688,6 @@ function syncModelProviderTag(engine) {
   $(`mdl${cap}Provider`).textContent = providerLabel(providerUi(engine).select.value);
 }
 function onClaudeProviderChange() { onEngineProviderChange('claude'); }
-
-// 模型跟随服务商自动定档：没有选定模型时自动拉取候选并选中服务商推荐的那个。
-// 只改表单里的下拉，不落盘——落盘仍由「保存」按钮完成（否则会把新模型配到旧的已保存服务商上）。
-async function autoPickModel(engine) {
-  const u = providerUi(engine);
-  const provider = u.select.value;
-  if (provider === 'official') {
-    // 原版订阅也可以选择模型：如果没有选定模型，自动填充内置候选列表
-    if (modelValue(engine)) return; // 已有模型就不动
-    // 从后端获取可用模型列表（对于 official，返回内置候选）
-    try {
-      const r = await api('/api/model/available', { engine, verify: false });
-      const models = r && r.models ? r.models : [];
-      if (models.length > 0) {
-        fillModelChoices(engine, models, true);
-        // 默认选中 opus（如果有）
-        const defaultModel = models.find(m => m.id === 'opus') || models[0];
-        if (defaultModel) {
-          setModelValue(engine, defaultModel.id);
-          setModelStatus(engine, T('mdlAutoPickedOne').replace('{model}', modelOptionText(defaultModel)), true);
-        }
-      }
-    } catch (e) {
-      setModelStatus(engine, T('mdlListFail').replace('{err}', e.message), false);
-    }
-    return;
-  }
-  if (modelValue(engine)) return; // 已有模型就不动，避免覆盖用户的选择
-  // clootee 的 Key 由本机自动领取（后端补），不要求用户填
-  if (!u.key.value.trim() && provider !== 'clootee') {
-    setModelStatus(engine, T('modelNeedKey'), null);
-    return;
-  }
-  if (provider === 'custom' && !u.base.value.trim()) {
-    setModelStatus(engine, T('modelNeedBase'), null);
-    return;
-  }
-  await fetchEngineModels(engine, true);
-}
-// API Key 填完（失焦/回车）时：若还没有模型就自动检测一次
-function onApiKeySettled(engine) {
-  if (modelValue(engine)) return;
-  autoPickModel(engine);
-}
 
 async function loadEngineProvider(engine) {
   const u = providerUi(engine);
@@ -9694,11 +9700,8 @@ async function loadEngineProvider(engine) {
     u.base.value = c.baseUrl || '';
     u.modelsUrl.value = c.modelsUrl || '';
     if (u.ctxWin) u.ctxWin.value = c.contextWindow || '';
-    clearModelChoices(engine);
-    if (c.model) {
-      u.model.appendChild(new Option(c.model, c.model));
-      u.modelList.appendChild(new Option(c.model, c.model));
-    }
+    fillModelChoices(engine, Array.isArray(c.models) ? c.models : [], true);
+    if (c.model) u.modelList.appendChild(new Option(c.model, c.model));
     setModelValue(engine, c.model || '');
     if (u.effort) u.effort.value = c.effort || '';
     syncProviderVisibility(engine);
@@ -9712,12 +9715,6 @@ async function loadEngineProvider(engine) {
         .replace('{provider}', providerLabel(c.provider))
         .replace('{model}', c.model || '');
     renderAccSummary(engine);
-    // 原版订阅也可以选择模型：如果没有选定模型，自动填充内置候选列表
-    if (c.provider === 'official' && !c.model) {
-      autoPickModel(engine);
-    }
-    // 已存了第三方服务商与 Key、却没有模型（历史配置/上次没选完）→ 进面板就自动补一个
-    if (c.provider !== 'official' && c.apiKey && !c.model) autoPickModel(engine);
   } catch (e) {
     EngineLoaded[engine] = false;
     u.status.className = 'sx-note err';
@@ -9738,18 +9735,17 @@ async function fetchEngineModels(engine, auto = false) {
     u.status.className = 'sx-note' + (ok === true ? ' ok' : ok === false ? ' err' : '');
     u.status.textContent = text;
   };
-  // 原版订阅：走 /api/model/available 获取内置候选列表
+  // 原版订阅：读取所选引擎的模型目录
   if (provider === 'official') {
     const prev = modelValue(engine);
-    clearModelChoices(engine);
     say(auto ? T('modelAutoDetecting') : T('modelFetching'), null);
     try {
-      const r = await api('/api/model/available', { engine, verify: false });
+      const r = await api('/api/engine/models', { engine, provider: 'official' });
       const models = r && r.models ? r.models : [];
       if (!models.length) throw new Error(T('modelEmptyList'));
       fillModelChoices(engine, models, true);
       // 优先保留用户原本的选择；否则选中第一个
-      const pick = (prev && models.some(m => m.id === prev) && prev) || models[0]?.id || '';
+      const pick = prev;
       setModelValue(engine, pick);
       say(
         auto
@@ -9759,7 +9755,7 @@ async function fetchEngineModels(engine, auto = false) {
       );
       renderAccSummary(engine);
     } catch (e) {
-      clearModelChoices(engine);
+      // 拉取失败：保持原有下拉与选择不动，只提示原因
       say(T('modelFetchFail').replace('{err}', e.message), false);
     }
     return;
@@ -9802,6 +9798,62 @@ async function fetchEngineModels(engine, auto = false) {
     say(T('modelFetchFail').replace('{err}', e.message), false);
   }
 }
+function chooseModelFetch(name, version, signal) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'message-link-dialog';
+  const title = T('modelUpdateTitle').replace('{name}', name);
+  dialog.setAttribute('aria-label', title);
+  dialog.innerHTML = `<div class="ml-head"><span class="ml-badge" aria-hidden="true">↑</span><h3></h3><button type="button" class="ml-close">×</button></div>
+    <p class="ml-path"></p><p class="model-update-note"></p><form method="dialog" class="ml-primary">
+    <button class="ml-action ml-folder" value="fetch" autofocus></button>
+    <button class="ml-action ml-download" value="update"></button></form>`;
+  dialog.querySelector('h3').textContent = title;
+  dialog.querySelector('.ml-path').textContent = version.current + ' → ' + version.latest;
+  const close = dialog.querySelector('.ml-close');
+  close.setAttribute('aria-label', T('close'));
+  close.onclick = () => dialog.close();
+  dialog.querySelector('.model-update-note').textContent = T('modelUpdateCli');
+  dialog.querySelector('[value="fetch"]').textContent = T('modelDirectFetch');
+  dialog.querySelector('[value="update"]').textContent = T('modelUpdateFetch');
+  document.body.append(dialog);
+  return new Promise(resolve => {
+    const abort = () => dialog.close();
+    dialog.addEventListener('close', () => {
+      signal?.removeEventListener('abort', abort);
+      dialog.remove();
+      resolve(dialog.returnValue);
+    }, { once: true });
+    dialog.showModal();
+    signal?.addEventListener('abort', abort, { once: true });
+  });
+}
+async function prepareModelFetch(engine, status, signal) {
+  const name = engine === 'claude' ? 'Claude Code' : 'Codex';
+  status(T('modelCheckingCli').replace('{name}', name));
+  let version;
+  try {
+    version = await api('/api/engine/version-check', { engine }, false, signal);
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    console.warn('CLI version check failed', engine, error);
+    return;
+  }
+  if (signal?.aborted || !version.hasUpdate) return;
+  const choice = await chooseModelFetch(name, version, signal);
+  if (!choice) throw new DOMException(T('cancel'), 'AbortError');
+  if (choice === 'update') {
+    const message = T('modelUpdatingCli').replace('{name}', name);
+    const started = Date.now();
+    const progress = () => status(message + ' ' + T('engInstElapsed').replace('{s}', Math.floor((Date.now() - started) / 1000)));
+    progress();
+    const timer = setInterval(progress, 1000);
+    try { await api('/api/engine/update', { engine }, false, signal); }
+    finally { clearInterval(timer); }
+
+    const checked = await api('/api/engine/version-check', { engine }, false, signal);
+    if (checked.hasUpdate) throw new Error(T('modelUpdateIncomplete').replace('{current}', checked.current).replace('{latest}', checked.latest));
+  }
+}
 async function refreshEngineModels(engine) {
   const button = $(`${engine}ModelsBtn`);
   if (button.disabled) return;
@@ -9811,7 +9863,11 @@ async function refreshEngineModels(engine) {
   button.setAttribute('aria-busy', 'true');
   label.textContent = T('engFetchingModels');
   try {
+    await prepareModelFetch(engine, message => { label.textContent = message; });
+    label.textContent = T('engFetchingModels');
     await fetchEngineModels(engine);
+  } catch (error) {
+    if (error.name !== 'AbortError') setModelStatus(engine, error.message, false);
   } finally {
     button.disabled = false;
     button.classList.remove('is-loading');
@@ -9837,8 +9893,6 @@ async function saveEngineProvider(engine) {
     }
   }
 
-  // 第三方缺模型时先自动补一次（多数情况用户根本不用管模型），补不上才报错
-  if (provider !== 'official' && !modelValue(engine)) await autoPickModel(engine);
   const model = modelValue(engine);
   if (provider !== 'official' && !model) {
     u.status.className = 'sx-note err';
@@ -9857,7 +9911,6 @@ async function saveEngineProvider(engine) {
     u.status.className = 'sx-note ok';
     u.status.textContent = T('engSavedOk');
     clearEngineDirty(engine);
-    await loadModelState();
     renderAccSummary(engine);
     return null;
   } catch (e) {

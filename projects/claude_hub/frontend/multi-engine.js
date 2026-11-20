@@ -17,7 +17,7 @@ const MultiUi = {
 
       noUsage: ['暂无用量', 'No usage yet'],
       equivalentCost: ['API 等价估价', 'API-equivalent estimate'],
-      fetchModels: ['拉取模型', 'Fetch models'], fetchingModels: ['拉取中…', 'Fetching…'],
+      fetchModels: ['拉取模型列表', 'Fetch model list'], fetchingModels: ['拉取中…', 'Fetching…'],
       fetchedModels: ['已获取 {n} 个模型', 'Loaded {n} models'], emptyModels: ['未获取到模型，请手动输入或重试。', 'No models returned. Enter a model ID or retry.'],
       manualModel: ['手动输入模型 ID', 'Enter a model ID'], autoModel: ['自动', 'Automatic'],
       needKey: ['请先填写此引擎的 API Key。', 'Enter this engine’s API key first.'], needBase: ['请先填写 Base URL。', 'Enter a Base URL first.'],
@@ -258,15 +258,18 @@ const MultiUi = {
     modelBox.append(modelHead, choices, modelInput); fields.modelChoice = choices;
     const manualValue = '__clootee_manual_model__';
     const setChoices = (models, selected) => {
-      card.multiModels = Array.from(new Map((models || []).map(m => typeof m === 'string' ? { id: m } : m).filter(m => m?.id).map(m => [m.id, m])).values());
+      card.multiModels = Array.from(new Map((models || []).map(m => typeof m === 'string' ? { id: m } : m).filter(m => m?.id && m.source !== 'builtin' && m.source !== 'detected').map(m => [m.id, m])).values());
       choices.replaceChildren();
       if (provider.value === 'official') choices.add(new Option(this.text('autoModel'), ''));
       for (const m of card.multiModels) choices.add(new Option(m.label || m.id, m.id));
       if (selected && !card.multiModels.some(m => m.id === selected)) choices.add(new Option(selected, selected));
       choices.add(new Option(this.text('manualModel'), manualValue));
       choices.value = selected || (provider.value === 'official' ? '' : manualValue);
-      modelInput.value = selected;
-      modelInput.hidden = choices.value !== manualValue;
+      modelInput.value = selected || '';
+      const empty = !card.multiModels.length && !selected;
+      modelTitle.hidden = empty;
+      choices.hidden = empty;
+      modelInput.hidden = empty || choices.value !== manualValue;
     };
     choices.onchange = () => {
       modelInput.hidden = choices.value !== manualValue;
@@ -311,6 +314,9 @@ const MultiUi = {
       modelController = new AbortController(); card.dataset.modelsLoading = 'true';
       setFetching(true); say(this.text('fetchingModels'), 'loading');
       try {
+        await prepareModelFetch(request.engine, message => say(message, 'loading'), modelController.signal);
+        if (version !== modelVersion || signature !== fingerprint() || !card.isConnected) return;
+        say(this.text('fetchingModels'), 'loading');
         const response = await api('/api/engine/models', request, false, modelController.signal);
         if (version !== modelVersion || signature !== fingerprint() || !card.isConnected) return;
         const models = (response.models || []).map(m => typeof m === 'string' ? { id: m } : m).filter(m => m?.id);

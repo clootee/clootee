@@ -458,10 +458,10 @@
                   <label class="sx-lbl"><span id="claudeModelLbl">模型</span> <span class="sx-tag" id="mdlClaudeProvider"></span></label>
                   <button type="button" class="sx-btn multi-engine-model-fetch" id="claudeModelsBtn">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14-5.3L3 9M3 4v5h5M4 13a8 8 0 0 0 14 5.3L21 15M16 15h5v5" /></svg>
-                    <span id="claudeModelsBtnLabel">拉取模型</span>
+                    <span id="claudeModelsBtnLabel">拉取模型列表</span>
                   </button>
                 </div>
-                <select class="sx-input" id="claudeModelSelect"></select>
+                <select class="sx-input" id="claudeModelSelect" hidden></select>
                 <!-- 自定义服务商：模型列表未必拉得到，允许直接手填（候选仍以 datalist 提示） -->
                 <input class="sx-input" id="claudeModelInput" list="claudeModelList" spellcheck="false" hidden />
                 <datalist id="claudeModelList"></datalist>
@@ -530,16 +530,16 @@
                   <label class="sx-lbl"><span id="codexModelLbl">模型</span> <span class="sx-tag" id="mdlCodexProvider"></span></label>
                   <button type="button" class="sx-btn multi-engine-model-fetch" id="codexModelsBtn">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14-5.3L3 9M3 4v5h5M4 13a8 8 0 0 0 14 5.3L21 15M16 15h5v5" /></svg>
-                    <span id="codexModelsBtnLabel">拉取模型</span>
+                    <span id="codexModelsBtnLabel">拉取模型列表</span>
                   </button>
                 </div>
-                <select class="sx-input" id="codexModelSelect"></select>
+                <select class="sx-input" id="codexModelSelect" hidden></select>
                 <input class="sx-input" id="codexModelInput" list="codexModelList" spellcheck="false" hidden />
                 <datalist id="codexModelList"></datalist>
                 <div class="sx-note" id="codexModelHint" hidden></div>
                 <label class="sx-lbl" id="codexEffortLbl">思考强度</label>
                 <select class="sx-input" id="codexEffortSelect"></select>
-                <div class="sx-note" id="codexEffortNote">Codex 只有低/中/高三档，选「极高/最高」会按「高」执行。</div>
+                <div class="sx-note" id="codexEffortNote">当前工作台会把「极高」和「最高」按「高」传给 Codex。</div>
 
               </div>
               <div class="sx-note" id="mdlCodexStatus"></div>
@@ -1230,7 +1230,7 @@
     <div class="prompt-cache-actions"><button type="button" id="promptCacheCancel"></button><button type="button" id="promptCacheConfirm"></button></div>
   </dialog>
   <dialog id="updateConflictModal" class="update-conflict-modal" aria-labelledby="updConflictTitle" aria-describedby="updConflictNote">
-    <h3 id="updConflictTitle"></h3>
+    <div class="engine-dialog-heading"><h3 id="updConflictTitle"></h3><button type="button" id="updConflictDismiss">×</button></div>
     <p id="updConflictNote"></p>
     <div class="update-conflict-actions">
       <button type="button" id="updConflictCancel" autofocus></button>
@@ -1256,7 +1256,7 @@
   </dialog>
 
   <dialog id="engineRecoveryModal" class="batch-cost-modal" aria-labelledby="engineRecoveryTitle" aria-describedby="engineRecoveryNote">
-    <h3 id="engineRecoveryTitle"></h3>
+    <div class="engine-dialog-heading"><h3 id="engineRecoveryTitle"></h3><button type="button" id="engineRecoveryDismiss">×</button></div>
     <p id="engineRecoveryNote"></p>
     <pre id="engineRecoveryProgress" class="sx-note sx-pre" role="status" aria-live="polite" hidden></pre>
     <div class="modal-actions">

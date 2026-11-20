@@ -1,10 +1,10 @@
 {
-  "version": "3.1.43",
+  "version": "3.1.48",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-18",
+  "releasedAt": "2026-11-20",
   "notesI18n": {
-    "zh": "在 AI 引擎设置中直接更新 Codex 和 Claude Code。Linux 遇到安装目录权限不足时，可通过服务器管理员授权重试。",
-    "en": "Update Codex and Claude Code directly from AI Engine settings. On Linux, retry with server administrator authorization when the installation directory is not writable."
+    "zh": "支持为每个项目设置独立提示词。可从目录菜单或单目录按钮编辑，保存后同步到 CLAUDE.md 和 AGENTS.md。",
+    "en": "Set a prompt for each project from its directory menu or the single-directory view. Saving updates both CLAUDE.md and AGENTS.md."
   }
 }

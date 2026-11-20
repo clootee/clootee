@@ -336,6 +336,9 @@ export class Server {
 
     // 安装 / 更新 claude / codex 到最新版（npm 全局安装，源在官方与国内镜像间竞速选出）
     // 下载动辄几百 MB，逐行把 npm 输出广播出去，前端据此显示进度，避免看起来像卡死
+    app.post('/api/engine/version-check', (req, res) =>
+      this._wrapAsync(res, 'engine.versionCheck', () => EngineUpdater.checkVersion(req.body.engine)),
+    );
     app.post('/api/engine/update', async (req, res) => {
       const { engine, admin } = req.body || {};
       if (admin && !(LocalAccess.isLocal(req) || req.secure ||

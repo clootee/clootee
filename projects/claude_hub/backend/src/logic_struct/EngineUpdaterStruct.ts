@@ -19,7 +19,7 @@ export interface UpdateResult {
 // 安装过程中的实时输出回调（Server 用它把进度广播给前端；不传则静默）
 export type UpdateProgress = (line: string) => void;
 
-const PKG: Record<string, string> = {
+export const PKG: Record<string, string> = {
   claude: '@anthropic-ai/claude-code',
   codex: '@openai/codex',
 };
@@ -46,17 +46,22 @@ export class EngineUpdaterStruct {
     if (!pkg) throw new Error(`update: invalid engine=${engine}`);
     const registry = await this._pickRegistry();
     onProgress?.(`npm registry: ${registry}`);
-    const log = await this._npmInstall(pkg, registry, onProgress);
+    const prefix = this._installPrefix(engine);
+    const log = await this._npmInstall(pkg, registry, prefix, onProgress);
     // 安装后清缓存，让下次解析拿到新版本
     ClaudeBin.clearCache();
     CodexBin.clearCache();
     // 「装没装」的探测结果是进程级缓存的，装完必须作废，否则界面还显示未安装
     EngineStatus.invalidate();
-    const version = await this._verify(engine);
+    const version = await this._verify(engine, prefix);
     return { ok: true, engine, pkg, log, registry, version };
   }
 
-  protected static _verify(_engine: string): Promise<string> {
+  protected static _installPrefix(_engine: string): string {
+    throw new Error('Not implemented');
+  }
+
+  protected static _verify(_engine: string, _prefix: string): Promise<string> {
     throw new Error('Not implemented');
   }
 
@@ -69,6 +74,7 @@ export class EngineUpdaterStruct {
   protected static _npmInstall(
     _pkg: string,
     _registry: string,
+    _prefix: string,
     _onProgress?: UpdateProgress
   ): Promise<string> {
     throw new Error('Not implemented');
