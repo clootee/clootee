@@ -8390,6 +8390,8 @@ function startServerHealth() {
 let subscriptionGeneration = 0;
 // 后端下发稳定原因码；认不出的（多为系统/网络原始错误码，如 ETIMEDOUT）原样展示
 const SUBSCRIPTION_REASON = {
+  'usage-unauthorized': ['The subscription usage request was denied (HTTP 401)', '订阅余量查询未获授权（HTTP 401）'],
+  'claude-signed-out': ['Claude Code reports that you are signed out', 'Claude Code 显示当前未登录'],
   'no-credentials': ['Not signed in on this computer (no credentials file)', '本机尚未登录（找不到凭据文件）'],
   'no-token': ['No access token in the credentials', '凭据中没有访问令牌'],
   'empty-usage': ['The service returned no usage data', '服务未返回用量数据'],
@@ -8419,14 +8421,16 @@ async function refreshSubscriptionUsage() {
       title.textContent = account.name;
       cell.append(title);
       if (account.status !== 'ok') {
+        // Older backends marked every Claude usage 401 as an expired login.
+        const reason = account.name === 'Claude' && account.reason === 'http-401' ? 'usage-unauthorized' : account.reason;
         const status = document.createElement('small');
-        status.textContent = account.status === 'expired'
+        status.textContent = account.status === 'expired' && reason !== 'usage-unauthorized'
           ? (zh ? '登录已过期，请重新登录' : 'Sign in again')
           : (zh ? '暂无法获取订阅余量' : 'Subscription usage unavailable');
         cell.append(status);
-        if (account.reason) {
+        if (reason) {
           const why = document.createElement('small');
-          why.textContent = (zh ? '原因：' : 'Reason: ') + (SUBSCRIPTION_REASON[account.reason] ? SUBSCRIPTION_REASON[account.reason][zh ? 1 : 0] : account.reason);
+          why.textContent = (zh ? '原因：' : 'Reason: ') + (SUBSCRIPTION_REASON[reason] ? SUBSCRIPTION_REASON[reason][zh ? 1 : 0] : reason);
           cell.append(why);
         }
       }

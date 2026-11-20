@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { EngineConfig } from '../logic_realize/EngineConfig';
+import { ClaudeLogin } from '../logic_realize/ClaudeLogin';
 import { Settings } from '../logic_realize/Settings';
 import { HttpJson } from './HttpJson';
 import { CodexStoreHelper } from './CodexStoreHelper';
@@ -31,6 +32,17 @@ export class SubscriptionUsage {
     this.pending.set(key, pending);
     return pending;
   }
+  private static claudeToken(home: string): string | undefined {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(path.join(ClaudeStoreHelper.configDir(home), '.credentials.json'), 'utf8');
+    } catch (e: any) {
+      if (e?.code !== 'ENOENT') throw e;
+      if (process.platform !== 'darwin') throw Object.assign(new Error('no-credentials'), { code: 'no-credentials' });
+      raw = execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { encoding: 'utf8', timeout: 3000 });
+    }
+    return JSON.parse(raw).claudeAiOauth?.accessToken;
+  }
   private static async read(name: string): Promise<unknown> {
     const rows: { label: string; remaining: number; reset?: string }[] = [];
     try {
@@ -42,22 +54,26 @@ export class SubscriptionUsage {
         token = auth.tokens?.access_token;
         account = auth.tokens?.account_id;
       } else {
-        let raw: string;
-        try {
-          raw = fs.readFileSync(path.join(ClaudeStoreHelper.configDir(home), '.credentials.json'), 'utf8');
-        } catch (e) {
-          // Windows / Linux 把凭据放在文件里；只有 macOS 在钥匙串。文件不存在时不要把 ENOENT 当成别的错误
-          if (process.platform !== 'darwin') return { name, status: 'unavailable', reason: 'no-credentials', rows };
-          raw = execFileSync('security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { encoding: 'utf8', timeout: 3000 });
-        }
-        token = JSON.parse(raw).claudeAiOauth?.accessToken;
+        token = this.claudeToken(home);
       }
       if (!token) return { name, status: 'unavailable', reason: 'no-token', rows };
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
       if (name === 'Claude') headers['anthropic-beta'] = 'oauth-2025-04-20';
       if (account) headers['ChatGPT-Account-Id'] = account;
-      const response = await HttpJson.get(name === 'Claude' ? 'https://api.anthropic.com/api/oauth/usage' : 'https://chatgpt.com/backend-api/wham/usage',
-        headers, 10000);
+      const url = name === 'Claude' ? 'https://api.anthropic.com/api/oauth/usage' : 'https://chatgpt.com/backend-api/wham/usage';
+      let response = await HttpJson.get(url, headers, 10000);
+      if (name === 'Claude' && response.status === 401) {
+        const auth = await ClaudeLogin.status();
+        const latest = this.claudeToken(home);
+        if (latest && latest !== token) {
+          headers.Authorization = `Bearer ${latest}`;
+          response = await HttpJson.get(url, headers, 10000);
+        }
+        if (response.status === 401) {
+          const signedOut = auth.cliFound && !auth.error && auth.needsLogin;
+          return { name, status: signedOut ? 'expired' : 'unavailable', reason: signedOut ? 'claude-signed-out' : 'usage-unauthorized', rows };
+        }
+      }
       if (response.status < 200 || response.status >= 300) return { name, status: response.status === 401 ? 'expired' : 'error', reason: `http-${response.status}`, rows };
       const data = response.json;
       if (!data || typeof data !== 'object') return { name, status: 'error', reason: 'bad-response', rows };
