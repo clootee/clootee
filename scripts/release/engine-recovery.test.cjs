@@ -116,8 +116,8 @@ function queueFixture() {
     removeSession(id) { calls.push(['remove', id]); removed = true; },
   };
   const mocks = {
-    MultiEngine: { withSession: (_session, run) => run(), ensureIdentity() {} },
-    SessionManager: manager, RootManager: { getRoot: () => ({ path: '/test-project' }) },
+    MultiEngine: { parentRoot: id => id, withSession: (_session, run) => run(), ensureIdentity() {} },
+    SessionManager: manager, RootManager: { getRoot: id => ({ id, path: '/test-project' }) },
     SessionLimit: { status: () => ({ count: 0, max: 100 }) }, Settings: { get: () => ({}) },
     CostOptimizer: { consume() {} }, CostPolicy: { cache() {} }, SUBSCRIPTION_PROVIDERS: [],
     EngineConfig: { get: () => ({ claude: {}, codex: {} }) }, CodexRunner: { billingMeta: () => ({}) },
