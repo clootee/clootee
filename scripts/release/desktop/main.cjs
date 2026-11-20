@@ -15,7 +15,11 @@ if (!single) app.exit(installOnly ? 1 : 0);
 else {
   app.on('second-instance', () => { if (win) { win.show(); win.focus(); } if (recoverBackend) recoverBackend().catch(error => dialog.showErrorBox('Clootee', error.message)); });
   app.on('open-url', (event, url) => { event.preventDefault(); if (url === 'clootee://start' && win) { win.show(); win.focus(); if (recoverBackend) recoverBackend().catch(error => dialog.showErrorBox('Clootee', error.message)); } });
-  app.whenReady().then(start).catch(error => { dialog.showErrorBox('Clootee', error.message); app.exit(1); });
+  app.whenReady().then(start).catch(error => {
+    if (app.commandLine.hasSwitch('noerrdialogs')) process.stderr.write(String(error.stack || error) + '\n');
+    else dialog.showErrorBox('Clootee', error.message);
+    app.exit(1);
+  });
 }
 function stopChild() {
   if (!child || !child.pid) return;
