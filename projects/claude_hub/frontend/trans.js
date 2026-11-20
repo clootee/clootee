@@ -272,6 +272,8 @@ const DICT = {
   dirCtxSessions: { en: '{n} sessions here', zh: '本目录 {n} 个会话' },
   dirCtxLoading: { en: 'Reading…', zh: '读取中…' },
   dirCtxMissing: { en: 'Directory no longer exists', zh: '该目录已不存在' },
+  projectPrompt: { en: 'Project prompt', zh: '项目提示词' },
+  projectPromptHint: { en: 'Saved to CLAUDE.md and AGENTS.md. Clear the field and save to remove the project prompt.', zh: '保存后写入 CLAUDE.md 和 AGENTS.md。清空并保存可移除项目提示词。' },
   dirCtxCopyPath: { en: 'Copy path', zh: '复制路径' },
   dirCtxCopied: { en: 'Path copied', zh: '路径已复制' },
   dirCtxOpen: { en: 'Open this folder', zh: '打开该目录' },

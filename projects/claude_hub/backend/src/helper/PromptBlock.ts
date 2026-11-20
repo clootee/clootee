@@ -4,13 +4,32 @@ export class PromptBlock {
   static readonly START = '<!-- claude-hub:preset-prompt:start -->';
   static readonly END = '<!-- claude-hub:preset-prompt:end -->';
 
+  static readonly PROJECT_START = '<!-- claude-hub:project-prompt:start -->';
+  static readonly PROJECT_END = '<!-- claude-hub:project-prompt:end -->';
+
+  static project(content: string, prompt: string): string {
+    const start = content.indexOf(this.PROJECT_START);
+    const end = content.indexOf(this.PROJECT_END);
+    const newline = content.includes('\r\n') ? '\r\n' : '\n';
+    const body = prompt.trim().replace(/\r\n?/g, '\n').replace(/\n/g, newline);
+    const block = body ? [this.PROJECT_START, body, this.PROJECT_END].join(newline) : '';
+    if (start < 0 && end < 0) {
+      if (!block) return content;
+      return content + (content && !content.endsWith('\n') ? newline : '') + block + newline;
+    }
+    if (start < 0 || end < start || content.indexOf(this.PROJECT_START, start + 1) >= 0
+      || content.indexOf(this.PROJECT_END, end + 1) >= 0) throw new Error('Invalid project prompt markers');
+    const tail = content.slice(end + this.PROJECT_END.length);
+    return content.slice(0, start) + block + (block ? tail : tail.replace(/^\r?\n/, ''));
+  }
+
   // 文本里是否已包含该提示词（标记块内容一致，或用户手写的原文已在文中）
   static has(content: string, prompt: string): boolean {
     const body = this._norm(prompt);
     if (!body) return true;
     const inBlock = this._blockBody(content);
     if (inBlock !== null && this._norm(inBlock) === body) return true;
-    return this._norm(content).includes(body);
+    return this._norm(this.project(content, '')).includes(body);
   }
 
   // 生成写入后的新文本；已存在（内容一致）返回 null 表示无需改动。

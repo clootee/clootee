@@ -1,10 +1,47 @@
 // 预设系统提示词注入（实现）：文件查找（大小写不敏感）与读写。
 import * as fs from 'fs';
+import { JsonStore } from '../helper/JsonStore';
+import { Paths } from '../paths';
 import * as path from 'path';
 import { PromptBlock } from '../helper/PromptBlock';
 import { ProjectPromptStruct, PromptEnsureAction } from '../logic_struct/ProjectPromptStruct';
 
 export class ProjectPrompt extends ProjectPromptStruct {
+  private static get settingsFile(): string {
+    return path.join(Paths.DATA_ROOT, 'project_prompts.json');
+  }
+
+  static getLocal(id: string): string | undefined {
+    return JsonStore.read<Record<string, string>>(this.settingsFile, {})[id];
+  }
+
+  static setLocal(id: string, dir: string, prompt: string): void {
+    if (typeof prompt !== 'string' || [PromptBlock.START, PromptBlock.END, PromptBlock.PROJECT_START,
+      PromptBlock.PROJECT_END].some(marker => prompt.includes(marker))) throw new Error('Invalid project prompt');
+    const value = prompt.trim();
+    const settings = JsonStore.read<Record<string, string>>(this.settingsFile, {});
+    this.syncLocal(dir, value);
+    settings[id] = value;
+    JsonStore.write(this.settingsFile, settings);
+  }
+
+  static syncLocal(dir: string, prompt: string | undefined): void {
+    if (prompt === undefined) return;
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const changes = ['CLAUDE.md', 'AGENTS.md'].map(name => {
+      const entry = entries.find(item => item.name.toLowerCase() === name.toLowerCase());
+      if (entry && !entry.isFile()) throw new Error(`Expected a regular file: ${entry.name}`);
+      const file = path.join(dir, entry?.name || name);
+      const current = entry ? fs.readFileSync(file, 'utf8') : '';
+      const next = PromptBlock.project(current, prompt);
+      if (entry && next !== current) fs.accessSync(file, fs.constants.W_OK);
+      return { file, current, next };
+    });
+    for (const { file, current, next } of changes) {
+      if (next !== current) this._writeFile(file, next);
+    }
+  }
+
   // 目录里找 basename 与 defaultName 相同（忽略大小写）的文件；Linux 下 claude.md 与 CLAUDE.md 可并存，取先出现的
   protected static _findFile(rootPath: string, defaultName: string): string | null {
     const want = defaultName.toLowerCase();

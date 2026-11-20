@@ -3609,3 +3609,14 @@ body.rabbit { --session-notice-fg: var(--text); --session-notice-action: var(--t
 #subscriptionUsage .server-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 8px; gap: 12px; }
 #subscriptionUsage .server-health-metric b { font-size: 12px; }
 #subscriptionUsage meter { width: 100%; height: 8px; margin: 2px 0 5px; }
+
+#projectPromptDialog {
+  width: min(38rem, 92vw);
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+#projectPromptDialog::backdrop { background: rgb(0 0 0 / 55%); }
+#projectPromptText { display: block; width: 100%; margin: 12px 0; max-height: 55vh; resize: vertical; }
+#projectPromptDialog .actions { display: flex; justify-content: flex-end; gap: 8px; }

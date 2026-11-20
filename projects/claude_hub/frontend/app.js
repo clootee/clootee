@@ -385,6 +385,7 @@ function applyText() {
   $('addRootBtn').title = T('addRoot');
   $('removeRootBtn').innerHTML = svgIcon('trash', 17);
   $('manageRootsBtn').innerHTML = svgIcon('manageRoots', 17);
+  $('projectPromptBtn').textContent = T('projectPrompt');
   $('openFolderBtn').innerHTML = svgIcon('openFolder', 17);
   $('removeRootBtn').title = T('removeRoot');
   $('manageRootsBtn').title = T('manageRoots');
@@ -1794,6 +1795,7 @@ function syncFavoritesButton() {
   if (!btn) return;
   document.body.classList.toggle('favorites-only', State.favoritesOnly);
   document.body.classList.toggle('list-mode-all', State.listMode === 'all');
+  $('projectPromptBtn').disabled = !State.rootId;
   btn.classList.toggle('active', State.favoritesOnly);
   btn.title = T('listModeTitle') + '：' + T(listModeLabelKey());
   $('sessionsLabel').textContent = T(listModeLabelKey());
@@ -1944,7 +1946,13 @@ function renderFavDirFilter() {
     + (FavDir.rootId ? `<button class="fdf-clear" id="fdfClear" title="${escapeHtml(T('clearFilter'))}">✕</button>` : '');
   box.querySelectorAll('.fdf-tag').forEach((el) => {
     const opt = opts.find((o) => o.rootId === el.dataset.fdf);
-    el.addEventListener('click', () => pickFavDir(el.dataset.fdf));
+    el.addEventListener('click', e => {
+      if (dirCtxOpt?.rootId === opt.rootId && !$('dirCtxMenu').hidden) {
+        e.stopPropagation(); // Touch release after a long press can synthesize a click.
+        return;
+      }
+      pickFavDir(el.dataset.fdf);
+    });
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       openDirCtxMenu(opt, e.clientX, e.clientY);
@@ -2017,6 +2025,7 @@ function openDirCtxMenu(opt, x, y) {
   $('dirCtxPath').textContent = (root && root.path) || T('dirCtxLoading');
   $('dirCtxInfo').className = 'dir-ctx-info';
   $('dirCtxInfo').textContent = T('dirCtxLoading');
+  $('dirCtxPrompt').textContent = T('projectPrompt');
   $('dirCtxCopy').textContent = T('dirCtxCopyPath');
   $('dirCtxOpen').textContent = T('dirCtxOpen');
   $('dirCtxLock').textContent = '🔒 ' + lockLabel(root);
@@ -2025,7 +2034,7 @@ function openDirCtxMenu(opt, x, y) {
   const menu = $('dirCtxMenu');
   menu.hidden = false;
   menu.style.left = Math.min(x, Math.max(8, window.innerWidth - 330)) + 'px';
-  menu.style.top = Math.min(y, Math.max(8, window.innerHeight - 220)) + 'px';
+  menu.style.top = Math.min(y, Math.max(8, window.innerHeight - menu.offsetHeight - 8)) + 'px';
   loadDirCtxInfo(opt);
 }
 
@@ -2053,6 +2062,48 @@ async function loadDirCtxInfo(opt) {
     Tn('dirCtxFiles', info.files),
     Tn('dirCtxSessions', opt.count),
   ].join(' · ');
+}
+
+async function editProjectPrompt(rootId) {
+  if (!rootId) return;
+  const dialog = $('projectPromptDialog');
+  const field = $('projectPromptText');
+  const save = $('projectPromptSave');
+  const cancel = $('projectPromptCancel');
+  dialog.dataset.rootId = rootId;
+  $('projectPromptTitle').textContent = T('projectPrompt') + ' · ' + rootName(rootId);
+  $('projectPromptHint').textContent = T('projectPromptHint');
+  save.textContent = T('save');
+  cancel.textContent = T('cancel');
+  field.value = '';
+  field.disabled = save.disabled = true;
+  dialog.showModal();
+  try {
+    const data = await api('/api/root/prompt?id=' + encodeURIComponent(rootId));
+    if (!dialog.open || dialog.dataset.rootId !== rootId) return;
+    field.value = data.prompt;
+    field.disabled = save.disabled = false;
+    field.focus();
+  } catch (e) {
+    if (dialog.open && dialog.dataset.rootId === rootId) {
+      dialog.close();
+      alert(e.message);
+    }
+  }
+}
+
+async function saveProjectPrompt() {
+  const dialog = $('projectPromptDialog');
+  const controls = [$('projectPromptText'), $('projectPromptSave'), $('projectPromptCancel')];
+  controls.forEach(el => { el.disabled = true; });
+  try {
+    await api('/api/root/prompt', { id: dialog.dataset.rootId, prompt: controls[0].value });
+    dialog.close();
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    controls.forEach(el => { el.disabled = false; });
+  }
 }
 
 function closeDirCtxMenu() {
@@ -7789,6 +7840,17 @@ function bind() {
   $('ctxTraceStats').addEventListener('click', ctxOpenStats);
   $('ctxOpenWorkdir').addEventListener('click', ctxOpenWorkdir);
   $('favDirMoreBtn').addEventListener('click', toggleFavDirExpanded);
+  $('projectPromptBtn').addEventListener('click', () => editProjectPrompt(State.rootId));
+  $('dirCtxPrompt').addEventListener('click', () => {
+    const id = dirCtxOpt?.rootId;
+    closeDirCtxMenu();
+    editProjectPrompt(id);
+  });
+  $('projectPromptSave').addEventListener('click', saveProjectPrompt);
+  $('projectPromptCancel').addEventListener('click', () => $('projectPromptDialog').close());
+  $('projectPromptDialog').addEventListener('cancel', e => {
+    if ($('projectPromptCancel').disabled) e.preventDefault();
+  });
   $('dirCtxCopy').addEventListener('click', dirCtxCopyPath);
   $('dirCtxOpen').addEventListener('click', dirCtxOpenFolder);
   $('dirCtxLock').addEventListener('click', () => {

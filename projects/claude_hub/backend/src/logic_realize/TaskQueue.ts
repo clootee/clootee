@@ -231,8 +231,9 @@ export class TaskQueue extends TaskQueueStruct {
     return session.claudeSessionId ? `${session.rootId}:${session.claudeSessionId}` : session.id;
   }
 
-  protected static _ensureProjectPrompt(rootPath: string): void {
+  protected static _ensureProjectPrompt(rootPath: string, rootId: string): void {
     try {
+      ProjectPrompt.syncLocal(rootPath, ProjectPrompt.getLocal(rootId));
       ProjectPrompt.ensure(rootPath);
     } catch {
       // 写不进去（只读目录/权限等）不影响任务本身

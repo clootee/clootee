@@ -13,6 +13,7 @@ import { Logger } from '../helper/Logger';
 import { LifeGuard } from '../logic_realize/LifeGuard';
 import { ErrorHandler } from '../helper/ErrorHandler';
 import { EventBus } from '../helper/EventBus';
+import { ProjectPrompt } from '../logic_realize/ProjectPrompt';
 import { RootManager } from '../logic_realize/RootManager';
 import { CodexStoreHelper } from '../helper/CodexStoreHelper';
 import { SessionList } from '../logic_realize/SessionList';
@@ -485,6 +486,19 @@ export class Server {
     );
     app.post('/api/root/gitpush', (req, res) =>
       this._wrap(res, 'root.gitpush', () => GitPusher.push(req.body.rootId)),
+    );
+    app.get('/api/root/prompt', (req, res) =>
+      this._wrap(res, 'root.getPrompt', () => {
+        const root = RootManager.getRoot(MultiEngine.parentRoot(String(req.query.id || '')));
+        return { prompt: ProjectPrompt.getLocal(root.id) || '' };
+      }),
+    );
+    app.post('/api/root/prompt', (req, res) =>
+      this._wrap(res, 'root.setPrompt', () => {
+        const root = RootManager.getRoot(MultiEngine.parentRoot(String(req.body.id || '')));
+        ProjectPrompt.setLocal(root.id, root.path, req.body.prompt);
+        return { id: root.id };
+      }),
     );
     app.get('/api/root/info', (req, res) =>
       this._wrap(res, 'root.info', () => RootManager.rootInfo(String(req.query.id || ''))),

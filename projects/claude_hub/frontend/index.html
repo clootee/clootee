@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
   <link rel="stylesheet" href="dog.css?v=20261110d" />
-  <link rel="stylesheet" href="styles.css?v=20261118preview" />
+  <link rel="stylesheet" href="styles.css?v=20261120prompt" />
 </head>
 <body class="dark">
   <div id="gitInstallStatus" class="sx-note sx-pre" role="status" aria-live="polite" hidden style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(620px,90vw);max-height:35vh;overflow:auto;padding:16px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:12px;z-index:10050"></div>
@@ -803,6 +803,7 @@
         <div style="display:flex;justify-content:space-between;align-items:center">
           <h2 id="rootLabel"></h2>
           <div style="display:flex;gap:6px">
+            <button id="projectPromptBtn" class="sm"></button>
             <button id="manageRootsBtn" class="icon-square" title="manage roots">🗂</button>
             <button id="gitPushBtn" class="icon-square" title="git add . && commit -m 1 && push">⇪</button>
           </div>
@@ -898,8 +899,19 @@
       <div class="ctx-sep"></div>
       <button id="dirCtxCopy" class="ctx-item"></button>
       <button id="dirCtxOpen" class="ctx-item" hidden></button>
+      <button id="dirCtxPrompt" class="ctx-item"></button>
       <button id="dirCtxLock" class="ctx-item"></button>
     </div>
+
+    <dialog id="projectPromptDialog" aria-labelledby="projectPromptTitle">
+      <h3 id="projectPromptTitle"></h3>
+      <label for="projectPromptText" id="projectPromptHint"></label>
+      <textarea id="projectPromptText" rows="12"></textarea>
+      <div class="actions">
+        <button id="projectPromptCancel"></button>
+        <button id="projectPromptSave" class="primary"></button>
+      </div>
+    </dialog>
 
     <!-- 会话项右键菜单 / 长按菜单：标记状态（活跃/待测试/已完成，任意互切）/ 置顶 -->
     <div id="sessionCtxMenu" class="ctx-menu" hidden>
@@ -1253,7 +1265,7 @@
     </div>
   </dialog>
 
-  <script src="trans.js?v=20261117sso"></script>
+  <script src="trans.js?v=20261120prompt"></script>
   <script src="workspace.js?v=20261029sessionfix"></script>
   <script src="rootwizard.js?v=20261110permission"></script>
   <script src="health.js?v=20261104runtime"></script>
@@ -1276,6 +1288,6 @@
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
   <script src="multi-engine.js?v=20261117collapse"></script>
-  <script src="app.js?v=20261118engines"></script>
+  <script src="app.js?v=20261120prompt"></script>
 </body>
 </html>

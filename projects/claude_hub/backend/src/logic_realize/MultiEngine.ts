@@ -179,6 +179,8 @@ export class MultiEngine {
     const root = RootManager.getRoot(rootId);
     const base = path.join(root.path, 'divide');
     this.safeDir(base);
+    const projectPrompt = ProjectPrompt.getLocal(rootId);
+    ProjectPrompt.syncLocal(root.path, projectPrompt);
     ProjectPrompt.ensure(root.path);
     // Check every target before creating sessions; never follow directory symlinks.
     for (const [index, e] of entries.entries()) {
@@ -192,6 +194,7 @@ export class MultiEngine {
         if (existing && fs.lstatSync(path.join(dir, existing)).isSymbolicLink()) throw new Error(`Unsafe instruction file: ${existing}`);
         if (!existing) fs.copyFileSync(path.join(root.path, source), target, fs.constants.COPYFILE_EXCL);
       }
+      ProjectPrompt.syncLocal(dir, projectPrompt);
       ProjectPrompt.ensure(dir);
       this.writeIdentity(dir, index, e);
     }

@@ -192,7 +192,7 @@ export class TaskQueueStruct {
     task.costBlocked = false;
     CostOptimizer.consume(task.costApproval);
     const root = RootManager.getRoot(session.rootId);
-    this._ensureProjectPrompt(root.path);
+    this._ensureProjectPrompt(root.path, MultiEngine.parentRoot(root.id));
     MultiEngine.ensureIdentity(session);
 
     // 轨迹：记录任务起点（含完整 prompt 与工作目录），后续引擎事件都挂在这个 taskId 下
@@ -406,7 +406,7 @@ export class TaskQueueStruct {
   protected static _traceSessionId(_sessionId: string): string { throw new Error('Not implemented'); }
 
   // 预设系统提示词写入（失败不得阻断任务执行）
-  protected static _ensureProjectPrompt(_rootPath: string): void { throw new Error('Not implemented'); }
+  protected static _ensureProjectPrompt(_rootPath: string, _rootId: string): void { throw new Error('Not implemented'); }
 
   // 供 Realize 内部构造消息复用
   protected static _newMessage(_taskId: string, _role: Message['role'], _text: string): Message { throw new Error('Not implemented'); }
