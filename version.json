@@ -1,10 +1,10 @@
 {
-  "version": "3.1.46",
+  "version": "3.1.47",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-19",
+  "releasedAt": "2026-11-20",
   "notesI18n": {
-    "zh": "修复官方订阅保存新模型后下拉框消失、选择被重置为自动的问题；订阅用量在所有系统上显示失败原因；模型区间距优化。",
-    "en": "Fix the official model dropdown vanishing and the saved model resetting to Auto; show subscription usage failure reasons on every OS; add spacing above the model section."
+    "zh": "修复 Claude 订阅余量查询偶发提示登录过期的问题。聊天输入框现支持直接粘贴文件作为附件。",
+    "en": "Fix occasional false sign-in expiry alerts when checking Claude subscription usage. Files can now be pasted directly into chat as attachments."
   }
 }
