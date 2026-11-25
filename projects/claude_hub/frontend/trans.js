@@ -661,6 +661,7 @@ const DICT = {
   costUnknownPrice: { en: 'Unknown price', zh: '价目未知' },
   costContinue: { en: 'Continue in this session', zh: '继续当前会话发送' },
   costNew: { en: 'Prepare a new session', zh: '准备新会话发送' },
+  costCompactContinue: { en: 'Compact and continue (recommended)', zh: '压缩并继续（推荐）' },
   costCompact: { en: 'Compact, then review cost', zh: '先压缩，再确认费用' },
   costStrictNote: { en: 'Strict lock is enabled. Direct sending is blocked. Compact successfully or move to a new session.', zh: '严格锁定已开启，不允许直接发送。请先成功压缩，或迁移到新会话。' },
   costChecking: { en: 'Checking whether the message stands alone with a low-cost model…', zh: '正在用低价模型检查消息能否独立理解…' },

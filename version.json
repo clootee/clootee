@@ -1,10 +1,10 @@
 {
-  "version": "3.1.48",
+  "version": "3.1.49",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-20",
+  "releasedAt": "2026-11-25",
   "notesI18n": {
-    "zh": "支持为每个项目设置独立提示词。可从目录菜单或单目录按钮编辑，保存后同步到 CLAUDE.md 和 AGENTS.md。",
-    "en": "Set a prompt for each project from its directory menu or the single-directory view. Saving updates both CLAUDE.md and AGENTS.md."
+    "zh": "发送前确认上下文费用时，可选择「压缩并继续（推荐）」。压缩成功后自动发送原消息，也可选择先查看压缩后的费用。",
+    "en": "Choose “Compact and continue” in the context cost dialog to send your original message after compaction. You can also review the updated cost first."
   }
 }

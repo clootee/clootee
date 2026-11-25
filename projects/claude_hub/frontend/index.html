@@ -1197,7 +1197,7 @@
     <div class="cost-progress" id="costProgress" hidden><progress id="costProgressBar" max="100" value="0"></progress><p id="costProgressText" aria-live="polite"></p></div>
     <div id="costPrepared" hidden><label id="costPreparedLabel" for="costPreparedInput"></label><textarea id="costPreparedInput" rows="7"></textarea><p id="costHelperCost" class="sx-note"></p><button type="button" id="costPreparedSend"></button></div>
     <p id="costGuardError" role="alert"></p>
-    <div class="cost-guard-actions"><button type="button" id="costContinue"></button><button type="button" id="costNew"></button><button type="button" id="costCompact"></button><button type="button" id="costCancel"></button></div>
+    <div class="cost-guard-actions"><button type="button" id="costCompactContinue" class="primary">压缩并继续（推荐）</button><button type="button" id="costContinue"></button><button type="button" id="costNew"></button><button type="button" id="costCompact"></button><button type="button" id="costCancel"></button></div>
   </dialog>
   <dialog id="queueWaitModal" class="queue-wait-modal" aria-labelledby="queueWaitTitle" aria-describedby="queueWaitBody">
     <button type="button" class="qw-close" id="queueWaitClose">✕</button>
@@ -1265,7 +1265,7 @@
     </div>
   </dialog>
 
-  <script src="trans.js?v=20261120prompt"></script>
+  <script src="trans.js?v=20261125compact"></script>
   <script src="workspace.js?v=20261029sessionfix"></script>
   <script src="rootwizard.js?v=20261110permission"></script>
   <script src="health.js?v=20261104runtime"></script>
@@ -1284,7 +1284,7 @@
   <script src="mecha.js?v=20260802a"></script>
   <script src="helper/ErrorHandler.js?v=20261012e"></script>
   <script src="prompt-cache.js?v=20261012e"></script>
-  <script src="cost-optimization.js?v=20261015a"></script>
+  <script src="cost-optimization.js?v=20261125compact"></script>
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
   <script src="multi-engine.js?v=20261117collapse"></script>

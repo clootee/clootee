@@ -9,7 +9,7 @@ const CostUi = {
       costCheapModelLabel: 'costCheapModel', costClassifierNote: 'costClassifierNote',
       costCompactIntro: 'costCompactIntro', costCompactWindowLabel: 'costCompactWindow', costCompactTokensLabel: 'costCompactTokens', costCompactWindowHelp: 'costCompactHelp', costCompactPresetHint: 'costCompactPresetHint',
       costGuardTitle: 'costAlertTitle', costContinue: 'costContinue', costNew: 'costNew',
-      costCompact: 'costCompact', costCancel: 'cancel', costGuardStrictNote: 'costStrictNote',
+      costCompactContinue: 'costCompactContinue', costCompact: 'costCompact', costCancel: 'cancel', costGuardStrictNote: 'costStrictNote',
       costPreparedLabel: 'costPreparedLabel', costPreparedSend: 'costPreparedSend' };
     for (const [id, key] of Object.entries(labels)) $(id).textContent = T(key);
     $('costGuardClose').setAttribute('aria-label', T('close'));
@@ -67,7 +67,7 @@ const CostUi = {
       .replace('{cold}', this.dollars(c.costs?.coldUsd)) + (c.subscription ? ' ' + T('apiSubscription') : '');
     $('costGuardStrictNote').hidden = !(c.strict && c.blocked && !c.compactProof);
     $('costContinue').hidden = c.strict && c.blocked && !c.compactProof;
-    $('costCompact').disabled = !c.canCompact;
+    $('costCompactContinue').disabled = $('costCompact').disabled = !c.canCompact;
   },
   async prepare(prompts) {
     if (this.pending) return null;
@@ -95,8 +95,8 @@ const CostUi = {
     let working = false;
     const busy = (value) => {
       working = value;
-      for (const name of ['costContinue', 'costNew', 'costCompact', 'costCancel', 'costGuardClose']) $(name).disabled = value;
-      if (!value) $('costCompact').disabled = !current.canCompact;
+      for (const name of ['costContinue', 'costNew', 'costCompactContinue', 'costCompact', 'costCancel', 'costGuardClose']) $(name).disabled = value;
+      if (!value) $('costCompactContinue').disabled = $('costCompact').disabled = !current.canCompact;
     };
     const progress = (stage, percent) => {
       $('costProgress').hidden = false;
@@ -115,16 +115,20 @@ const CostUi = {
         resolve(State.sessionId === id ? result : null);
       }, { once: true });
       $('costGuardClose').onclick = $('costCancel').onclick = () => { if (!working) modal.close(); };
+      const approve = async () => {
+        if (State.sessionId !== id) { modal.close(); return; }
+        const r = await api('/api/cost/approve', { sessionId: id, prompts, fingerprint: current.fingerprint, compactProof: current.compactProof });
+        result = { sessionId: id, prompts, costApprovals: r.approvals };
+        modal.close();
+      };
       $('costContinue').onclick = async () => {
         if (working || State.sessionId !== id) return;
         busy(true);
         try {
-          const r = await api('/api/cost/approve', { sessionId: id, prompts, fingerprint: current.fingerprint, compactProof: current.compactProof });
-          result = { sessionId: id, prompts, costApprovals: r.approvals };
-          modal.close();
+          await approve();
         } catch (e) { failed(e); }
       };
-      $('costCompact').onclick = async () => {
+      const compact = async (continueAfter) => {
         if (working || State.sessionId !== id) return;
         busy(true); progress('compacting', 20);
         try {
@@ -136,9 +140,12 @@ const CostUi = {
           $('costProgressText').textContent = T('costCompactResult').replace('{before}', fmtNum(r.beforeTokens))
             .replace('{after}', fmtNum(r.afterTokens)).replace('{usd}', this.dollars(r.usd));
           $('costContinue').textContent = T('costConfirmSend');
-          busy(false);
+          if (continueAfter) await approve();
+          else busy(false);
         } catch (e) { failed(e); }
       };
+      $('costCompactContinue').onclick = () => compact(true);
+      $('costCompact').onclick = () => compact(false);
       $('costNew').onclick = async () => {
         if (working || State.sessionId !== id) return;
         busy(true); progress('checking', 10);
@@ -168,7 +175,7 @@ const CostUi = {
           busy(false);
           $('costNew').disabled = true;
           $('costContinue').hidden = true;
-          $('costCompact').disabled = true;
+          $('costCompactContinue').disabled = $('costCompact').disabled = true;
           $('costPreparedSend').onclick = () => {
             const text = $('costPreparedInput').value.trim();
             if (!text || State.sessionId !== id) return;
