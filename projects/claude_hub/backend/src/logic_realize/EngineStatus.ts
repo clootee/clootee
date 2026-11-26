@@ -8,11 +8,12 @@ import { ClaudeBin } from '../helper/ClaudeBin';
 import { CodexBin } from '../helper/CodexBin';
 import { OutEnd } from '../helper/OutEnd';
 import { AppConfig } from '../config/AppConfig';
+import { Settings } from './Settings';
 
 export class EngineStatus extends EngineStatusStruct {
   protected static _probe(engine: SessionEngine): EngineAvail {
     if (engine === 'antigravity') {
-      const system = !!AntigravityBin.find();
+      const system = !!AntigravityBin.find(Settings.effectiveHomeDir());
       return { system, bundled: false, ready: system };
     }
     if (engine === 'claude') ClaudeBin.clearCache();

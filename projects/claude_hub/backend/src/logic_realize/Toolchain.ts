@@ -22,6 +22,8 @@ import { RunDiag } from '../helper/RunDiag';
 import { RunAsUser } from '../helper/RunAsUser';
 import { Settings } from './Settings';
 import { Logger } from '../helper/Logger';
+import { AntigravityBin } from '../helper/AntigravityBin';
+import { EngineUpdater } from './EngineUpdater';
 
 const NPM_PKG: Partial<Record<ToolId, string>> = {
   claude: '@anthropic-ai/claude-code',
@@ -40,6 +42,10 @@ export class Toolchain extends ToolchainStruct {
   // claude / codex 没有内置版：npm 全局目录可能就在 out_end/node 下（用内置便携 Node 时），
   // 那也是货真价实的一次全局安装，不能排除掉，否则装完了界面还显示"未安装"。
   protected static _detectSystem(id: ToolId): ToolCopy {
+    if (id === 'antigravity') {
+      const agy = AntigravityBin.find(Settings.effectiveHomeDir());
+      return agy ? { found: true, path: agy, ...this._probe(agy, id) } : { found: false, path: '', version: '' };
+    }
     const name = this._exeName(id);
     const bundlable = TOOLS.some((m) => m.id === id && m.bundlable);
     const found = bundlable ? this._whichOutsideOutEnd(name) : this._which(name);
@@ -54,7 +60,7 @@ export class Toolchain extends ToolchainStruct {
   }
 
   private static _exeName(id: ToolId): string {
-    return id === 'claude' ? 'claude' : id === 'codex' ? 'codex' : id;
+    return id === 'antigravity' ? 'agy' : id;
   }
 
   // 只有 node / git 有内置版；claude / codex 一律全局安装，没有"内置那一份"
@@ -126,7 +132,7 @@ export class Toolchain extends ToolchainStruct {
     // `WARNING: failed to clean up stale arg0 temp dirs: Permission denied`。
     // 所以只对这两个引擎按运行身份探测；node / git 是服务自身要用的工具，
     // 保持当前身份（切了身份反而可能读不到内置的那一份）。
-    const isEngine = id === 'claude' || id === 'codex';
+    const isEngine = id === 'claude' || id === 'codex' || id === 'antigravity';
     const run = isEngine ? RunAsUser.wrap(cmd, args, Settings.runAsUser()) : { bin: cmd, args };
     try {
       const out = String(
@@ -170,6 +176,7 @@ export class Toolchain extends ToolchainStruct {
   // 系统软件（macOS/Linux 的 git）走系统包管理器——npm 上没有官方 git。
   protected static async _installGlobal(id: ToolId, onProgress?: ToolProgress): Promise<void> {
     if (id === 'git') return this._installSystemGit(onProgress);
+    if (id === 'antigravity') { await EngineUpdater.update(id, onProgress); return; }
     const pkg = NPM_PKG[id];
     if (!pkg) throw new Error(`Toolchain: ${id} 不支持全局安装`);
     const registry = await RegistryPicker.pick();

@@ -13,7 +13,7 @@ import * as fs from 'fs';
 // 一律 `npm install -g`（源由 RegistryPicker 竞速选出）。只有 node / git 提供内置便携版。
 import { OutEnd } from '../helper/OutEnd';
 
-export type ToolId = 'node' | 'git' | 'claude' | 'codex';
+export type ToolId = 'node' | 'git' | 'claude' | 'codex' | 'antigravity';
 export type ToolPref = 'auto' | 'system' | 'bundled';
 export type ToolSource = 'system' | 'bundled' | 'none';
 export type InstallTarget = 'global' | 'bundled';
@@ -83,6 +83,14 @@ export const TOOLS: ToolMeta[] = [
     purpose: '可选的第二个 AI 引擎；不用 Codex 就不必装',
     optional: true,
     bundlable: false, // 同上
+    globalInstallable: true,
+  },
+  {
+    id: 'antigravity',
+    label: 'Antigravity CLI',
+    purpose: '可选的 Google Antigravity 引擎（agy）；用官方脚本一键安装，之后自动更新',
+    optional: true,
+    bundlable: false, // 不在 npm 上：走官方安装脚本，装到运行用户的 ~/.local/bin
     globalInstallable: true,
   },
 ];

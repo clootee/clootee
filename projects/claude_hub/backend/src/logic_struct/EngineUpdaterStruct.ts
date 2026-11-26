@@ -30,7 +30,7 @@ export class EngineUpdaterStruct {
 
   // 安装/更新指定引擎到最新版（npm 全局）。onProgress 有值时逐行回传 npm 输出。
   static async update(engine: string, onProgress?: UpdateProgress): Promise<UpdateResult> {
-    if (engine !== 'claude' && engine !== 'codex') throw new Error(`update: invalid engine=${engine}`);
+    if (!['claude', 'codex', 'antigravity'].includes(engine)) throw new Error(`update: invalid engine=${engine}`);
     const active = this._updates.get(engine);
     if (active) return active;
     // Settings, onboarding and runtime recovery share one npm installation queue.
@@ -42,6 +42,11 @@ export class EngineUpdaterStruct {
   }
 
   private static async _performUpdate(engine: string, onProgress?: UpdateProgress): Promise<UpdateResult> {
+    if (engine === 'antigravity') {
+      const done = await this._installAntigravity(onProgress);
+      EngineStatus.invalidate();
+      return { ok: true, engine, pkg: 'agy', log: done.log, registry: '', version: done.version };
+    }
     const pkg = PKG[engine];
     if (!pkg) throw new Error(`update: invalid engine=${engine}`);
     const registry = await this._pickRegistry();
@@ -55,6 +60,11 @@ export class EngineUpdaterStruct {
     EngineStatus.invalidate();
     const version = await this._verify(engine, prefix);
     return { ok: true, engine, pkg, log, registry, version };
+  }
+
+  // Antigravity CLI 不在 npm 上，走官方安装脚本（Realize 实现）
+  protected static _installAntigravity(_onProgress?: UpdateProgress): Promise<{ version: string; log: string }> {
+    throw new Error('Not implemented');
   }
 
   protected static _installPrefix(_engine: string): string {

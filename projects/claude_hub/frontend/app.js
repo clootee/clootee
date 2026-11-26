@@ -8172,6 +8172,7 @@ async function startApp() {
   Clootee.refresh();
   await loadSettings();
   await loadRoots();
+  void EngineRecovery.promptAntigravity(); // 不 await：Antigravity 未安装时弹一次一键安装窗
   checkAppUpdateSilently(); // 不 await：每次启动静默检测一次，有更新才在齿轮按钮上提示，不打断使用
 }
 
@@ -9258,7 +9259,10 @@ function tcRow(t) {
     (p) => `<option value="${p.v}"${t.pref === p.v ? ' selected' : ''}>${p.label}</option>`,
   ).join('');
   const btns = [];
-  if (t.globalInstallable)
+  if (t.id === 'antigravity') {
+    // agy 装好后自己后台自动更新，只在缺失时给安装按钮
+    if (!t.system.found) btns.push(`<button class="sx-btn" data-tc-install="${t.id}" data-tc-target="global">一键安装</button>`);
+  } else if (t.globalInstallable)
     btns.push(
       `<button class="sx-btn" data-tc-install="${t.id}" data-tc-target="global">${['claude', 'codex'].includes(t.id) ? '安装 / 更新到最新版' : t.system.found ? '更新本机版' : '安装到本机（全局）'}</button>`,
     );
@@ -9271,7 +9275,7 @@ function tcRow(t) {
     `<div class="tc-head"><b>${t.label}</b>${t.optional ? '<span class="tc-opt">可选</span>' : ''}${badge}</div>` +
     `<div class="tc-purpose">${t.purpose}</div>` +
     `<div class="tc-copies">${copy(t.system, '本机')}${copy(t.bundled, '内置', t.bundlable ? '未下载' : '不提供内置版')}</div>` +
-    `<div class="tc-actions"><select class="sx-input tc-sel" data-tc-pref="${t.id}">${opts}</select>${btns.join('')}</div>` +
+    `<div class="tc-actions">${t.id === 'antigravity' ? '' : `<select class="sx-input tc-sel" data-tc-pref="${t.id}">${opts}</select>`}${btns.join('')}</div>` +
     `<div class="sx-note sx-pre tc-install-status" data-tc-status="${t.id}" hidden></div>` +
     `</div>`
   );
@@ -9325,6 +9329,7 @@ async function setToolPref(tool, pref) {
 async function installTool(tool, target, btn) {
   let box = btn?.closest('.tc-item')?.querySelector('[data-tc-status]');
   if (!box) box = document.querySelector(`[data-tc-status="${tool}"]`) || $('tcStatus');
+  if (tool === 'antigravity') return EngineRecovery.ensure('antigravity');
   if (['claude', 'codex'].includes(tool)) return updateEngine(tool, btn, box, true);
   box.hidden = false;
   box.className = 'sx-note sx-pre';

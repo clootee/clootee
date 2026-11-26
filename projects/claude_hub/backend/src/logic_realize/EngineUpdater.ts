@@ -14,6 +14,8 @@ import { AppConfig } from '../config/AppConfig';
 import { EngineUpdaterStruct, UpdateProgress, PKG } from '../logic_struct/EngineUpdaterStruct';
 import { Logger } from '../helper/Logger';
 import { RegistryPicker, OFFICIAL_REGISTRY, MIRROR_REGISTRY } from '../helper/RegistryPicker';
+import { AntigravityInstaller } from '../helper/AntigravityInstaller';
+import { Settings } from './Settings';
 
 export class EngineAuthDenied extends Error {}
 export class EngineWriteDenied extends Error {}
@@ -43,6 +45,10 @@ export class EngineUpdater extends EngineUpdaterStruct {
     const latest = SemVer.parse((await response.json()).version);
     if (!latest) throw new Error('Cannot read latest CLI version');
     return { current, latest, hasUpdate: SemVer.gt(latest, current) };
+  }
+
+  protected static _installAntigravity(onProgress?: UpdateProgress) {
+    return AntigravityInstaller.install(Settings.effectiveHomeDir(), Settings.runAsUser(), onProgress);
   }
 
   protected static async _verify(engine: string, prefix: string): Promise<string> {
@@ -79,7 +85,7 @@ export class EngineUpdater extends EngineUpdaterStruct {
   private static permissionFailures = new Map<string, number>();
 
   static async requestUpdate(engine: string, auth: { username: string; password: string } | undefined, progress: UpdateProgress) {
-    if (engine !== 'claude' && engine !== 'codex') throw new Error('无效的引擎');
+    if (!['claude', 'codex', 'antigravity'].includes(engine)) throw new Error('无效的引擎');
     if (auth) {
       if (process.platform !== 'linux' || (this.permissionFailures.get(engine) || 0) < Date.now())
         throw new Error('请先尝试普通更新');
