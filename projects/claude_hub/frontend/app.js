@@ -8178,7 +8178,6 @@ async function startApp() {
   Clootee.refresh();
   await loadSettings();
   await loadRoots();
-  void EngineRecovery.promptAntigravity(); // 不 await：Antigravity 未安装时弹一次一键安装窗
   checkAppUpdateSilently(); // 不 await：每次启动静默检测一次，有更新才在齿轮按钮上提示，不打断使用
 }
 
@@ -10303,6 +10302,8 @@ async function onEngineChange() {
   if (!s || s.multiGroup || !isDraftSession(s)) return;
   const selected = $('engineSelect').value;
   const eng = selected;
+  // Antigravity 是可选引擎：只有用户在会话里选了它、本机又没装时，才弹一键安装（不 await，不挡切换）
+  if (eng === 'antigravity') void EngineRecovery.ensure('antigravity');
   // 收藏夹草稿只在前端存在，后端没有这个会话；直接改本地，等绑定目录时带过去
   if (isFavoriteDraftId(s.id)) {
     s.engine = eng;

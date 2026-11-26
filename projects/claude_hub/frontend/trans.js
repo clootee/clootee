@@ -59,7 +59,6 @@ const DICT = {
   engineRecoveryRetry: {"en": "Retry installation", "zh": "重试安装"},
   agyRecoveryMissing: { en: 'Antigravity CLI (agy) is not installed yet. One click downloads it from the fastest source (Google or the China mirror) with progress; when it finishes, the configuration window opens so you can pick a provider, API key and model.', zh: '尚未安装 Antigravity CLI（agy）。点一下即可自动选最快的下载源（Google 官方或国内镜像）并显示下载进度，装好后会自动打开配置窗口，填好服务商、Key 和模型就能用。' },
   agyRecoveryInstall: { en: 'Install now', zh: '一键安装' },
-  agyRecoveryNever: { en: "Don't remind me", zh: '不再提醒' },
   agyRecoveryDone: { en: 'Antigravity CLI is installed. Configure it now to start using it.', zh: 'Antigravity CLI 已安装，现在配置一下就能使用。' },
   agyRecoveryConfigure: { en: 'Configure now', zh: '去配置' },
   engineRecoveryCheckFailed: {"en": "Could not check installed engines. Check your connection and try again.", "zh": "无法检查引擎安装状态，请检查连接后重试。"},
