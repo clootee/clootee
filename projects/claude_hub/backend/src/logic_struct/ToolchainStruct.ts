@@ -88,9 +88,9 @@ export const TOOLS: ToolMeta[] = [
   {
     id: 'antigravity',
     label: 'Antigravity CLI',
-    purpose: '可选的 Google Antigravity 引擎（agy）；用官方脚本一键安装，之后自动更新',
+    purpose: '可选的 Google Antigravity 引擎（agy）；一键安装，自动在官方源与国内镜像间选最快的，之后自动更新',
     optional: true,
-    bundlable: false, // 不在 npm 上：走官方安装脚本，装到运行用户的 ~/.local/bin
+    bundlable: false, // 不在 npm 上：按官方清单下载（官方源/国内镜像竞速），装到运行用户的 ~/.local/bin
     globalInstallable: true,
   },
 ];

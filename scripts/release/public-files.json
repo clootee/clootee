@@ -69,6 +69,7 @@
     "scripts/release/cdn/package-lock.json",
     "scripts/release/cdn/publish.cjs",
     "scripts/release/cdn/retire.cjs",
+    "scripts/release/cdn/antigravity-mirror.cjs",
     "scripts/release/desktop/.gitignore",
     "scripts/release/desktop/main.cjs",
     "scripts/release/desktop/installer.nsh",
