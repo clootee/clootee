@@ -194,12 +194,25 @@ export class TaskQueue extends TaskQueueStruct {
   // 消息不再持久化（正文以 claude 原生 jsonl 为准），仅实时广播给前端即时展示
   protected static _recordUserMessage(sessionId: string, task: Task): void {
     const msg = this._newMessage(task.id, 'user', task.prompt);
+    this._saveAntigravityMessage(sessionId, msg);
     EventBus.broadcast({ kind: 'message', sessionId, taskId: task.id, message: msg });
   }
 
   protected static _recordAssistantMessage(sessionId: string, taskId: string, text: string): void {
     const msg = this._newMessage(taskId, 'assistant', text);
+    this._saveAntigravityMessage(sessionId, msg);
     EventBus.broadcast({ kind: 'message', sessionId, taskId, message: msg });
+  }
+
+  private static _saveAntigravityMessage(sessionId: string, msg: Message): void {
+    const s = SessionManager.liveAntigravitySession(sessionId);
+    if (!s || !s.tasks.some(task => task.id === msg.taskId && task.status === 'running')) return;
+    s.messages.push(msg);
+    if (msg.role === 'user') {
+      if (!s.name) s.name = msg.text.slice(0, 80);
+      s.lastUser = msg.text.slice(0, 200);
+    }
+    SessionManager.saveSession(s);
   }
 
   // 校正：把 claude 实际使用的 session_id 回写到（内存）会话。草稿首跑后即在此拿到真实 uuid，

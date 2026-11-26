@@ -13,6 +13,7 @@ import { Logger } from '../helper/Logger';
 import { LifeGuard } from '../logic_realize/LifeGuard';
 import { ErrorHandler } from '../helper/ErrorHandler';
 import { EventBus } from '../helper/EventBus';
+import { ProjectPromptEditor } from '../logic_realize/ProjectPromptEditor';
 import { ProjectPrompt } from '../logic_realize/ProjectPrompt';
 import { RootManager } from '../logic_realize/RootManager';
 import { CodexStoreHelper } from '../helper/CodexStoreHelper';
@@ -489,6 +490,14 @@ export class Server {
     );
     app.post('/api/root/gitpush', (req, res) =>
       this._wrap(res, 'root.gitpush', () => GitPusher.push(req.body.rootId)),
+    );
+    app.get('/api/root/prompts', (req, res) =>
+      this._wrap(res, 'root.readPrompts', () => ProjectPromptEditor.read(MultiEngine.parentRoot(String(req.query.rootId || '')))),
+    );
+    app.post('/api/root/prompts', (req, res) =>
+      this._wrap(res, 'root.savePrompts', () => ProjectPromptEditor.save(
+        MultiEngine.parentRoot(String(req.body.rootId || '')), req.body.revision, req.body.mode, req.body.contents,
+      )),
     );
     app.get('/api/root/prompt', (req, res) =>
       this._wrap(res, 'root.getPrompt', () => {

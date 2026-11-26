@@ -21,6 +21,7 @@ import { ApiCost } from './ApiCost';
 import { ApiSessionTotals } from '../models/Types';
 import { API_COST_MAX_BATCH } from '../config/ClaudePricing';
 import { ModelManager } from './ModelManager';
+import { AntigravityProfile } from './AntigravityProfile';
 import { EngineConfig } from './EngineConfig';
 
 interface Member extends MultiEngineEntry { rootId: string; sessionId: string }
@@ -125,7 +126,8 @@ export class MultiEngine {
     for (const id of ids) { try { this.remove(id); removed.push(id); } catch { failed.push(id); } }
     return { removed, failed };
   }
-  static async models(engine: Engine, config: Pick<EngineProviderConfig, 'provider' | 'apiKey' | 'baseUrl' | 'modelsUrl'>) {
+  static async models(engine: Session['engine'], config: Pick<EngineProviderConfig, 'provider' | 'apiKey' | 'baseUrl' | 'modelsUrl'>) {
+    if (engine === 'antigravity') return AntigravityProfile.models(config);
     if (engine !== 'claude' && engine !== 'codex') throw new Error('Invalid engine');
     if (config.provider === 'official') return { models: await ModelManager.officialModels(engine) };
     const ids = await EngineConfig.listModels(config.provider, config.apiKey, config.baseUrl, config.modelsUrl);
@@ -170,7 +172,7 @@ export class MultiEngine {
     // Always enter a fresh context: a completion callback can start a different engine.
     return EngineConfig.withConfig(m ? { [m.engine]: m.config } : {}, run);
   }
-  static create(rootId: string, name: string, engine?: Engine | 'multi'): Session {
+  static create(rootId: string, name: string, engine?: Session['engine'] | 'multi'): Session {
     if (engine !== 'multi') return SessionManager.createSession(rootId, name, engine);
     const setting = Settings.get().multiEngine;
     if (!setting.enabled) throw new Error('请先在设置中启用多引擎 / Enable multiple engines in Settings first');
@@ -225,7 +227,7 @@ export class MultiEngine {
     this.safeDir(dir);
     const start = '<!-- clootee:engine-identity:start -->';
     const end = '<!-- clootee:engine-identity:end -->';
-    const block = `${start}\n## Multi-engine identity\n- Engine index (zero-based / 引擎编号，从 0 开始): ${index}\n- Engine name / 引擎名称: ${entry.name}\n- Engine type: ${entry.engine === 'codex' ? 'Codex' : 'Claude Code'}\nWhen separate addresses are requested, include your engine index in the address to distinguish it from the other engines.\n${end}`;
+    const block = `${start}\n## Multi-engine identity\n- Engine index (zero-based / 引擎编号，从 0 开始): ${index}\n- Engine name / 引擎名称: ${entry.name}\n- Engine type: ${entry.engine === 'antigravity' ? 'Antigravity CLI' : entry.engine === 'codex' ? 'Codex' : 'Claude Code'}\nWhen separate addresses are requested, include your engine index in the address to distinguish it from the other engines.\n${end}`;
     for (const filename of ['CLAUDE.md', 'AGENTS.md']) {
       const matches = fs.readdirSync(dir).filter(n => n.toLowerCase() === filename.toLowerCase());
       for (const name of matches.length ? matches : [filename]) {

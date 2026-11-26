@@ -219,10 +219,10 @@ function listModeIcon(mode) {
 
 // 引擎显示名
 function engineLabel(e) {
-  return e === 'multi' ? MultiUi.text('title') : e === 'codex' ? T('engineCodex') : T('engineClaude');
+  return e === 'antigravity' ? 'Antigravity CLI' : e === 'multi' ? MultiUi.text('title') : e === 'codex' ? T('engineCodex') : T('engineClaude');
 }
 function engineShortLabel(e) {
-  return e === 'multi' ? 'M' : e === 'codex' ? 'CD' : 'CC';
+  return e === 'antigravity' ? 'AG' : e === 'multi' ? 'M' : e === 'codex' ? 'CD' : 'CC';
 }
 function assistantLabel() {
   return engineLabel(State.session?.engine);
@@ -455,6 +455,8 @@ function applyText() {
   $('ctxMarkActive').textContent = T('markActive');
   $('ctxMarkTesting').textContent = T('markTesting');
   $('ctxMarkCompleted').textContent = T('markCompleted');
+  $('ctxPrompts').textContent = T('ppTitle');
+  $('dirCtxPrompts').textContent = T('ppTitle');
   $('ctxRenameTitle').textContent = T('renameSession');
   $('ctxTraceStats').textContent = T('ctxTraceStats');
   $('ctxOpenWorkdir').textContent = T('ctxOpenWorkdir');
@@ -550,6 +552,7 @@ function fillEngineOptions(sel) {
   sel.innerHTML =
     `<option value="claude">${escapeHtml(T('engineClaude'))}</option>` +
     `<option value="codex">${escapeHtml(T('engineCodex'))}</option>` +
+    '<option value="antigravity">Antigravity CLI</option>' +
     (sel.id === 'engineSelect' && State.settings.multiEngine?.enabled ? `<option value="multi">${escapeHtml(MultiUi.text('title'))}</option>` : '');
   if (prev) sel.value = prev;
 }
@@ -2504,6 +2507,14 @@ async function newSession() {
     }
     // 已经是收藏草稿会话（哪怕还没选目录）也算「已经是新会话」，不重复弹目录选择
     if (cur && isFavoriteDraftId(cur.id) && cur.engine === engine) {
+      if (favRoot && State.favoriteRootBindingDraftId !== cur.id &&
+          (cur.pendingRootId !== favRoot || cur.preferredRootId !== favRoot)) {
+        cur.preferredRootId = favRoot;
+        cur.pendingRootId = favRoot;
+        renderMessages();
+        focusTaskInputIfDesktop();
+        return;
+      }
       showMiniToast(T('alreadyNewSession'));
       flashSessionRow(cur.id);
       focusTaskInputIfDesktop();
@@ -6809,6 +6820,68 @@ function showMarkdownLink(link) {
     btn.onclick = () => action(btn); parent.appendChild(btn); return btn;
   };
   let preview;
+  // 图片/视频/音频/PDF 链接直接在弹窗内预览；远程链接按 URL 路径的扩展名判断。
+  const mediaPreview = (src, ext) => {
+    const e = String(ext || '').toLowerCase();
+    // 远程 .html 是网页而不是要看源码的文件，仍按普通链接处理。
+    const remote = /^https?:/i.test(src);
+    const media = kindOf(e);
+    const kind = PREVIEW_MD.includes(e) ? 'md'
+      : LINK_TEXT_EXT.includes(e) && !(remote && /^html?$/.test(e)) ? 'text'
+        : e && ['img', 'video', 'audio', 'pdf'].includes(media) ? media : '';
+    if (!kind) return;
+    const stage = document.createElement('div');
+    stage.className = 'ml-stage ml-stage-' + kind + ' ml-loading';
+    let el;
+    if (kind === 'text' || kind === 'md') {
+      // 文本只读取前 512KB，避免大日志卡住页面；Markdown 走与消息相同的安全渲染。
+      el = document.createElement(kind === 'md' ? 'div' : 'pre');
+      el.className = 'ml-preview ml-text';
+      stage.appendChild(el);
+      preview = stage;
+      dialog.classList.add('ml-with-preview');
+      badge.textContent = (e || 'TXT').toUpperCase().slice(0, 6);
+      fetch(src, remote ? { mode: 'cors', credentials: 'omit' } : {}).then(async (res) => {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const LIMIT = 512 * 1024;
+        const buf = await res.arrayBuffer();
+        let text = new TextDecoder('utf-8').decode(buf.byteLength > LIMIT ? buf.slice(0, LIMIT) : buf);
+        if (buf.byteLength > LIMIT) text += '\n\n… ' + T('messageLinkTextTruncated');
+        if (kind === 'md') renderMarkdown(el, text); else el.textContent = text;
+        stage.classList.remove('ml-loading');
+      }).catch((err) => {
+        stage.hidden = true;
+        status.textContent = T('previewFail') + ': ' + err.message; status.hidden = false;
+      });
+      return;
+    }
+    if (kind === 'img') {
+      el = document.createElement('img');
+      el.alt = title.textContent;
+      el.title = T('messageLinkZoomHint');
+      el.onclick = () => stage.classList.toggle('ml-zoom');
+      el.addEventListener('load', () => stage.classList.remove('ml-loading'));
+    } else if (kind === 'pdf') {
+      el = document.createElement('iframe');
+      el.title = title.textContent;
+      el.addEventListener('load', () => stage.classList.remove('ml-loading'));
+    } else {
+      el = document.createElement(kind);
+      el.controls = true; el.preload = 'metadata';
+      el.setAttribute('playsinline', '');
+      el.addEventListener('loadedmetadata', () => stage.classList.remove('ml-loading'));
+    }
+    el.className = 'ml-preview';
+    el.addEventListener('error', () => {
+      stage.hidden = true;
+      status.textContent = T('previewFail'); status.hidden = false;
+    });
+    el.src = src;
+    stage.appendChild(el);
+    preview = stage;
+    dialog.classList.add('ml-with-preview');
+    badge.textContent = { img: 'IMG', video: 'VIDEO', audio: 'AUDIO', pdf: 'PDF' }[kind];
+  };
   if (path) {
     const rootId = activeWorkRootId();
     const root = State.roots.find((r) => r.id === rootId);
@@ -6820,19 +6893,7 @@ function showMarkdownLink(link) {
     if (/^(?:[a-z]:\/|\/)/i.test(rel)) {
       status.textContent = T('messageLinkOutsideRoot'); status.hidden = false;
     } else {
-      const kind = kindOf(rel.split('.').pop());
-      if (kind === 'img' || kind === 'pdf') {
-        preview = document.createElement(kind === 'img' ? 'img' : 'iframe');
-        preview.className = 'ml-preview';
-        if (kind === 'img') preview.alt = title.textContent;
-        else preview.title = title.textContent;
-        preview.addEventListener('error', () => {
-          preview.hidden = true;
-          status.textContent = T('previewFail'); status.hidden = false;
-        });
-        preview.src = fmFileUrl(rel, false);
-        dialog.classList.add('ml-with-preview');
-      }
+      mediaPreview(fmFileUrl(rel, false), rel.split('/').pop().includes('.') ? rel.split('.').pop() : '');
       if (State.settings.platform === 'win32') {
         if (/\.(?:pptx?|ppsx?|docx?|xlsx?|pdf|txt|md|csv|rtf|odt|ods|odp|png|jpe?g|gif|webp|bmp|svg|mp3|wav|mp4|mov)$/i.test(rel)) {
           button(primary, T('messageLinkOpenFile'), async (btn) => {
@@ -6861,8 +6922,31 @@ function showMarkdownLink(link) {
     }
     button(secondary, T('messageLinkCopyPath'), (btn) => copyText(path, btn, T('messageLinkCopyPath')));
   } else {
+    let urlPath = '';
+    try { urlPath = /^https?:/i.test(href) ? decodeURIComponent(new URL(href, location.href).pathname) : ''; } catch { /* 非法 URL 不预览 */ }
+    const fileName = urlPath.split('/').pop() || '';
+    const ext = /\.([a-z0-9]{1,5})$/i.exec(fileName)?.[1] || '';
+    mediaPreview(href, ext);
+    if (preview && fileName) title.textContent = link.textContent.trim() && link.textContent.trim() !== href ? link.textContent : fileName;
+    if (preview) {
+      // 跨域 <a download> 会被浏览器忽略，先取 blob 再保存；对方不允许跨域读取时退回新标签页打开。
+      button(primary, T('download'), async (btn) => {
+        btn.disabled = true; btn.textContent = T('messageLinkDownloading'); status.hidden = true;
+        try {
+          const res = await fetch(href, { mode: 'cors', credentials: 'omit' });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const url = URL.createObjectURL(await res.blob());
+          const a = document.createElement('a');
+          a.href = url; a.download = fileName || 'download'; document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 30000);
+        } catch {
+          window.open(href, '_blank', 'noopener');
+          status.textContent = T('messageLinkDownloadFallback'); status.hidden = false;
+        } finally { btn.disabled = false; btn.textContent = T('download'); }
+      }, 'ml-download');
+    }
     const target = document.createElement('a');
-    target.className = 'ml-action ml-download'; target.textContent = T('messageLinkOpen');
+    target.className = 'ml-action ' + (preview ? 'ml-folder' : 'ml-download'); target.textContent = T('messageLinkOpen');
     target.href = href; target.target = '_blank'; target.rel = 'noopener noreferrer'; primary.appendChild(target);
     button(secondary, T('messageLinkCopyLink'), (btn) => copyText(href, btn, T('messageLinkCopyLink')));
   }
@@ -6916,7 +7000,17 @@ function renderMarkdown(el, text) {
     el.innerHTML = html;
     el.classList.add('md');
     el.onclick = (event) => {
-      const link = event.target.closest('a');
+      let link = event.target.closest('a');
+      // 消息里直接嵌入的图片（不在链接内）点击后也走同一个预览弹窗。
+      if (!link && event.target.tagName === 'IMG' && el.contains(event.target) && /^https?:/i.test(event.target.getAttribute('src') || '')) {
+        link = document.createElement('a');
+        link.setAttribute('href', event.target.getAttribute('src'));
+        link.textContent = event.target.getAttribute('alt') || '';
+        event.preventDefault();
+        event.stopPropagation();
+        showMarkdownLink(link);
+        return;
+      }
       if (!link || !el.contains(link)) return;
       const href = link.getAttribute('href') || '';
       if (!link.dataset.localPath && !/^(https?:|mailto:)/i.test(href)) return;
@@ -7094,6 +7188,10 @@ const PREVIEW_PDF = ['pdf'];
 const PREVIEW_IMG = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp', 'ico'];
 const PREVIEW_VIDEO = ['mp4', 'webm', 'mov', 'm4v', 'ogv', 'mkv'];
 const PREVIEW_AUDIO = ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'];
+// 消息链接弹窗按文本预览的扩展名（kindOf 把未知扩展都当 text，这里必须白名单，避免拉取二进制）。
+const LINK_TEXT_EXT = ['txt', 'log', 'csv', 'tsv', 'json', 'jsonl', 'xml', 'yaml', 'yml', 'toml', 'ini', 'conf', 'cfg', 'env',
+  'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'vue', 'py', 'sh', 'bash', 'ps1', 'bat', 'css', 'scss', 'less', 'html', 'htm', 'sql',
+  'go', 'rs', 'java', 'kt', 'swift', 'c', 'h', 'cc', 'cpp', 'hpp', 'cs', 'rb', 'php', 'lua', 'diff', 'patch', 'srt', 'vtt'];
 // 从消息文本里抽取候选文件名的正则（不含空格的 token，以已知扩展名结尾）
 const FILE_CAND_RE =
   /[^\s`"'()<>\[\]，。；：、]+\.(?:xlsx|xls|csv|md|markdown|txt|json|log|ya?ml|xml|html?|css|js|ts|tsx|jsx|py|java|go|rs|c|cpp|h|sh|bat|ini|conf|sql|pdf|png|jpe?g|gif|svg|webp|bmp|ico|mp4|webm|mov|m4v|ogv|mkv|mp3|wav|ogg|m4a|flac|aac|docx?|pptx?)/gi;
@@ -7782,6 +7880,12 @@ function bind() {
     btn.onclick = () => updateEngine(btn.dataset.engineUpdate, btn, $(btn.dataset.engineUpdate + 'UpdateStatus'));
   });
   $('engAccClaudeHead').addEventListener('click', () => toggleAcc('claude'));
+  $('engAccAntigravityHead').addEventListener('click', () => toggleAcc('antigravity'));
+  $('antigravityProviderSelect').addEventListener('change', () => onEngineProviderChange('antigravity'));
+  $('antigravityModelsBtn').addEventListener('click', () => refreshEngineModels('antigravity'));
+  for (const id of ['antigravityModelSelect', 'antigravityEffortSelect']) {
+    $(id).addEventListener('change', () => onModelSelect('antigravity'));
+  }
   $('engAccCodexHead').addEventListener('click', () => toggleAcc('codex'));
   // 服务商 → 模型联动：换服务商即清空并自动检测选中推荐模型；Key 填完（失焦/回车）也自动补
   $('claudeProviderSelect').addEventListener('change', onClaudeProviderChange);
@@ -7791,7 +7895,7 @@ function bind() {
   // 引擎块没有自己的保存按钮了（全板块只有一个，在 footer），靠脏标记告诉用户「这块动了还没存」。
   // 「脏」只由用户操作产生：换服务商在 onEngineProviderChange 里标，Key/地址/手填模型在这里标；
   // 思考强度与原版订阅的模型下拉是即时落盘的，不算脏，故不在监听之列。
-  for (const eng of ['claude', 'codex']) {
+  for (const eng of ['claude', 'codex', 'antigravity']) {
     for (const id of [`${eng}ApiKey`, `${eng}BaseUrl`, `${eng}ModelsUrl`, `${eng}ModelInput`]) {
       $(id).addEventListener('input', () => markEngineDirty(eng));
     }
@@ -7851,6 +7955,16 @@ function bind() {
   document.querySelectorAll('.s-tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   document.querySelectorAll('.r-tab').forEach((b) => b.addEventListener('click', () => toggleRunFilter(b.dataset.runtab)));
   document.querySelectorAll('.ctx-status').forEach((b) => b.addEventListener('click', () => ctxSetStatus(b.dataset.status)));
+  $('ctxPrompts').addEventListener('click', () => {
+    const id = ctxSession?.rootId;
+    closeSessionCtxMenu();
+    openProjectPrompts(id);
+  });
+  $('dirCtxPrompts').addEventListener('click', () => {
+    const id = dirCtxOpt?.rootId;
+    closeDirCtxMenu();
+    openProjectPrompts(id);
+  });
   $('ctxRenameTitle').addEventListener('click', ctxRenameTitle);
   $('ctxToggleFavorite').addEventListener('click', ctxToggleFavorite);
   $('ctxTogglePinned').addEventListener('click', ctxTogglePinned);
@@ -8069,13 +8183,12 @@ function readBrowserDefaultEngine(avail) {
   let wanted = 'claude';
   try {
     const saved = localStorage.getItem('defaultEngine');
-    if (saved === 'claude' || saved === 'codex') wanted = saved;
+    if (['claude', 'codex', 'antigravity'].includes(saved)) wanted = saved;
   } catch { /* 禁用本地存储时仍可打开页面 */ }
-  const other = wanted === 'claude' ? 'codex' : 'claude';
-  return avail && !avail[wanted] && avail[other] ? other : wanted;
+  return avail && !avail[wanted] ? ['claude', 'codex', 'antigravity'].find(engine => avail[engine]) || wanted : wanted;
 }
 function saveBrowserDefaultEngine(engine) {
-  if (engine !== 'claude' && engine !== 'codex') return false;
+  if (!['claude', 'codex', 'antigravity'].includes(engine)) return false;
   try {
     localStorage.setItem('defaultEngine', engine);
   } catch { return false; }
@@ -8253,7 +8366,7 @@ const SETTINGS_PANES = [
     title: () => T('paneEngine'),
     desc: () => T('paneEngineDesc'),
     summary: () => {
-      const e = State.settings.defaultEngine === 'codex' ? T('engineCodex') : T('engineClaude');
+      const e = engineLabel(State.settings.defaultEngine);
       return `${T('defaultEngine')}：${e}`;
     },
     fill: fillEnginePane,
@@ -8417,7 +8530,7 @@ function startServerHealth() {
       const metrics = [
         [T('serverLoad'), `${data.loadPercent.toFixed(0)}%`, data.loadPercent, 100, `${data.load.toFixed(2)} / ${T('serverCores').replace('{n}', data.cores)}`, 'serverHigh'],
         [T('serverDisk'), data.disk ? `${data.disk.usedPercent.toFixed(0)}%` : '—', data.disk?.usedPercent, 90, data.disk ? `${bytes(data.disk.total - data.disk.available)} / ${bytes(data.disk.total)}` : '', 'serverHigh'],
-        [T('serverMemory'), data.memory ? `${data.memory.usedPercent.toFixed(0)}%` : '—', data.memory?.usedPercent, 90, data.memory ? `/ ${bytes(data.memory.total)}` : '', 'serverHigh'],
+        [T('serverMemory'), data.memory ? `${data.memory.usedPercent.toFixed(0)}%` : '—', data.memory?.usedPercent, 90, data.memory ? `RAM ${bytes(data.memory.total - data.memory.available)} / ${bytes(data.memory.total)}` : '', 'serverHigh'],
       ];
       for (const [label, value, percent, threshold, detail, warning] of metrics) {
         const high = Number.isFinite(percent) && percent >= threshold;
@@ -8430,6 +8543,12 @@ function startServerHealth() {
         number.textContent = value;
         const sub = document.createElement('small');
         sub.textContent = high ? `${T(warning)} · ${detail}` : detail;
+        if (label === T('serverMemory') && data.swap) {
+          const swapDetail = data.swap.total > 0
+            ? `${bytes(data.swap.used)} / ${bytes(data.swap.total)}`
+            : T('serverSwapOff');
+          sub.append(document.createElement('br'), `Swap ${swapDetail}`);
+        }
         const bar = document.createElement('meter');
         bar.min = 0; bar.max = 100; bar.value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
         bar.setAttribute('aria-label', label);
@@ -8608,7 +8727,7 @@ function renderPaneStatus() {
     show(s, PaneNotice.kind);
     return;
   }
-  if (CurrentPane === 'engine' && (EngineDirty.claude || EngineDirty.codex || PromptCacheUi.dirty)) return show(T('engDirty'), 'warn');
+  if (CurrentPane === 'engine' && (Object.values(EngineDirty).some(Boolean) || PromptCacheUi.dirty)) return show(T('engDirty'), 'warn');
   if (CurrentPane === 'network' && (hasSecurityPasswordDraft() || hasSecurityResetDraft())) return show(T('engDirty'), 'warn');
   show('', '');
 }
@@ -8700,23 +8819,23 @@ async function patchSettings(patch) {
 function applyEnginePaneText() {
   PromptCacheUi.applyText();
   CostUi.applyText();
-  for (const engine of ['claude', 'codex']) {
-    const cap = engine === 'claude' ? 'Claude' : 'Codex';
+  for (const engine of ['claude', 'codex', 'antigravity']) {
+    const cap = engine[0].toUpperCase() + engine.slice(1);
     const u = providerUi(engine);
     $(`${engine}ProviderLbl`).textContent = T('engProviderLabel');
     // 服务商下拉的选项由 HTML 定义（顺序/值），这里只按 value 改文案
     for (const o of u.select.options) o.textContent = providerOptionText(engine, o.value);
-    $(`${engine}BaseUrlLbl`).textContent = T(engine === 'claude' ? 'engBaseUrlClaude' : 'engBaseUrlCodex');
-    u.base.placeholder = T(engine === 'claude' ? 'engBaseUrlPhClaude' : 'engBaseUrlPhCodex');
+    $(`${engine}BaseUrlLbl`).textContent = engine === 'antigravity' ? 'Gemini API Base URL' : T(engine === 'claude' ? 'engBaseUrlClaude' : 'engBaseUrlCodex');
+    u.base.placeholder = engine === 'antigravity' ? 'https://example.com' : T(engine === 'claude' ? 'engBaseUrlPhClaude' : 'engBaseUrlPhCodex');
     $(`${engine}ModelsUrlLbl`).textContent = T('engModelsUrlLabel');
-    u.modelsUrl.placeholder = T('engModelsUrlPh');
+    u.modelsUrl.placeholder = engine === 'antigravity' ? 'https://example.com/v1beta/models' : T('engModelsUrlPh');
     $(`${engine}ApiKeyLbl`).textContent = T('engApiKeyLabel');
-    u.key.placeholder = T('engApiKeyPh');
+    u.key.placeholder = T(engine === 'antigravity' ? 'agyKeyPh' : 'engApiKeyPh');
     $(`${engine}ModelLbl`).textContent = T('engModelLabel');
-    u.modelInput.placeholder = T('engModelPh');
-    u.modelHint.textContent = T('engModelHintCustom');
+    u.modelInput.placeholder = engine === 'antigravity' ? 'gemini-3.1-pro-preview' : T('engModelPh');
+    u.modelHint.textContent = T(engine === 'antigravity' ? 'agyModelHint' : 'engModelHintCustom');
     $(`${engine}EffortLbl`).textContent = T('engEffortLabel');
-    $(`${engine}EffortNote`).textContent = T(engine === 'claude' ? 'engEffortNoteClaude' : 'engEffortNoteCodex');
+    $(`${engine}EffortNote`).textContent = engine === 'antigravity' ? T('agyEffortNote') : T(engine === 'claude' ? 'engEffortNoteClaude' : 'engEffortNoteCodex');
     if (u.ctxWin) {
       $('claudeCtxWindowLbl').textContent = T('engCtxWindowLabel');
       u.ctxWin.placeholder = T('engCtxWindowPh');
@@ -8736,6 +8855,7 @@ function applyEnginePaneText() {
 }
 // 服务商下拉的选项文字：原版按引擎分两种说法，MiniMax 在 claude 侧带「推荐」后缀
 function providerOptionText(engine, id) {
+  if (engine === 'antigravity' && id === 'official') return T('agyLocalProfile');
   if (id === 'official') return T(engine === 'claude' ? 'pvOfficialClaude' : 'pvOfficialCodex');
   // 「官方 API」与「原版订阅」是同一家的两条路：下拉里必须一眼看出这条要填 Key、按量付费
   if (id === 'anthropic' && engine === 'claude') return T('pvAnthropic') + T('pvApiTag');
@@ -8749,11 +8869,11 @@ function providerOptionText(engine, id) {
 // 所以必须把「哪一块动过还没存」显式画出来：折叠块标题上一个圆点 + footer 按钮旁边一句话。
 // 脏标记只由**用户操作**产生（换服务商、改 Key/地址/手填模型），程序回填表单不算——
 // 否则 loadEngineProvider / autoPickModel 自动填一次就会把它标脏。
-const EngineDirty = { claude: false, codex: false };
+const EngineDirty = { claude: false, codex: false, antigravity: false };
 // 配置有没有成功读到过：没读到就全是空表单，这时保存会把已存的 Key 覆盖成空，必须跳过
-const EngineLoaded = { claude: false, codex: false };
+const EngineLoaded = { claude: false, codex: false, antigravity: false };
 
-function engineBlockLabel(engine) { return engine === 'claude' ? 'Claude Code' : 'Codex'; }
+function engineBlockLabel(engine) { return engineLabel(engine); }
 
 function markEngineDirty(engine) {
   if (EngineDirty[engine]) { PaneNotice = null; renderPaneStatus(); return; }
@@ -8768,8 +8888,8 @@ function clearEngineDirty(engine) {
   renderEngineDirty();
 }
 function renderEngineDirty() {
-  for (const engine of ['claude', 'codex']) {
-    const head = $(engine === 'claude' ? 'engAccClaudeHead' : 'engAccCodexHead');
+  for (const engine of Object.keys(EngineDirty)) {
+    const head = accUi(engine).head;
     head.classList.toggle('eng-dirty', EngineDirty[engine]);
   }
 }
@@ -8778,6 +8898,8 @@ function fillEnginePane() {
   MultiUi.fill();
   EngineDirty.claude = false;
   EngineDirty.codex = false;
+  EngineDirty.antigravity = false;
+  EngineLoaded.antigravity = false;
   EngineLoaded.claude = false;
   EngineLoaded.codex = false;
   setPaneNotice(null);
@@ -8785,18 +8907,18 @@ function fillEnginePane() {
   $('defaultEngineSelect').value = State.settings.defaultEngine;
   $('defaultEngineNote').textContent = defaultEngineNoteText();
   // 默认展开当前默认引擎那一块，另一块收起
-  const claudeFirst = State.settings.defaultEngine !== 'codex';
-  setAccOpen('claude', claudeFirst);
-  setAccOpen('codex', !claudeFirst);
+  setAccOpen('claude', State.settings.defaultEngine === 'claude');
+  setAccOpen('codex', State.settings.defaultEngine === 'codex');
+  setAccOpen('antigravity', State.settings.defaultEngine === 'antigravity');
   setModelStatus('codex', T('mdlDetecting'), null);
-  Promise.all([loadClaudeProvider(), loadEngineProvider('codex')]).then(loadModelState);
+  Promise.all([loadClaudeProvider(), loadEngineProvider('codex'), loadEngineProvider('antigravity')]).then(loadModelState);
 }
 // 「默认引擎」下面那行说明：只装了一个引擎时，额外说清默认引擎已自动跟着它走
 function defaultEngineNoteText() {
   const av = State.settings.engineAvail;
   let note = T('defaultEngineNote');
-  if (av && av.claude !== av.codex) {
-    const only = av.codex ? T('engineCodex') : T('engineClaude');
+  if (av && Object.values(av).filter(Boolean).length === 1) {
+    const only = engineLabel(Object.keys(av).find(engine => av[engine]));
     note += ' ' + T('defaultEngineOnlyInstalled').replace(/\{engine\}/g, only);
   }
   return note;
@@ -8809,8 +8931,8 @@ async function saveEnginePane() {
   try {
     await MultiUi.saveConfiguration();
   } catch (e) { setPaneNotice('engBlockSaveFail', { block: MultiUi.text('title'), msg: e.message }, 'err', 0); return false; }
-  const eng = $('defaultEngineSelect').value === 'codex' ? 'codex' : 'claude';
-  const targets = ['claude', 'codex'].filter((e) => EngineDirty[e]);
+  const eng = $('defaultEngineSelect').value;
+  const targets = Object.keys(EngineDirty).filter((e) => EngineDirty[e]);
   if (targets.length) setPaneNotice('engSaving', null, '', 0);
   const fails = [];
   for (const e of targets) {
@@ -8820,6 +8942,7 @@ async function saveEnginePane() {
     const err = await saveEngineProvider(e);
     if (err) fails.push({ engine: e, label, msg: err.msg });
   }
+  MultiUi.savedConfig = null;
   const savedDefault = saveBrowserDefaultEngine(eng);
   if (fails.length) {
     const f = fails[0];
@@ -9024,7 +9147,7 @@ function fillContextPane() {
 function syncAutoCompactMode() {
   const custom = $('autoCompactModeSelect').value === 'custom';
   $('autoCompactCustomBox').hidden = !custom;
-  const eng = State.settings.defaultEngine === 'codex' ? T('engineCodex') : T('engineClaude');
+  const eng = engineLabel(State.settings.defaultEngine);
   $('autoCompactNote').textContent = T('paneContextScope').replace('{engine}', eng);
 }
 async function saveContextPane() {
@@ -9229,8 +9352,8 @@ async function installTool(tool, target, btn) {
 }
 
 function accUi(engine) {
-  const cap = engine === 'claude' ? 'Claude' : 'Codex';
-  return { arrow: $(`engAcc${cap}Arrow`), body: $(`engAcc${cap}Body`), sum: $(`engAcc${cap}Sum`) };
+  const cap = engine[0].toUpperCase() + engine.slice(1);
+  return { head: $('engAcc' + cap + 'Head'), arrow: $(`engAcc${cap}Arrow`), body: $(`engAcc${cap}Body`), sum: $(`engAcc${cap}Sum`) };
 }
 function setAccOpen(engine, open) {
   const u = accUi(engine);
@@ -9244,7 +9367,7 @@ function toggleAcc(engine) {
 function renderAccSummary(engine) {
   const u = providerUi(engine);
   // 摘要要短：括号里的补充说明（如「按量计费」）去掉，只留服务商名
-  const pv = providerLabel(u.select.value).split(/[（(]/)[0].trim();
+  const pv = providerOptionText(engine, u.select.value).split(/[（(]/)[0].trim();
   const modelLabel = modelValue(engine) || T('effAutoShort');
   // 强度非自动时才进摘要（避免每个引擎都挂一个「自动」显得啰嗦）
   const effort = u.effort ? u.effort.value : '';
@@ -9322,8 +9445,8 @@ function syncModelControls(engine) {
   const u = providerUi(engine);
   // 原版订阅的下拉永远显示：至少有「自动」，Claude 还有 opus/sonnet/haiku/fable 别名，
   // 候选目录没拉到 / 已选模型不在目录里，都不能让用户连选择框都看不到。
-  const empty = !modelIsFree(engine) ? false : !u.modelList.options.length && !modelValue(engine);
   const free = modelIsFree(engine);
+  const empty = free && engine !== 'antigravity' && !u.modelList.options.length && !modelValue(engine);
   u.model.hidden = empty || free;
   u.modelInput.hidden = empty || !free;
   u.modelHint.hidden = empty || !free;
@@ -9383,7 +9506,7 @@ async function loadModelState() {
 // 换服务商时（onEngineProviderChange）会先被清空，这里再按当前服务商的候选重新填充。
 function renderModelSection(engine, s) {
   if (!s || EngineDirty[engine]) return;
-  const cap = engine === 'claude' ? 'Claude' : 'Codex';
+  const cap = engine[0].toUpperCase() + engine.slice(1);
   const sel = providerUi(engine).model;
   $(`mdl${cap}Provider`).textContent = providerLabel(s.provider);
   const opts = Array.isArray(s.options) ? s.options : [];
@@ -9410,7 +9533,7 @@ function renderModelSection(engine, s) {
 }
 
 function setModelStatus(engine, text, ok) {
-  const el = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  const el = $(`mdl${engine[0].toUpperCase() + engine.slice(1)}Status`);
   el.dataset.revision = String(Number(el.dataset.revision || 0) + 1);
   el.className = 'sx-note' + (ok === true ? ' ok' : ok === false ? ' err' : '');
   el.textContent = text;
@@ -9427,7 +9550,7 @@ async function onModelSelect(engine) {
 // 检测当前实际生效的模型（真实探测引擎）
 async function detectCurrentModel(engine, currentState) {
   setModelStatus(engine, T('mdlDetecting'), null);
-  const status = $(`mdl${engine === 'claude' ? 'Claude' : 'Codex'}Status`);
+  const status = $(`mdl${engine[0].toUpperCase() + engine.slice(1)}Status`);
   const revision = status.dataset.revision;
   try {
     // The runner passes the saved model via -m. Only Auto needs the CLI default.
@@ -9495,7 +9618,7 @@ function formatCtxWindow(n) {
 }
 
 function providerUi(engine) {
-  const p = engine === 'claude' ? 'claude' : 'codex';
+  const p = engine;
   return {
     select: $(`${p}ProviderSelect`), cfg: $(`${p}ProviderCfg`), custom: $(`${p}CustomCfg`),
     key: $(`${p}ApiKey`), base: $(`${p}BaseUrl`), modelsUrl: $(`${p}ModelsUrl`),
@@ -9505,7 +9628,7 @@ function providerUi(engine) {
     // 上下文窗口：只有 Claude Code 侧有这一项（写 CLAUDE_CODE_MAX_CONTEXT_TOKENS）
     ctxWin: $(`${p}CtxWindow`), ctxWinBox: $(`${p}CtxWindowBox`),
     // 账号登录卡片：claude 侧是 Claude 登录，codex 侧是 Codex 登录（原版才是订阅登录）
-    login: engine === 'claude' ? $('clBox') : $('cxBox'),
+    login: engine === 'antigravity' ? null : engine === 'claude' ? $('clBox') : $('cxBox'),
   };
 }
 
@@ -9684,8 +9807,8 @@ async function onEngineProviderChange(engine) {
 // 「模型」标签旁的服务商小标要跟着表单里选中的服务商走
 // （否则会一直显示上次已保存的那个，和下面的模型对不上）
 function syncModelProviderTag(engine) {
-  const cap = engine === 'claude' ? 'Claude' : 'Codex';
-  $(`mdl${cap}Provider`).textContent = providerLabel(providerUi(engine).select.value);
+  const cap = engine[0].toUpperCase() + engine.slice(1);
+  $(`mdl${cap}Provider`).textContent = providerOptionText(engine, providerUi(engine).select.value);
 }
 function onClaudeProviderChange() { onEngineProviderChange('claude'); }
 
@@ -9695,6 +9818,7 @@ async function loadEngineProvider(engine) {
     await loadProviderCatalog(engine);
     const cfg = await api('/api/engine/config');
     const c = (cfg && cfg[engine]) || { provider: 'official', apiKey: '', model: '' };
+    if (engine === 'antigravity' && !cfg?.antigravity) throw new Error(T('agyRestartHub'));
     u.select.value = c.provider || 'official';
     u.key.value = c.apiKey || '';
     u.base.value = c.baseUrl || '';
@@ -9703,6 +9827,7 @@ async function loadEngineProvider(engine) {
     fillModelChoices(engine, Array.isArray(c.models) ? c.models : [], true);
     if (c.model) u.modelList.appendChild(new Option(c.model, c.model));
     setModelValue(engine, c.model || '');
+    if (engine === 'antigravity') renderEffortSelect(engine, c);
     if (u.effort) u.effort.value = c.effort || '';
     syncProviderVisibility(engine);
     syncModelProviderTag(engine);
@@ -9710,7 +9835,7 @@ async function loadEngineProvider(engine) {
     u.status.className = 'sx-note';
     // 说明的是「已保存」的状态（表单里可能已改成别的服务商但还没点保存），文案要写明白
     u.status.textContent = c.provider === 'official'
-      ? T(engine === 'claude' ? 'engSavedOfficialClaude' : 'engSavedOfficialCodex')
+      ? (engine === 'antigravity' ? T('agyLocalProfile') : T(engine === 'claude' ? 'engSavedOfficialClaude' : 'engSavedOfficialCodex'))
       : T(c.model ? 'engSavedProviderModel' : 'engSavedProvider')
         .replace('{provider}', providerLabel(c.provider))
         .replace('{model}', c.model || '');
@@ -9741,6 +9866,7 @@ async function fetchEngineModels(engine, auto = false) {
     say(auto ? T('modelAutoDetecting') : T('modelFetching'), null);
     try {
       const r = await api('/api/engine/models', { engine, provider: 'official' });
+      if (u.select.value !== provider) return;
       const models = r && r.models ? r.models : [];
       if (!models.length) throw new Error(T('modelEmptyList'));
       fillModelChoices(engine, models, true);
@@ -9755,6 +9881,7 @@ async function fetchEngineModels(engine, auto = false) {
       );
       renderAccSummary(engine);
     } catch (e) {
+      if (u.select.value !== provider) return;
       // 拉取失败：保持原有下拉与选择不动，只提示原因
       say(T('modelFetchFail').replace('{err}', e.message), false);
     }
@@ -9763,18 +9890,13 @@ async function fetchEngineModels(engine, auto = false) {
   if (!apiKey && provider !== 'clootee') { say(T('modelNeedKey'), false); return; }
   if (provider === 'custom' && !u.base.value.trim()) { say(T('modelNeedBase'), false); return; }
   const prev = modelValue(engine);
-  clearModelChoices(engine);
+  const baseUrl = u.base.value.trim(), modelsUrl = u.modelsUrl.value.trim();
+  const currentRequest = () => u.select.value === provider && u.key.value.trim() === apiKey && u.base.value.trim() === baseUrl && u.modelsUrl.value.trim() === modelsUrl;
   say(auto ? T('modelAutoDetecting') : T('modelFetching'), null);
   try {
-    const q = new URLSearchParams({ provider, apiKey });
-    if (provider === 'custom') {
-      q.set('baseUrl', u.base.value.trim());
-      q.set('modelsUrl', u.modelsUrl.value.trim());
-    }
-    const r = await api(`/api/engine/models?${q.toString()}`);
-    if (u.select.value !== provider || u.key.value.trim() !== apiKey) return;
-    // 服务商 API 只返回 id 字符串，统一成候选对象再进下拉/提示列表
-    const models = (r && r.models) || [];
+    const r = await api('/api/engine/models', { engine, provider, apiKey, baseUrl, modelsUrl });
+    if (!currentRequest() || modelValue(engine) !== prev) return;
+    const models = (r.models || []).map(m => typeof m === 'string' ? m : m.id);
     if (!models.length) throw new Error(T('modelEmptyList'));
     fillModelChoices(engine, models.map((id) => ({ id, source: 'api' })), false);
     // 优先保留用户原本的选择；否则用后端在真实返回列表里挑的推荐模型；再否则第一个
@@ -9782,6 +9904,7 @@ async function fetchEngineModels(engine, auto = false) {
       || (r.recommended && models.includes(r.recommended) && r.recommended)
       || models[0];
     setModelValue(engine, pick);
+    if (pick !== prev) markEngineDirty(engine);
     say(
       auto
         ? T('modelAutoPicked').replace('{model}', pick).replace('{n}', models.length)
@@ -9791,7 +9914,7 @@ async function fetchEngineModels(engine, auto = false) {
     renderAccSummary(engine);
   } catch (e) {
     // 自定义服务商拉不到列表是常事（很多网关没有 /models）：清空候选但保留已填的模型 id
-    if (u.select.value !== provider || u.key.value.trim() !== apiKey) return;
+    if (!currentRequest() || modelValue(engine) !== prev) return;
     const kept = modelIsFree(engine) ? prev : '';
     clearModelChoices(engine);
     setModelValue(engine, kept);
@@ -9828,6 +9951,7 @@ function chooseModelFetch(name, version, signal) {
   });
 }
 async function prepareModelFetch(engine, status, signal) {
+  if (engine === 'antigravity') return;
   const name = engine === 'claude' ? 'Claude Code' : 'Codex';
   status(T('modelCheckingCli').replace('{name}', name));
   let version;
@@ -10170,7 +10294,7 @@ async function onEngineChange() {
   const s = State.session;
   if (!s || s.multiGroup || !isDraftSession(s)) return;
   const selected = $('engineSelect').value;
-  const eng = selected === 'multi' ? 'multi' : selected === 'codex' ? 'codex' : 'claude';
+  const eng = selected;
   // 收藏夹草稿只在前端存在，后端没有这个会话；直接改本地，等绑定目录时带过去
   if (isFavoriteDraftId(s.id)) {
     s.engine = eng;

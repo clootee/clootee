@@ -2,7 +2,7 @@
 // 持久化到 data/settings.json。
 import { AppConfig } from '../config/AppConfig';
 import { MultiEngineSettings } from '../helper/MultiEngineSettings';
-import { MultiEngineEntry, Engine } from '../models/Types';
+import { MultiEngineEntry, SessionEngine as Engine } from '../models/Types';
 import { OutEnd } from '../helper/OutEnd';
 import { NetHelper } from '../helper/NetHelper';
 import { PackageInfo } from '../helper/PackageInfo';
@@ -88,7 +88,7 @@ export interface AppSettings {
   runAsUserEnabled: boolean;
   runAsUserName: string;
   // 只读输出：两个引擎各自装没装（前端据此在「默认引擎」处提示）
-  engineAvail?: { claude: boolean; codex: boolean };
+  engineAvail?: Record<Engine, boolean>;
   // 只读输出：true = 落盘/出厂的默认引擎那个没装，实际已自动改用另一个可用引擎
   defaultEngineFallback?: boolean;
 }
@@ -98,13 +98,13 @@ export interface AppSettings {
 const DEFAULT_RUN_AS_USER_NAME = 'claudeuser';
 // 引擎可用性由 EngineStatus 自己做进程级缓存（只在首次/装完引擎后真探测），
 // 所以 SettingsStruct.get() 再频繁也不会反复起子进程。
-function engineAvail(): { claude: boolean; codex: boolean } {
+function engineAvail(): Record<Engine, boolean> {
   try {
     const st = EngineStatus.get();
-    return { claude: !!st.claude.ready, codex: !!st.codex.ready };
+    return { claude: !!st.claude.ready, codex: !!st.codex.ready, antigravity: !!st.antigravity.ready };
   } catch {
     // 探测失败就当都可用，避免把用户锁死在错误的引擎上
-    return { claude: true, codex: true };
+    return { claude: true, codex: true, antigravity: false };
   }
 }
 
@@ -119,13 +119,13 @@ export class SettingsStruct {
   static get(): AppSettings {
     const raw = this._read();
     const wanted: Engine =
-      raw && (raw.defaultEngine === 'codex' || raw.defaultEngine === 'claude')
+      raw && (raw.defaultEngine === 'antigravity' || raw.defaultEngine === 'codex' || raw.defaultEngine === 'claude')
         ? raw.defaultEngine
         : AppConfig.DEFAULT_ENGINE;
     // 只装了其中一个引擎时，默认引擎自动落到那个装了的上面：
     // 用户只装 codex 的话，新建会话默认就该是 codex，而不是一个根本跑不起来的 claude。
     const avail = engineAvail();
-    const other: Engine = wanted === 'claude' ? 'codex' : 'claude';
+    const other = (['claude', 'codex', 'antigravity'] as const).find(engine => avail[engine]) || wanted;
     const fallback = !avail[wanted] && avail[other];
     const eng: Engine = fallback ? other : wanted;
     const hasRunAsUserEnabled = !!raw && typeof raw.runAsUserEnabled === 'boolean';
@@ -191,7 +191,7 @@ export class SettingsStruct {
   }
 
   static setDefaultEngine(engine: Engine): AppSettings {
-    if (engine !== 'claude' && engine !== 'codex')
+    if (engine !== 'claude' && engine !== 'codex' && engine !== 'antigravity')
       throw new Error(`setDefaultEngine: invalid engine=${engine}`);
     return this._patch({ defaultEngine: engine });
   }
@@ -222,7 +222,7 @@ export class SettingsStruct {
       next.claudePromptCache = patch.claudePromptCache;
     }
     if (typeof patch.askClaudePromptCache === 'boolean') next.askClaudePromptCache = patch.askClaudePromptCache;
-    if (patch.defaultEngine === 'claude' || patch.defaultEngine === 'codex')
+    if (patch.defaultEngine === 'claude' || patch.defaultEngine === 'codex' || patch.defaultEngine === 'antigravity')
       next.defaultEngine = patch.defaultEngine;
     if (typeof patch.allowLan === 'boolean') next.allowLan = patch.allowLan;
     if (typeof patch.preferBundled === 'boolean') next.preferBundled = patch.preferBundled;
@@ -252,7 +252,7 @@ export class SettingsStruct {
     // 不能把这种临时回退写成用户的正式选择
     const raw = this._read();
     const savedEngine: Engine =
-      raw && (raw.defaultEngine === 'claude' || raw.defaultEngine === 'codex')
+      raw && (raw.defaultEngine === 'claude' || raw.defaultEngine === 'codex' || raw.defaultEngine === 'antigravity')
         ? raw.defaultEngine
         : cur.defaultEngine;
     const merged: AppSettings = {

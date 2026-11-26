@@ -27,6 +27,7 @@ const MultiUi = {
       note: ['开启后，新建会话可选择「多引擎」；选择后每次发送可选择全部或当前引擎，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'When enabled, new sessions can choose Multiple engines to choose all engines or the current engine for each message in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
       name: ['英文名称', 'English name'], nameNote: ['字母开头，仅英文字母、数字、下划线，最多40字符，名称不能重复。', 'Start with a letter; use letters, numbers and underscores, up to 40 characters. Names must be unique.'],
       engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型', 'Model'], base: ['自定义 Base URL', 'Custom Base URL'],
+      modelsUrl: ['模型列表 URL（可选）', 'Model list URL (optional)'], effort: ['思考强度', 'Reasoning effort'],
       key: ['API Key', 'API Key'], saving: ['保存中…', 'Saving…'],
       running: ['工作中', 'Working'], pending: ['等待中', 'Waiting'], paused: ['已暂停', 'Paused'], done: ['已完成', 'Done'], error: ['失败', 'Failed'], idle: ['待命', 'Ready'],
       broadcast: ['每次发送时选择全部或当前引擎', 'Choose all engines or the current engine for each message'], retry: ['重试加载引擎', 'Retry loading engines'], loading: ['正在加载引擎…', 'Loading engines…'],
@@ -47,7 +48,7 @@ const MultiUi = {
   },
   sessionMode(session) { return session?.multiGroup ? 'multi' : session?.engine; },
   chooseSessionEngine() {
-    if (!State.settings.multiEngine?.enabled) return Promise.resolve(State.settings.defaultEngine === 'codex' ? 'codex' : 'claude');
+    if (!State.settings.multiEngine?.enabled) return Promise.resolve(State.settings.defaultEngine || 'claude');
     if (this.enginePickerOpen) return Promise.resolve(null);
     this.enginePickerOpen = true;
     const focus = document.activeElement, overflow = document.body.style.overflow;
@@ -57,6 +58,7 @@ const MultiUi = {
     const list = document.createElement('div'); list.className = 'session-engine-choices'; dialog.append(list);
     const choices = [
       { id: 'claude', title: 'Claude Code', mark: 'CC', note: this.text('singleSession') },
+      { id: 'antigravity', title: 'Antigravity CLI', mark: 'AG', note: this.text('singleSession') },
       { id: 'codex', title: 'Codex', mark: 'CD', note: this.text('singleSession') },
     ];
     if (State.settings.multiEngine?.enabled) {
@@ -96,7 +98,7 @@ const MultiUi = {
     const list = document.createElement('div'); list.className = 'session-engine-choices'; dialog.append(list);
     for (const choice of [
       { id:'all', title:this.text('sendAll'), note:this.text('sendAllNote'), mark:'M' },
-      { id:'current', title:this.text('sendCurrent'), note:State.session.multiName || (State.session.engine === 'codex' ? 'Codex' : 'Claude Code'), mark:'1' },
+      { id:'current', title:this.text('sendCurrent'), note:State.session.multiName || engineLabel(State.session.engine), mark:'1' },
     ]) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'session-engine-choice'; button.dataset.scope = choice.id;
       const mark = document.createElement('span'); mark.className = 'session-engine-mark'; mark.textContent = choice.mark; mark.setAttribute('aria-hidden','true');
@@ -156,7 +158,7 @@ const MultiUi = {
       try {
         const saved = await this.savedConfigurations();
         if (!add.isConnected) return;
-        const engine = State.settings.defaultEngine === 'claude' ? 'claude' : 'codex';
+        const engine = State.settings.defaultEngine || 'codex';
         this.addRow({ engine, config: this.currentConfiguration(engine, saved) });
         result.textContent = '';
       } catch (e) { result.textContent = e.message; } finally { add.disabled = false; }
@@ -207,7 +209,8 @@ const MultiUi = {
         api('/api/engine/config'),
         api('/api/engine/slots?engine=claude'),
         api('/api/engine/slots?engine=codex'),
-      ]).then(([current, claude, codex]) => ({ current, slots: { claude: claude.slots || {}, codex: codex.slots || {} } }))
+        api('/api/engine/slots?engine=antigravity'),
+      ]).then(([current, claude, codex, antigravity]) => ({ current, slots: { claude: claude.slots || {}, codex: codex.slots || {}, antigravity: antigravity.slots || {} } }))
         .catch(error => { this.savedConfig = null; throw error; });
     }
     return this.savedConfig;
@@ -235,7 +238,7 @@ const MultiUi = {
       const label = document.createElement('label'); label.textContent = this.text(key);
       const el = document.createElement('select'); el.className = 'sx-input'; label.append(el); card.append(label); fields[key] = el; return el;
     };
-    const engine = select('engine'); engine.add(new Option('Claude Code', 'claude')); engine.add(new Option('Codex', 'codex')); engine.value = entry?.engine || 'codex';
+    const engine = select('engine'); engine.add(new Option('Claude Code', 'claude')); engine.add(new Option('Codex', 'codex')); engine.add(new Option('Antigravity CLI', 'antigravity')); engine.value = entry?.engine || 'codex';
     const provider = select('provider');
     const populate = (wanted) => {
       const previous = wanted || provider.value || entry?.config?.provider || 'official';
@@ -248,6 +251,10 @@ const MultiUi = {
     };
     input('key', 'password').value = entry?.config?.apiKey || '';
     input('base', 'url').value = entry?.config?.baseUrl || '';
+    input('modelsUrl', 'url');
+    const effort = select('effort');
+    effort.add(new Option(T('effAuto'), ''));
+    for (const level of EFFORT_FALLBACK) effort.add(new Option(effortLabel(level.id), level.id));
     const modelInput = input('model'); modelInput.classList.add('multi-engine-model-input'); modelInput.setAttribute('aria-label', this.text('manualModel'));
     const choices = document.createElement('select'); choices.className = 'sx-input'; choices.setAttribute('aria-label', this.text('model'));
     const modelBox = document.createElement('div'); modelBox.className = 'multi-engine-model-box';
@@ -266,7 +273,7 @@ const MultiUi = {
       choices.add(new Option(this.text('manualModel'), manualValue));
       choices.value = selected || (provider.value === 'official' ? '' : manualValue);
       modelInput.value = selected || '';
-      const empty = !card.multiModels.length && !selected;
+      const empty = !card.multiModels.length && !selected && engine.value !== 'antigravity';
       modelTitle.hidden = empty;
       choices.hidden = empty;
       modelInput.hidden = empty || choices.value !== manualValue;
@@ -288,6 +295,7 @@ const MultiUi = {
       fetchLabel.textContent = this.text(busy ? 'fetchingModels' : 'fetchModels');
     };
     const update = () => {
+      fields.modelsUrl.parentElement.hidden = provider.value !== 'custom';
       fields.key.parentElement.hidden = provider.value === 'official';
       fields.base.parentElement.hidden = provider.value !== 'custom';
       fields.key.required = provider.value !== 'official'; fields.base.required = provider.value === 'custom';
@@ -305,9 +313,9 @@ const MultiUi = {
       setFetching(false);
     };
     card.abortModels = cancelModels;
-    const fingerprint = () => JSON.stringify([engine.value, provider.value, fields.key.value.trim(), fields.base.value.trim(), card.multiModelsUrl || '']);
+    const fingerprint = () => JSON.stringify([engine.value, provider.value, fields.key.value.trim(), fields.base.value.trim(), fields.modelsUrl.value.trim()]);
     fetchModels.onclick = async () => {
-      const request = { engine: engine.value, provider: provider.value, apiKey: fields.key.value.trim(), baseUrl: fields.base.value.trim(), modelsUrl: card.multiModelsUrl || '' };
+      const request = { engine: engine.value, provider: provider.value, apiKey: fields.key.value.trim(), baseUrl: fields.base.value.trim(), modelsUrl: fields.modelsUrl.value.trim() };
       if (request.provider !== 'official' && request.provider !== 'clootee' && !request.apiKey) { say(this.text('needKey'), 'error'); return; }
       if (request.provider === 'custom' && !request.baseUrl) { say(this.text('needBase'), 'error'); return; }
       cancelModels(); const version = modelVersion, signature = fingerprint();
@@ -330,9 +338,9 @@ const MultiUi = {
         if (version === modelVersion) { delete card.dataset.modelsLoading; setFetching(false); }
       }
     };
-    for (const field of [fields.key, fields.base]) field.addEventListener('input', () => { cancelModels(); setChoices([], modelInput.value); say(''); });
+    for (const field of [fields.key, fields.base, fields.modelsUrl]) field.addEventListener('input', () => { cancelModels(); setChoices([], modelInput.value); say(''); });
 
-    const readConfig = () => ({ provider: currentProvider, apiKey: fields.key.value, baseUrl: fields.base.value, model: fields.model.value, effort: card.multiEffort || '', modelsUrl: card.multiModelsUrl || '', models: card.multiModels || [] });
+    const readConfig = () => ({ provider: currentProvider, apiKey: fields.key.value, baseUrl: fields.base.value, model: fields.model.value, effort: effort.value, modelsUrl: fields.modelsUrl.value.trim(), models: card.multiModels || [] });
     const change = async (engineChanged) => {
       drafts.set(currentEngine + ':' + currentProvider, readConfig());
       cancelModels();
@@ -351,20 +359,20 @@ const MultiUi = {
         populate(wanted);
         fields.key.value = config.apiKey || '';
         fields.base.value = config.baseUrl || '';
-        card.multiModelsUrl = config.modelsUrl || '';
+        fields.modelsUrl.value = config.modelsUrl || '';
         setChoices(config.models || [], config.model || '');
-        card.multiEffort = config.effort || '';
+        effort.value = config.effort || '';
         say('');
       } catch (e) {
         engine.value = currentEngine; populate(currentProvider); say(e.message, 'error');
       } finally { card.disabled = false; delete card.dataset.loading; }
     };
     engine.onchange = () => change(true); provider.onchange = () => change(false); populate();
-    card.multiModelsUrl = entry?.config?.modelsUrl || '';
+    fields.modelsUrl.value = entry?.config?.modelsUrl || '';
     setChoices(entry?.config?.models || [], entry?.config?.model || '');
     modelBox.append(status);
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn'; remove.textContent = this.text('remove'); remove.onclick = () => { cancelModels(); card.remove(); }; card.append(remove);
-    card.multiFields = fields; card.multiEffort = entry?.config?.effort || ''; parent.append(card);
+    card.multiFields = fields; effort.value = entry?.config?.effort || ''; parent.append(card);
   },
   collect() {
     const enabled = $('multiEngineEnabled').checked;
@@ -374,7 +382,7 @@ const MultiUi = {
       if (card.dataset.loading) throw new Error(this.text('loadingConfig'));
       const f = card.multiFields;
       if (enabled) for (const el of Object.values(f)) if (!el.reportValidity()) throw new Error(this.text('nameNote'));
-      return { name: f.name.value.trim(), engine: f.engine.value, config: { provider: f.provider.value, apiKey: f.key.value.trim(), baseUrl: f.base.value.trim(), model: f.model.value.trim(), effort: card.multiEffort, modelsUrl: card.multiModelsUrl || '' } };
+      return { name: f.name.value.trim(), engine: f.engine.value, config: { provider: f.provider.value, apiKey: f.key.value.trim(), baseUrl: f.base.value.trim(), model: f.model.value.trim(), effort: f.effort.value, modelsUrl: f.modelsUrl.value.trim() } };
     });
     return { enabled, engines };
   },
@@ -400,7 +408,7 @@ const MultiUi = {
         const tasks = m.tasks || [], last = tasks.at(-1);
         const status = m.paused ? 'paused' : tasks.some(t => t.status === 'running') ? 'running' : tasks.some(t => t.status === 'pending') ? 'pending' : last?.status === 'error' ? 'error' : last?.status === 'done' ? 'done' : 'idle';
         const title = document.createElement('strong'); title.textContent = m.name;
-        const detail = document.createElement('span'); detail.textContent = `${m.engine === 'codex' ? 'Codex' : 'Claude Code'} · ${this.text(status)}`;
+        const detail = document.createElement('span'); detail.textContent = `${engineLabel(m.engine)} · ${this.text(status)}`;
         const cost = document.createElement('span'); cost.className = 'multi-engine-cost';
         cost.textContent = m.cost?.consumedMessages || m.cost?.missingUsageTurns || m.cost?.unpriced ? `${m.cost.sub > 0 ? '≈' : ''}${ApiBill.money(m.cost)}${m.cost.unpriced ? ' · ' + T('apiUnpriced') : ''}` : this.text('noUsage');
         cost.title = `${m.model || ''}${m.cost?.sub > 0 ? ' · ' + this.text('equivalentCost') : ''}`;

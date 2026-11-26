@@ -6,6 +6,7 @@ const DICT = {
   serverLoad: { en: 'Load · 1 min', zh: '负载 · 1分钟' },
   serverDisk: { en: 'Disk usage', zh: '磁盘占用率' },
   serverMemory: { en: 'Memory used', zh: '内存使用率' },
+  serverSwapOff: { en: 'off', zh: '未启用' },
   serverHigh: { en: 'High', zh: '偏高' },
   serverLow: { en: 'Low', zh: '不足' },
   serverCores: { en: '{n} cores', zh: '{n} 核' },
@@ -69,6 +70,10 @@ const DICT = {
   messageLinkCopyLink: { en: 'Copy link', zh: '复制链接' },
   messageLinkCopyPath: { en: 'Copy path', zh: '复制路径' },
   messageLinkOpen: { en: 'Open link', zh: '打开网址' },
+  messageLinkDownloading: { en: 'Downloading…', zh: '下载中…' },
+  messageLinkDownloadFallback: { en: 'The site blocks direct download; opened the original in a new tab, save it from there.', zh: '该网站不允许直接下载，已在新标签页打开原文件，可在那里保存。' },
+  messageLinkTextTruncated: { en: 'File is large; only the first 512KB is shown. Download to see the rest.', zh: '文件较大，仅显示前 512KB，完整内容请下载。' },
+  messageLinkZoomHint: { en: 'Click the image to toggle actual size', zh: '点击图片可切换原始尺寸' },
   messageLinkOutsideRoot: { en: 'This file is outside the current project. Copy its path to open it locally.', zh: '此文件不在当前项目目录内，可复制路径在本机打开。' },
   argQuickT: { en: "I'm new — start right away", zh: '我是小白、我要立即开始' },
   argQuickD: { en: 'Choose a template, then automatically create your project folder', zh: '选择模板后，自动创建并选好项目文件夹' },
@@ -1084,6 +1089,12 @@ const DICT = {
   engineLockedHint: { en: 'Engine is locked once the session starts', zh: '会话开始后引擎即锁定' },
   settings: { en: 'Settings', zh: '设置' },
   settingsTitle: { en: 'Settings', zh: '设置' },
+  agyLocalProfile: { en: 'Use local Antigravity API settings', zh: '沿用本机 Antigravity API 配置' },
+  agyModelHint: { en: 'Fetch the provider’s model list or enter a Gemini model ID.', zh: '可拉取此服务商的模型列表，也可直接填写 Gemini 模型 ID。' },
+  agyKeyPh: { en: 'API key from this Gemini provider', zh: '填写此 Gemini 服务商的 API Key' },
+  agyEffortNote: { en: 'Available reasoning levels depend on the model.', zh: '可用的思考强度取决于所选模型。' },
+  agyRestartHub: { en: 'Restart the hub to load Antigravity settings.', zh: '请重启 Hub 以加载 Antigravity 引擎配置。' },
+  antigravityInstall: { en: 'Install Antigravity CLI (agy) on the hub host: antigravity.google/docs/getting-started', zh: '请在 Hub 所在电脑安装 Antigravity CLI（agy）：antigravity.google/docs/getting-started' },
   defaultEngine: { en: 'Default engine (for new sessions)', zh: '默认引擎（新建会话用）' },
   defaultEngineNote: {
     en: 'Saved only in this browser; other browsers can choose independently. You can still switch engines before a session starts.',
@@ -1099,8 +1110,8 @@ const DICT = {
   // ── 设置板块（每个板块点进去单独设置）──
   paneEngine: { en: 'AI engines', zh: 'AI 引擎' },
   paneEngineDesc: {
-    en: 'Default engine, plus the provider and model for Claude Code and Codex',
-    zh: '默认引擎，以及 Claude Code 与 Codex 各自的服务商与模型',
+    en: 'Default engine, provider, model and reasoning effort for Claude Code, Codex and Antigravity CLI',
+    zh: '默认引擎，以及 Claude Code、Codex 和 Antigravity CLI 各自的服务商、模型与思考强度',
   },
   paneNetwork: { en: 'Access & network', zh: '访问与网络' },
   paneNetworkDesc: {

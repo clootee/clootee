@@ -2,7 +2,11 @@
 
 [English](../../README.md) · [中文使用说明](../../README_zh.md)
 
-Clootee runs Claude Code and Codex through a local browser interface. Start with the platform launcher in the repository root. Configuration and sessions remain in your local data directory.
+Clootee runs Claude Code, Codex and Google Antigravity CLI through a local browser interface. Start with the platform launcher in the repository root. Configuration and sessions remain in your local data directory.
+
+## Antigravity CLI
+
+Install the Google Antigravity CLI executable (`agy`) on the hub host. Open **Settings → AI engines → Antigravity CLI**. Select Google Gemini API, OpenLux, or a custom Gemini-compatible endpoint, enter its API key, choose or enter a model ID, and save. Each provider remembers its own key, model and reasoning effort. A custom provider also accepts a base URL and an optional model-list URL. The local CLI option uses the host’s `GEMINI_API_KEY`, optional `GOOGLE_GEMINI_BASE_URL`, and CLI model defaults. Under **Multiple engines**, named Antigravity instances can use independent configurations. [Google CLI authentication guide](https://antigravity.google/docs/install?tab=cli)
 
 ## Frontend builds
 

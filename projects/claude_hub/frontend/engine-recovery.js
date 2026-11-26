@@ -8,6 +8,7 @@ const EngineRecovery = {
       if (this.pending) return await this.pending;
       const status = await api('/api/engine/status?refresh=1');
       if (!force && status[engine]?.ready) return true;
+      if (engine === 'antigravity') { alert(T('antigravityInstall')); return false; }
       if (force && status[engine]) status[engine].ready = false;
       return await this.open(status, force ? engine : null);
     } catch (error) {

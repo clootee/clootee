@@ -24,6 +24,7 @@ export interface Root {
 
 // 执行引擎：claude code（默认）或 codex。会话创建时选定，一旦开始（有 claudeSessionId 或任务）即锁定。
 export type Engine = 'claude' | 'codex';
+export type SessionEngine = Engine | 'antigravity';
 
 // 引擎服务商：official=原版订阅登录流程；其余=第三方 API（填 apiKey + 选 model）
 // xiaomi=小米 MiMo 开放平台，kimi=月之暗面开放平台（按量），kimicode=Kimi Code 包月订阅，minimax=MiniMax
@@ -33,7 +34,7 @@ export type Engine = 'claude' | 'codex';
 // Runtime validation uses the bundled provider catalog (including legacy IDs).
 export type EngineProvider = keyof typeof import('../config/provider-catalog.json').providers
   | 'official' | 'custom' | 'clootee' | 'anthropic' | 'openai'
-  | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
+  | 'gemini' | 'openlux' | 'xiaomi' | 'minimax' | 'kimi' | 'kimicode' | 'tencent';
 
 // 思考强度（effort）。**空字符串 = 自动**（不传参数，由引擎自己决定）。
 // 取值来自 claude CLI 的 `--effort <level>`；codex 走 `-c model_reasoning_effort=<level>`
@@ -80,6 +81,7 @@ export interface EngineProviderConfig {
 export interface EnginesConfig {
   claude: EngineProviderConfig;
   codex: EngineProviderConfig;
+  antigravity: EngineProviderConfig;
 }
 
 // 单个引擎的落盘结构：当前选中的服务商 + 每个服务商各自一套设置
@@ -92,6 +94,7 @@ export interface EngineFileEntry {
 export interface EnginesFile {
   claude: EngineFileEntry;
   codex: EngineFileEntry;
+  antigravity: EngineFileEntry;
 }
 
 // ── 模型选择能力 ──
@@ -204,7 +207,7 @@ export interface Message {
 // 唯一数据源就是 claude 的 jsonl。这里的 Session 只是把 jsonl 元信息 + 运行期队列状态拼到一起的"视图"。
 export interface MultiEngineEntry {
   name: string;
-  engine: Engine;
+  engine: SessionEngine;
   config: EngineProviderConfig;
 }
 
@@ -222,7 +225,7 @@ export interface Session {
   // 尚未开始的"新会话草稿"为 `<rootId>:draft-<rand>`，纯运行期、不落盘、发首条消息后由 claude 生成真实 uuid。
   id: string;
   rootId: string;             // 关联的根目录 id
-  engine: Engine;             // 执行引擎：claude / codex。草稿创建时选定，开始后锁定
+  engine: SessionEngine;      // 执行引擎：claude / codex。草稿创建时选定，开始后锁定
   name: string;               // 标题：取自 claude jsonl（summary / 首条用户消息），草稿为占位
   // claude 会话 uuid（jsonl 文件名）。唯一来源 = claude code 生成并经 stream-json 回报；我们绝不自造。
   // 空 = 草稿尚未开始（首条任务不传 --session-id，让 claude 生成后回写）；有值 = --resume 它。
@@ -270,7 +273,7 @@ export interface TraceEvent {
   ts: number;               // 事件时间（epoch ms）
   taskId: string;           // 归属任务（原生终端会话解析出来的为 `native`）
   kind: TraceKind;
-  engine?: Engine;
+  engine?: SessionEngine;
   name?: string;            // 工具名 / 任务结束状态
   toolId?: string;          // toolu_xxx：tool_use ↔ tool_result 的配对键
   text?: string;            // thinking / text / stderr 全文

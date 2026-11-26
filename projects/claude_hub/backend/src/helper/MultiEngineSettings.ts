@@ -1,5 +1,5 @@
 import { MultiEngineEntry } from '../models/Types';
-import { isProvider, isEffort, PROVIDERS } from '../logic_struct/EngineConfigStruct';
+import { isProvider, isEffort, PROVIDERS, validateGeminiConfig } from '../logic_struct/EngineConfigStruct';
 import { resolveProvider } from '../config/ProviderCatalog';
 
 export class MultiEngineSettings {
@@ -12,10 +12,11 @@ export class MultiEngineSettings {
       if (!/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name) || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(name)) throw new Error('名称须以英文字母开头，仅含英文字母、数字、下划线，最多40字符 / Invalid engine directory name');
       if (names.has(name.toLowerCase())) throw new Error('引擎名称不能重复 / Duplicate engine name');
       names.add(name.toLowerCase());
-      if (entry.engine !== 'claude' && entry.engine !== 'codex') throw new Error('Invalid engine');
+      if (!['claude', 'codex', 'antigravity'].includes(entry.engine)) throw new Error('Invalid engine');
       const c = entry.config;
       if (!c || !isProvider(c.provider) || !isEffort(c.effort)) throw new Error('Invalid engine provider');
       const config = { provider: c.provider, apiKey: String(c.apiKey || '').trim(), model: String(c.model || '').trim(), effort: c.effort || '', baseUrl: String(c.baseUrl || '').trim(), ...(typeof c.modelsUrl === 'string' && c.modelsUrl.trim() ? { modelsUrl: c.modelsUrl.trim() } : {}) };
+      if (entry.engine === 'antigravity') validateGeminiConfig(config);
       if (config.provider !== 'official') {
         if (!config.apiKey || !config.model) throw new Error(`${name}: 需要 API Key 和模型 / API key and model required`);
         if (config.provider === 'custom') {
@@ -23,7 +24,7 @@ export class MultiEngineSettings {
           if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Invalid Base URL');
         } else {
           const meta = resolveProvider(config.provider, config.apiKey, PROVIDERS);
-          if (!(entry.engine === 'claude' ? meta?.anthropicBase : meta?.chatBase)) throw new Error(`${name}: 服务商不支持此引擎 / Incompatible provider`);
+          if (!(entry.engine === 'antigravity' ? meta?.geminiBase : entry.engine === 'claude' ? meta?.anthropicBase : meta?.chatBase)) throw new Error(`${name}: 服务商不支持此引擎 / Incompatible provider`);
         }
       }
       return { name, engine: entry.engine, config };

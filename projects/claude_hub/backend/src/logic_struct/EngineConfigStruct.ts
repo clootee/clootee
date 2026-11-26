@@ -36,8 +36,22 @@ export function isEffort(v: unknown): v is EffortLevel {
     : typeof v === 'string' && EFFORT_LEVELS.some((e) => e.id === v);
 }
 
+export function validateGeminiConfig(config: Pick<EngineProviderConfig, 'provider' | 'model' | 'baseUrl' | 'modelsUrl'>): void {
+  if (config.provider === 'official') return;
+  if (config.model && !/^(?:models\/)?[a-z0-9][a-z0-9._:-]*$/i.test(config.model.trim()))
+    throw new Error('Invalid Gemini API model ID');
+  if (config.provider !== 'custom') return;
+  for (const [value, base] of [[config.baseUrl, true], [config.modelsUrl, false]] as const) {
+    if (!value && !base) continue;
+    const url = new URL(value || '');
+    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.hash || (base && url.search))
+      throw new Error('Invalid Gemini API URL');
+  }
+}
+
 // 各服务商元信息（域内配置，非通用 helper）
 export interface ProviderMeta {
+  geminiBase?: string;
   anthropicBase: string; // 供 claude 第三方使用的 Anthropic 兼容 base_url
   chatBase: string;      // OpenAI Chat Completions 兼容 base_url（供 Codex 内置转换代理）
   modelsUrl: string;     // OpenAI 兼容模型列表端点
@@ -98,6 +112,15 @@ export const CUSTOM_DEFAULT_CONTEXT_WINDOW = 1_000_000;
 
 // 顺序即前端展示顺序：首推的服务商放最前
 export const PROVIDERS: Record<string, ProviderMeta> = {
+  gemini: {
+    label: 'Google Gemini API', geminiBase: 'https://generativelanguage.googleapis.com',
+    modelsUrl: 'https://generativelanguage.googleapis.com/v1beta/models', anthropicBase: '', chatBase: '',
+    signupUrl: 'https://aistudio.google.com/apikey', docsUrl: 'https://ai.google.dev/gemini-api/docs', note: '',
+  },
+  openlux: {
+    label: 'OpenLux', geminiBase: 'https://api.openlux.ai', modelsUrl: 'https://api.openlux.ai/v1beta/models',
+    anthropicBase: '', chatBase: '', signupUrl: 'https://openlux.ai', docsUrl: '', note: '',
+  },
   // 默认服务商：Key 由本机首次使用时自动领取（设备令牌），用户不用注册、不用填 Key
   clootee: {
     anthropicBase: CLOOTEE_CONSOLE_BASE,
@@ -230,6 +253,7 @@ export function isProvider(v: unknown): v is EngineProvider {
 const DEFAULT: EnginesConfig = {
   claude: { provider: 'official', apiKey: '', model: '', effort: '' },
   codex: { provider: 'official', apiKey: '', model: '', effort: '' },
+  antigravity: { provider: 'official', apiKey: '', model: '', effort: '' },
 };
 
 // 空槽（每个服务商的出厂设置）
@@ -249,6 +273,7 @@ export class EngineConfigStruct {
     const file = this._readFile();
     return {
       claude: this._context.getStore()?.claude || this._project(file.claude),
+      antigravity: this._context.getStore()?.antigravity || this._project(file.antigravity),
       codex: this._context.getStore()?.codex || this._project(file.codex),
     };
   }
@@ -289,7 +314,7 @@ export class EngineConfigStruct {
   }
 
   private static _assertEngine(who: string, engine: unknown): void {
-    if (engine !== 'claude' && engine !== 'codex')
+    if (engine !== 'claude' && engine !== 'codex' && engine !== 'antigravity')
       throw new Error(`${who}: invalid engine=${engine}`);
   }
 
@@ -304,12 +329,15 @@ export class EngineConfigStruct {
       throw new Error(`setProvider: ${provider} 需要填写 API Key`);
     if (provider === 'custom') this._assertUrl(cfg.baseUrl, 'Base URL');
     const resolved = this._bases(provider, cfg.apiKey || '');
+    if (engine === 'antigravity' && resolved && !resolved.geminiBase)
+      throw new Error('Antigravity requires a Gemini-compatible provider');
+    if (engine === 'antigravity') validateGeminiConfig(cfg);
     if (engine === 'claude' && resolved && !resolved.anthropicBase)
       throw new Error('此服务商未配置 Anthropic 接口，请使用 Codex / This provider supports Codex; no native Anthropic endpoint is configured.');
     if (engine === 'codex' && resolved && !resolved.chatBase)
       throw new Error('此服务商未配置 OpenAI 兼容接口，请使用 Claude Code / This provider has no OpenAI-compatible endpoint; use it with Claude Code.');
     // Third-party models may be fetched or manually supplied from provider documentation.
-    if (engine === 'claude' && provider !== 'official' && !(cfg.model || '').trim())
+    if (engine !== 'codex' && provider !== 'official' && !(cfg.model || '').trim())
       throw new Error(`setProvider: ${provider} 需要选择或填写模型 / Select or enter a model ID`);
     if (!isEffort(cfg.effort))
       throw new Error(`setProvider: invalid effort=${cfg.effort}`);
@@ -338,7 +366,7 @@ export class EngineConfigStruct {
       detected: keyChanged ? undefined : prevSlot.detected,
     };
     this._writeFile(file);
-    this.applyEnv();
+    if (engine !== 'antigravity') this.applyEnv();
     return this.get();
   }
 
@@ -346,8 +374,9 @@ export class EngineConfigStruct {
   static setModel(engine: keyof EnginesConfig, model: string): EnginesConfig {
     this._assertEngine('setModel', engine);
     if (typeof model !== 'string') throw new Error(`setModel: invalid model=${model}`);
+    if (engine === 'antigravity') validateGeminiConfig({ ...this.get().antigravity, model });
     this._patchSlot(engine, (slot) => ({ ...slot, model: model.trim() }));
-    this.applyEnv();
+    if (engine !== 'antigravity') this.applyEnv();
     return this.get();
   }
 
@@ -359,7 +388,7 @@ export class EngineConfigStruct {
         `setEffort: invalid effort=${effort}（可选 ''(自动)/${EFFORT_LEVELS.map((e) => e.id).join('/')}）`,
       );
     this._patchSlot(engine, (slot) => ({ ...slot, effort: (effort || '') as EffortLevel }));
-    this.applyEnv();
+    if (engine !== 'antigravity') this.applyEnv();
     return this.get();
   }
 
@@ -569,6 +598,7 @@ export class EngineConfigStruct {
   private static _enginesOf(meta: ProviderMeta): string[] {
     const engines: string[] = [];
     if (meta.anthropicBase) engines.push('claude');
+    if (meta.geminiBase) engines.push('antigravity');
     if (meta.chatBase) engines.push('codex');
     return engines.length ? engines : ['codex'];
   }
@@ -579,6 +609,7 @@ export class EngineConfigStruct {
     return {
       claude: this._normalizeEntry(raw?.claude),
       codex: this._normalizeEntry(raw?.codex),
+      antigravity: this._normalizeEntry(raw?.antigravity),
     };
   }
 

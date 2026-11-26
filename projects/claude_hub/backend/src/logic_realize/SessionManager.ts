@@ -42,6 +42,11 @@ export class SessionManager extends SessionManagerStruct {
     this._live.delete(id);
     this._persist();
   }
+  static liveAntigravitySession(id: string): Session | null {
+    const s = this._get(id);
+    return s?.engine === 'antigravity' ? s : null;
+  }
+
   static runtimeSessions(): Session[] { return this._all(); }
 
   protected static _all(): Session[] {
@@ -60,8 +65,8 @@ export class SessionManager extends SessionManagerStruct {
   private static _persist(): void {
     try {
       const snap = [...this._live.values()]
-        .filter((s) => s.multiGroup || (s.tasks && s.tasks.length > 0) || s.paused)
-        .map((s) => ({ ...s, messages: [] }));
+        .filter((s) => (s.engine === 'antigravity' && !!s.claudeSessionId) || s.multiGroup || (s.tasks && s.tasks.length > 0) || s.paused)
+        .map((s) => ({ ...s, messages: s.engine === 'antigravity' ? s.messages : [] }));
       JsonStore.write(Paths.QUEUE_STATE_FILE, snap);
     } catch {
       /* 持久化失败不影响主流程 */
@@ -116,6 +121,7 @@ export class SessionManager extends SessionManagerStruct {
 
   // 会话正文：按引擎从对应存储解析（草稿 / 无文件 / 异常安全降级为 []）
   protected static _loadMessages(session: Session): Message[] {
+    if (session.engine === 'antigravity') return session.messages || [];
     if (!session.claudeSessionId) return [];
     try {
       if (session.engine === 'codex') {
@@ -161,7 +167,7 @@ export class SessionManager extends SessionManagerStruct {
 
   // 定位会话对应的原生存储文件绝对路径（按引擎）；无法定位返回 null（草稿等）
   protected static _sessionFile(session: Session): string | null {
-    if (!session.claudeSessionId) return null;
+    if (!session.claudeSessionId || session.engine === 'antigravity') return null;
     try {
       if (session.engine === 'codex') {
         return CodexStoreHelper.findFile(session.claudeSessionId, Settings.effectiveHomeDir())?.file || null;
@@ -187,7 +193,8 @@ export class SessionManager extends SessionManagerStruct {
     const { rootId, uuid } = this._parseId(id);
     const realUuid = live?.claudeSessionId || (this._isDraftPart(uuid) ? '' : uuid);
     if (!realUuid) return; // 草稿无文件
-    const engine = live?.engine;
+    const engine = (live || this._getLiveByNaturalId(id))?.engine;
+    if (engine === 'antigravity') return;
     try {
       if (engine === 'codex') {
         CodexStoreHelper.removeSessionFile(realUuid, Settings.effectiveHomeDir());

@@ -8,6 +8,7 @@ import { Logger } from '../helper/Logger';
 import { SessionManager } from '../logic_realize/SessionManager';
 import { RootManager } from '../logic_realize/RootManager';
 import { ClaudeRunner } from '../logic_realize/ClaudeRunner';
+import { AntigravityRunner } from '../logic_realize/AntigravityRunner';
 import { CodexRunner } from '../logic_realize/CodexRunner';
 import { TraceStore } from '../logic_realize/TraceStore';
 import { EngineConfig } from '../logic_realize/EngineConfig';
@@ -202,7 +203,7 @@ export class TaskQueueStruct {
       engine: session.engine,
       name: session.engine,
       text: task.prompt,
-      raw: { cwd: root.path, claudeSessionId: session.claudeSessionId, provider: EngineConfig.get()[session.engine === 'codex' ? 'codex' : 'claude'].provider,
+      raw: session.engine === 'antigravity' ? { cwd: root.path, provider: 'gemini-api' } : { cwd: root.path, claudeSessionId: session.claudeSessionId, provider: EngineConfig.get()[session.engine === 'codex' ? 'codex' : 'claude'].provider,
         // 记录启动时的配置模型：费用检查据此判断“轮次之间是否换了模型”，
         // 而不是拿配置别名去比 CLI 回报的上游真实模型名（自定义服务商下两者天然不同）。
         model: EngineConfig.get().claude.model,
@@ -214,7 +215,7 @@ export class TaskQueueStruct {
     this._recordUserMessage(session.id, task);
 
     // 按会话选定的引擎分发执行器（两者 execute 签名一致）
-    const runner: EngineRunner = session.engine === 'codex' ? CodexRunner : ClaudeRunner;
+    const runner: EngineRunner = { claude: ClaudeRunner, codex: CodexRunner, antigravity: AntigravityRunner }[session.engine];
     const started = this._launchRunner(runner, session, root.path, task.prompt, {
       onThinking: (text) =>
         EventBus.broadcast({ kind: 'thinking', sessionId: session.id, taskId: task.id, text }),

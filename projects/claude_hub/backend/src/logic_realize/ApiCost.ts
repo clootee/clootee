@@ -98,7 +98,7 @@ export class ApiCost extends ApiCostStruct {
   protected static _compute(sessionId: string, events: TraceEvent[]): ApiSessionCost {
     const tasks = new Map<string, { ts: number; provider: string; codex: { model: string; codexAuth: string } | null }>();
     for (const e of events) {
-      if (e.kind !== 'task_start') continue;
+      if (e.kind !== 'task_start' || e.engine === 'antigravity') continue;
       const raw = (e.raw || {}) as { provider?: string; model?: string; codexAuth?: string };
       const provider = String(raw.provider || '');
       if (provider === CLOOTEE_PROVIDER) continue;

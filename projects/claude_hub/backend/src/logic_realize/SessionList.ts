@@ -19,7 +19,7 @@ import { Session } from '../models/Types';
 
 interface Candidate {
   displayRootId?: string; members?: Candidate[];
-  id: string; rootId: string; uuid: string; engine: 'claude' | 'codex';
+  id: string; rootId: string; uuid: string; engine: Session['engine'];
   file?: string; mtimeMs: number; size: number; createdAt: number;
   live?: Session;
 }

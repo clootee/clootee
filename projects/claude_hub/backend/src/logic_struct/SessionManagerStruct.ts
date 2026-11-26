@@ -13,7 +13,7 @@ import { Settings } from '../logic_realize/Settings';
 import { PromptCache } from '../helper/PromptCache';
 import { SessionMeta } from '../logic_realize/SessionMeta';
 import { SessionStatus, SessionMetaEntry } from './SessionMetaStruct';
-import { Session, Task, Message, Engine, SessionSearchHit } from '../models/Types';
+import { Session, Task, Message, SessionEngine as Engine, SessionSearchHit } from '../models/Types';
 
 export class SessionManagerStruct {
   // 正文缓存：键=会话存储文件（claude jsonl / codex rollout）绝对路径，签名=mtime+大小。
@@ -229,7 +229,7 @@ export class SessionManagerStruct {
   // 发首条任务时不传 --session-id，让 claude 生成 uuid 后由 _reconcileSessionId 回写。
   static createSession(rootId: string, _name: string, engine?: Engine, internal = false): Session {
     if (!rootId) throw new Error(`createSession: invalid rootId=${rootId}`);
-    const eng: Engine = engine === 'codex' ? 'codex' : engine === 'claude' ? 'claude' : AppConfig.DEFAULT_ENGINE;
+    const eng: Engine = engine === 'antigravity' || engine === 'codex' || engine === 'claude' ? engine : AppConfig.DEFAULT_ENGINE;
     const cache = Settings.get();
     const now = Date.now();
     const session: Session = {
@@ -260,7 +260,7 @@ export class SessionManagerStruct {
   // 一旦开始（有引擎会话 id 或已入队任务）即锁定，拒绝修改。
   static setEngine(id: string, engine: Engine): Session {
     if (!id) throw new Error(`setEngine: invalid id=${id}`);
-    if (engine !== 'claude' && engine !== 'codex') throw new Error(`setEngine: invalid engine=${engine}`);
+    if (engine !== 'claude' && engine !== 'codex' && engine !== 'antigravity') throw new Error(`setEngine: invalid engine=${engine}`);
     const session = this.getSession(id);
     if (session.multiGroup) throw new Error('多引擎会话的引擎已固定 / Multi-engine session engine is fixed');
     if (session.claudeSessionId || (session.tasks && session.tasks.length > 0))
@@ -289,7 +289,7 @@ export class SessionManagerStruct {
   // wantId = 调用方索取的 id（收藏夹/单会话按自然 id 索取）。返回会话统一用 wantId，
   // 避免兜底命中草稿键 live 时把返回 id 退回草稿 id（会丢失收藏标记与前端选中）。
   private static _hydrateLiveMeta(live: Session, wantId: string): Session {
-    if (!live.claudeSessionId) return { ...live, id: wantId };
+    if (!live.claudeSessionId || live.engine === 'antigravity') return { ...live, id: wantId };
     const meta = this._buildMeta(`${live.rootId}:${live.claudeSessionId}`);
     if (!meta) return { ...live, id: wantId };
     return {
@@ -340,6 +340,8 @@ export class SessionManagerStruct {
     if (!id) throw new Error(`removeSession: invalid id=${id}`);
     const s = this._getSessionSafe(id); // 必须先取：删完 jsonl / 运行期后就推不出规范键了
     this._removeJsonl(id);
+    const agy = s?.engine === 'antigravity' && this._getLiveByNaturalId(id);
+    if (agy && agy.id !== id) this._del(agy.id);
     this._del(id);
     SessionMeta.remove(id);
     if (s) SessionMeta.remove(this._canonicalKey(s)); // 顺带清掉另一个 id 上的历史标注
@@ -366,7 +368,7 @@ export class SessionManagerStruct {
           ? { ...t, status: 'stopped' as const, finishedAt: t.finishedAt || Date.now(), error: t.error || '服务重启中断' }
           : t,
       );
-      const session: Session = { ...s, tasks, messages: [] };
+      const session: Session = { ...s, tasks, messages: s.engine === 'antigravity' ? s.messages || [] : [] };
       this._put(session);
       restored.push(session);
     }

@@ -1,10 +1,10 @@
 {
-  "version": "3.1.49",
+  "version": "3.1.50",
   "minVersion": "2.0.0",
   "force": false,
-  "releasedAt": "2026-11-25",
+  "releasedAt": "2026-11-26",
   "notesI18n": {
-    "zh": "发送前确认上下文费用时，可选择「压缩并继续（推荐）」。压缩成功后自动发送原消息，也可选择先查看压缩后的费用。",
-    "en": "Choose “Compact and continue” in the context cost dialog to send your original message after compaction. You can also review the updated cost first."
+    "zh": "新增 Antigravity CLI 和独立多引擎配置，支持会话恢复、项目指令编辑与定时唤醒。保留压缩后继续发送、文件预览和草稿目录修复。",
+    "en": "Add Antigravity CLI, per-instance providers, resumable sessions, project instruction editing and scheduled wakeups. Includes compact-and-send, file previews and draft directory fixes."
   }
 }

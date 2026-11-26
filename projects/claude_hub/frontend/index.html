@@ -11,7 +11,8 @@
   <link rel="stylesheet" href="vendor/cm/codemirror.min.css" />
   <link rel="stylesheet" href="vendor/cm/theme/material-darker.min.css" />
   <link rel="stylesheet" href="dog.css?v=20261110d" />
-  <link rel="stylesheet" href="styles.css?v=20261120prompt" />
+  <link rel="stylesheet" href="project-prompts.css?v=3150" />
+  <link rel="stylesheet" href="styles.css?v=20261123filename" />
 </head>
 <body class="dark">
   <div id="gitInstallStatus" class="sx-note sx-pre" role="status" aria-live="polite" hidden style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);width:min(620px,90vw);max-height:35vh;overflow:auto;padding:16px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:12px;z-index:10050"></div>
@@ -547,6 +548,52 @@
             </div>
           </div>
 
+          <div class="eng-acc">
+            <button class="eng-acc-head" id="engAccAntigravityHead" type="button">
+              <span class="eng-acc-arrow" id="engAccAntigravityArrow">▸</span>
+              <span class="eng-acc-title">Antigravity CLI</span>
+              <span class="eng-acc-sum" id="engAccAntigravitySum"></span>
+            </button>
+            <div class="eng-acc-body" id="engAccAntigravityBody" hidden>
+              <label class="sx-lbl" id="antigravityProviderLbl">服务商</label>
+              <select class="sx-input" id="antigravityProviderSelect">
+                <option value="official">Antigravity CLI</option>
+                <option value="gemini">Google Gemini API</option>
+                <option value="openlux">OpenLux</option>
+                <option value="custom"></option>
+              </select>
+              <div id="antigravityProviderCfg" hidden>
+                <div id="antigravityCustomCfg" hidden>
+                  <label class="sx-lbl" id="antigravityBaseUrlLbl">Gemini API Base URL</label>
+                  <input class="sx-input" id="antigravityBaseUrl" spellcheck="false" placeholder="https://example.com" />
+                  <label class="sx-lbl" id="antigravityModelsUrlLbl">模型列表 URL（可选）</label>
+                  <input class="sx-input" id="antigravityModelsUrl" spellcheck="false" placeholder="https://example.com/v1beta/models" />
+                </div>
+                <label class="sx-lbl" id="antigravityApiKeyLbl">API Key</label>
+                <input class="sx-input" id="antigravityApiKey" type="password" autocomplete="off" placeholder="sk-…（填好后会自动检测并选一个模型）" />
+              </div>
+              <div id="antigravityModelBox">
+                <div class="multi-engine-model-head">
+                  <label class="sx-lbl"><span id="antigravityModelLbl">模型</span> <span class="sx-tag" id="mdlAntigravityProvider"></span></label>
+                  <button type="button" class="sx-btn multi-engine-model-fetch" id="antigravityModelsBtn">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14-5.3L3 9M3 4v5h5M4 13a8 8 0 0 0 14 5.3L21 15M16 15h5v5" /></svg>
+                    <span id="antigravityModelsBtnLabel">拉取模型列表</span>
+                  </button>
+                </div>
+                <select class="sx-input" id="antigravityModelSelect" hidden></select>
+                <input class="sx-input" id="antigravityModelInput" list="antigravityModelList" spellcheck="false" hidden />
+                <datalist id="antigravityModelList"></datalist>
+                <div class="sx-note" id="antigravityModelHint" hidden></div>
+                <label class="sx-lbl" id="antigravityEffortLbl">思考强度</label>
+                <select class="sx-input" id="antigravityEffortSelect"></select>
+                <div class="sx-note" id="antigravityEffortNote"></div>
+
+              </div>
+              <div class="sx-note" id="mdlAntigravityStatus"></div>
+              <div class="sx-note sx-pre" id="antigravityProviderStatus"></div>
+            </div>
+          </div>
+
           <section id="multiEngineSettings" aria-label="Multiple engines"></section>
         </div>
 
@@ -899,6 +946,7 @@
       <div class="ctx-sep"></div>
       <button id="dirCtxCopy" class="ctx-item"></button>
       <button id="dirCtxOpen" class="ctx-item" hidden></button>
+      <button id="dirCtxPrompts" class="ctx-item"></button>
       <button id="dirCtxPrompt" class="ctx-item"></button>
       <button id="dirCtxLock" class="ctx-item"></button>
     </div>
@@ -919,6 +967,7 @@
       <button class="ctx-item ctx-status" data-status="testing" id="ctxMarkTesting"></button>
       <button class="ctx-item ctx-status" data-status="completed" id="ctxMarkCompleted"></button>
       <div class="ctx-sep"></div>
+      <button id="ctxPrompts" class="ctx-item"></button>
       <button id="ctxRenameTitle" class="ctx-item"></button>
       <button id="ctxToggleFavorite" class="ctx-item"></button>
       <button id="ctxTogglePinned" class="ctx-item"></button>
@@ -1288,6 +1337,7 @@
   <script src="session-limit.js?v=20261016c"></script>
   <script src="engine-recovery.js?v=20261104runtime"></script>
   <script src="multi-engine.js?v=20261117collapse"></script>
-  <script src="app.js?v=20261120prompt"></script>
+  <script src="project-prompts.js?v=3150"></script>
+  <script src="app.js?v=20261123filename"></script>
 </body>
 </html>

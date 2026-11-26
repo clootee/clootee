@@ -28,6 +28,74 @@ EventBus.broadcast = () => {};
 
 test('named engine infrastructure', async t => {
   try {
+    await t.test('Antigravity resumes the selected conversation and treats user input as data', t => {
+      const { AntigravityRunner } = load('logic_realize/AntigravityRunner');
+      const { AntigravityBin } = load('helper/AntigravityBin');
+      const { ProcessSpawner } = load('helper/ProcessSpawner');
+      t.mock.method(AntigravityBin, 'find', () => 'agy');
+      let launch;
+      t.mock.method(ProcessSpawner, 'run', (...args) => { launch = args; return {}; });
+      const prior = process.env.GEMINI_API_KEY;
+      process.env.GEMINI_API_KEY = 'test-credential';
+      try {
+        const calls = [], prompt = 'line one\n--model sample';
+        AntigravityRunner.execute({ claudeSessionId: 'session-a' }, temp, prompt, {
+          onOutput: text => calls.push(text), onFinal: text => calls.push(text),
+          onDone: (ok, error) => calls.push([ok, error]),
+        });
+        const [bin, args, cwd, callbacks, input, shell] = launch;
+        assert.equal(bin, 'agy'); assert.equal(cwd, temp); assert.equal(shell, false);
+        assert.ok(args.includes('--dangerously-skip-permissions'));
+        assert.equal(args[args.indexOf('--conversation') + 1], 'session-a');
+        assert.equal(args.includes(prompt) || args.includes('test-credential'), false);
+        assert.equal(JSON.parse(input).message.content, prompt);
+        callbacks.onLine(JSON.stringify({ event: 'step_update', step_update: { step_type: 'agent_response', text_delta: 'hello' } }));
+        callbacks.onLine(JSON.stringify({ event: 'result', result: { status: 'ERROR', error: 'bad test-credential' } }));
+        callbacks.onExit(0);
+        assert.deepEqual(calls, ['hello', [false, 'bad [redacted]']]);
+      } finally {
+        if (prior === undefined) delete process.env.GEMINI_API_KEY;
+        else process.env.GEMINI_API_KEY = prior;
+      }
+    });
+    await t.test('Antigravity profiles isolate concurrent launches and native model discovery', async t => {
+      const { AntigravityProfile } = load('logic_realize/AntigravityProfile');
+      const { HttpJson } = load('helper/HttpJson');
+      const first = { ...config(1), baseUrl: 'http://localhost:22001/v1beta', model: 'models/gemini-one' };
+      const second = { ...config(2), baseUrl: 'http://localhost:22002', model: 'gemini-two', effort: 'low' };
+      const before = EngineConfig.get();
+      const scoped = await Promise.all([first, second].map(profile =>
+        EngineConfig.withConfig({ antigravity: profile }, async () => {
+          await new Promise(resolve => setImmediate(resolve));
+          return AntigravityProfile.launch(EngineConfig.get().antigravity);
+        })
+      ));
+      for (const [i, profile] of [first, second].entries()) {
+        const { args, env } = scoped[i];
+        const id = profile.model.replace(/^models\//, '');
+        assert.equal(env.GEMINI_API_KEY, profile.apiKey);
+        assert.equal(env.GOOGLE_GEMINI_BASE_URL, profile.baseUrl.replace(/\/v1beta$/, ''));
+        assert.equal(args[args.indexOf('--effort') + 1], profile.effort);
+        assert.equal(args[args.indexOf('--model') + 1], id);
+        const settings = JSON.parse(args[args.indexOf('--settings') + 1]);
+        assert.equal(settings.customModelsConfig.customModels[id].modelName, 'gemini-api://' + id);
+        assert.ok(!args.join(' ').includes(profile.apiKey));
+      }
+      const calls = [];
+      t.mock.method(HttpJson, 'get', async (url, headers) => {
+        calls.push([url, headers['x-goog-api-key']]);
+        const page = calls.length === 1 ? { models: [{ name: 'models/gemini-one' }], nextPageToken: 'next' }
+          : { models: [{ name: 'models/embed', supportedGenerationMethods: ['embedContent'] }, { name: 'models/gemini-two' }] };
+        return { status: 200, json: page };
+      });
+      const { models } = await MultiEngine.models('antigravity', first);
+      assert.deepEqual(models.map(m => m.id), ['gemini-one', 'gemini-two']);
+      assert.deepEqual(calls, [
+        ['http://localhost:22001/v1beta/models', first.apiKey],
+        ['http://localhost:22001/v1beta/models?pageToken=next', first.apiKey],
+      ]);
+      assert.deepEqual(EngineConfig.get(), before);
+    });
     await t.test('toggle and credential updates persist independently, including initial setup', () => {
       const before = structuredClone(settings), original = Settings._patch;
       Settings._patch = patch => Object.assign(settings, patch);

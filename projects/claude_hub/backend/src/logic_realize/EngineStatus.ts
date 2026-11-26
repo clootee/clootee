@@ -1,7 +1,8 @@
 // 引擎可用性探测（实现）：分别只看「系统」与「只看内置」两条路径。
 // ClaudeBin/CodexBin.resolve 在两处都找不到时抛错，故用 try/catch 包住；
 // 借 preferBundled 两个方向各探一次不足以区分来源，这里直接看 out_end 与 PATH。
-import { Engine } from '../models/Types';
+import { AntigravityBin } from '../helper/AntigravityBin';
+import { Engine, SessionEngine } from '../models/Types';
 import { EngineAvail, EngineStatusStruct } from '../logic_struct/EngineStatusStruct';
 import { ClaudeBin } from '../helper/ClaudeBin';
 import { CodexBin } from '../helper/CodexBin';
@@ -9,7 +10,11 @@ import { OutEnd } from '../helper/OutEnd';
 import { AppConfig } from '../config/AppConfig';
 
 export class EngineStatus extends EngineStatusStruct {
-  protected static _probe(engine: Engine): EngineAvail {
+  protected static _probe(engine: SessionEngine): EngineAvail {
+    if (engine === 'antigravity') {
+      const system = !!AntigravityBin.find();
+      return { system, bundled: false, ready: system };
+    }
     if (engine === 'claude') ClaudeBin.clearCache();
     else CodexBin.clearCache();
     const bundled = engine === 'claude' ? !!OutEnd.claudeCmd() : !!OutEnd.codexCmd();
