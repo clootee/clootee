@@ -6295,7 +6295,10 @@ function startEngineInstallProgress(el, headText) {
   };
   EngineInstall.watch((line) => {
     if (lines.length === 1 && lines[0] === T('engInstWaiting')) lines.length = 0;
-    lines.push(String(line).slice(0, 500));
+    const text = String(line).slice(0, 500);
+    // 「⬇ 已下载…」是同一条进度的刷新，原地替换，不刷屏
+    if (text.startsWith('⬇') && String(lines[lines.length - 1]).startsWith('⬇')) lines[lines.length - 1] = text;
+    else lines.push(text);
     if (lines.length > 40) lines.splice(0, lines.length - 40);
     render();
   });
@@ -6427,7 +6430,10 @@ async function runAppUpdate(box, onFail) {
   const lines = [T('updateApplying')];
   const render = () => { box.textContent = lines.join('\n'); box.scrollTop = box.scrollHeight; };
   UpdateApplyLog.watch((line) => {
-    lines.push(String(line).slice(0, 500));
+    const text = String(line).slice(0, 500);
+    // 「⬇ 已下载…」是同一条进度的刷新，原地替换，不刷屏
+    if (text.startsWith('⬇') && String(lines[lines.length - 1]).startsWith('⬇')) lines[lines.length - 1] = text;
+    else lines.push(text);
     if (lines.length > 40) lines.splice(0, lines.length - 40);
     render();
   });
