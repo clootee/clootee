@@ -236,7 +236,7 @@ export class SettingsStruct {
       next.templateCollectionPath = patch.templateCollectionPath.trim();
     if (patch.autoCompact) next.autoCompact = this._sanitizeAutoCompact(patch.autoCompact);
     if (patch.maxConcurrentTasks !== undefined) next.maxConcurrentTasks = this._sanitizeMaxConcurrent(patch.maxConcurrentTasks);
-    if (next.multiEngine?.enabled) next.maxConcurrentTasks = Math.max(next.maxConcurrentTasks ?? this.get().maxConcurrentTasks, next.multiEngine.engines.length);
+    if (next.multiEngine?.enabled) next.maxConcurrentTasks = Math.max(next.maxConcurrentTasks ?? this.get().maxConcurrentTasks, next.multiEngine.engines.filter(e => e.enabled !== false).length);
     if (typeof patch.runAsUserEnabled === 'boolean') next.runAsUserEnabled = patch.runAsUserEnabled;
     if (typeof patch.runAsUserName === 'string') {
       const name = patch.runAsUserName.trim();

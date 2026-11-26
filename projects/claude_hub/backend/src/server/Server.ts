@@ -807,7 +807,7 @@ export class Server {
     app.get('/api/multi/members', (req, res) => this._wrap(res, 'multi.members', () => {
       const members = MultiEngine.members(String(req.query.sessionId));
       const totals = ApiCost.totals(members.map(s => s.id));
-      return members.map(s => ({ id:s.id, name:s.multiName, engine:s.engine, model:MultiEngine.config(s)?.config.model || '', cost:totals[s.id] || null, paused:s.paused, tasks:s.tasks.map(t => ({status:t.status})) }));
+      return members.map(s => ({ id:s.id, name:s.multiName, engine:s.engine, enabled:MultiEngine.participating(s), model:MultiEngine.config(s)?.config.model || '', cost:totals[s.id] || null, paused:s.paused, tasks:s.tasks.map(t => ({status:t.status})) }));
     }));
     app.post('/api/multi/submit', (req, res) =>
       this._wrap(res, 'multi.submit', () => {

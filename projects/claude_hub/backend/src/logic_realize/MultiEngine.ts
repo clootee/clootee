@@ -177,7 +177,8 @@ export class MultiEngine {
     const setting = Settings.get().multiEngine;
     if (!setting.enabled) throw new Error('请先在设置中启用多引擎 / Enable multiple engines in Settings first');
     rootId = this.parentRoot(rootId);
-    const entries = MultiEngineSettings.validate(setting).engines;
+    const entries = MultiEngineSettings.validate(setting).engines.filter(e => e.enabled !== false);
+    if (!entries.length) throw new Error('请至少启用一个引擎 / Enable at least one engine');
     const root = RootManager.getRoot(rootId);
     const base = path.join(root.path, 'divide');
     this.safeDir(base);
@@ -250,10 +251,17 @@ export class MultiEngine {
       if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`Unsafe divide directory: ${dir}`);
     } else fs.mkdirSync(dir);
   }
+  static participating(s: Session): boolean {
+    if (!s.multiGroup || !s.multiName) return true;
+    const name = s.multiName.toLowerCase();
+    return !Settings.get().multiEngine.engines.some(e => e.enabled === false && e.name.toLowerCase() === name);
+  }
   static submit(sessionId: string, prompts: string[], approvals: string[] = [], scope: 'all' | 'current' = 'all') {
     if (scope !== 'all' && scope !== 'current') throw new Error('Invalid delivery scope');
     if (!Array.isArray(prompts) || !prompts.length || prompts.some(p => typeof p !== 'string' || !p.trim())) throw new Error('Invalid prompts');
-    const members = scope === 'current' ? [SessionManager.getSession(sessionId)] : this.members(sessionId);
+    const targets = scope === 'current' ? [SessionManager.getSession(sessionId)] : this.members(sessionId);
+    const members = targets.filter(s => this.participating(s));
+    if (!members.length) throw new Error('所选引擎已关闭 / No enabled recipients');
     for (const s of members) {
       const full = SessionManager.getSessionFull(s.id);
       SessionLimit.assertCapacity(SessionLimit.status(full, full.messages, Settings.get().costOptimization), prompts.length);

@@ -27,7 +27,8 @@ export class MultiEngineSettings {
           if (!(entry.engine === 'antigravity' ? meta?.geminiBase : entry.engine === 'claude' ? meta?.anthropicBase : meta?.chatBase)) throw new Error(`${name}: 服务商不支持此引擎 / Incompatible provider`);
         }
       }
-      return { name, engine: entry.engine, config };
+      if (entry.enabled !== undefined && typeof entry.enabled !== 'boolean') throw new Error('Invalid engine toggle');
+      return { name, engine: entry.engine, config, ...(entry.enabled === false ? { enabled: false } : {}) };
     });
     return { enabled: raw.enabled, engines };
   }

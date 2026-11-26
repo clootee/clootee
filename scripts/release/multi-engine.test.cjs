@@ -486,6 +486,20 @@ test('named engine infrastructure', async t => {
         }
       } finally {settings.systemPrompt=saved;}
     });
+    await t.test('per-instance switches filter new groups and later deliveries', t => {
+      t.mock.method(TaskQueue, '_tick', () => {});
+      const agy = {name: 'Gravity', engine: 'antigravity', config: {provider: 'official', apiKey: '', model: '', effort: ''}};
+      const configured = [agy, {...entries[0], enabled: false}];
+      settings.multiEngine = MultiEngineSettings.validate({enabled: true, engines: configured});
+      const group = MultiEngine.create(root.id, '', 'multi');
+      assert.deepEqual(MultiEngine.members(group.id).map(s => s.engine), ['antigravity']);
+      const toggle = enabled => { settings.multiEngine.engines[0].enabled = enabled; };
+      toggle(false);
+      assert.throws(() => MultiEngine.create(root.id, '', 'multi'), /at least one/);
+      for (const scope of ['all', 'current']) assert.throws(() => MultiEngine.submit(group.id, ['skip'], [], scope), /enabled recipients/);
+      toggle(true);
+      assert.equal(MultiEngine.submit(group.id, ['resume']).length, 1);
+    });
     await t.test('rejects symlink work directories', () => {
       settings.multiEngine = { enabled: true, engines: entries };
       const unsafe = path.join(temp, 'unsafe'); fs.mkdirSync(unsafe); fs.symlinkSync(rootDir, path.join(unsafe, 'divide'));

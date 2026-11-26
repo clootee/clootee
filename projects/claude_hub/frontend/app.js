@@ -219,7 +219,7 @@ function listModeIcon(mode) {
 
 // 引擎显示名
 function engineLabel(e) {
-  return e === 'antigravity' ? 'Antigravity CLI' : e === 'multi' ? MultiUi.text('title') : e === 'codex' ? T('engineCodex') : T('engineClaude');
+  return e === 'antigravity' ? (LANG === 'zh' ? '反重力（Antigravity CLI）' : 'Antigravity CLI') : e === 'multi' ? MultiUi.text('title') : e === 'codex' ? T('engineCodex') : T('engineClaude');
 }
 function engineShortLabel(e) {
   return e === 'antigravity' ? 'AG' : e === 'multi' ? 'M' : e === 'codex' ? 'CD' : 'CC';
@@ -549,11 +549,8 @@ function applyText() {
 function fillEngineOptions(sel) {
   if (!sel) return;
   const prev = sel.value;
-  sel.innerHTML =
-    `<option value="claude">${escapeHtml(T('engineClaude'))}</option>` +
-    `<option value="codex">${escapeHtml(T('engineCodex'))}</option>` +
-    '<option value="antigravity">Antigravity CLI</option>' +
-    (sel.id === 'engineSelect' && State.settings.multiEngine?.enabled ? `<option value="multi">${escapeHtml(MultiUi.text('title'))}</option>` : '');
+  sel.replaceChildren(...MultiUi.engineIds.map(id => new Option(engineLabel(id), id)));
+  if (sel.id === 'engineSelect' && State.settings.multiEngine?.enabled) sel.add(new Option(MultiUi.text('title'), 'multi'));
   if (prev) sel.value = prev;
 }
 

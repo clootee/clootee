@@ -1,5 +1,6 @@
 // Named, independent engine instances; a session group keeps its original configuration.
 const MultiUi = {
+  engineIds: ['claude', 'codex', 'antigravity'],
   text(key) {
     const copy = {
       title: ['多引擎', 'Multiple engines'], add: ['添加引擎', 'Add engine'], remove: ['移除', 'Remove'],
@@ -9,12 +10,14 @@ const MultiUi = {
       chooseDelivery: ['选择发送范围', 'Choose recipients'],
       sendAll: ['发送给所有引擎', 'Send to all engines'],
       sendCurrent: ['仅发送给当前引擎', 'Send only to current engine'],
-      sendAllNote: ['所有引擎同时处理本次消息', 'All engines process this message in parallel'],
+      sendAllNote: ['所有已启用的引擎同时处理本次消息', 'All enabled engines process this message in parallel'],
       singleSession: ['单引擎会话', 'Single-engine session'],
       multiDisabled: ['多引擎（已关闭）', 'Multiple engines (disabled)'],
       multiSession: ['并行运行 {n} 个引擎', 'Run {n} engines in parallel'],
       multiSetup: ['请先在设置中配置至少两个引擎', 'Configure at least two engines in Settings first'],
 
+      participate: ['参与多引擎工作', 'Participate in multi-engine sessions'],
+      noneEnabled: ['请至少启用一个引擎', 'Enable at least one engine'],
       noUsage: ['暂无用量', 'No usage yet'],
       equivalentCost: ['API 等价估价', 'API-equivalent estimate'],
       fetchModels: ['拉取模型列表', 'Fetch model list'], fetchingModels: ['拉取中…', 'Fetching…'],
@@ -24,7 +27,7 @@ const MultiUi = {
 
       toggleFailed: ['开关未保存，请重新勾选重试。', 'The switch was not saved. Toggle it again to retry.'],
       loadingConfig: ['正在带入已保存的配置…', 'Loading saved configuration…'],
-      note: ['开启后，新建会话可选择「多引擎」；选择后每次发送可选择全部或当前引擎，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。配置修改仅影响新会话；并发上限至少调整为引擎数。', 'When enabled, new sessions can choose Multiple engines to choose all engines or the current engine for each message in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Changes apply to new sessions. The concurrency limit is raised to at least the engine count.'],
+      note: ['开启后，新建会话可选择「多引擎」；选择后每次发送可选择全部或当前引擎，工作目录为 divide/英文名。初始复制根目录的 CLAUDE.md、AGENTS.md，公共提示词持续生效。关闭的实例会跳过后续发送；其他配置在新会话中生效。', 'When enabled, new sessions can choose Multiple engines to choose all engines or the current engine for each message in divide/name. CLAUDE.md and AGENTS.md are copied initially; shared prompts remain active. Disabled instances skip subsequent messages. Other configuration changes apply to new sessions.'],
       name: ['英文名称', 'English name'], nameNote: ['字母开头，仅英文字母、数字、下划线，最多40字符，名称不能重复。', 'Start with a letter; use letters, numbers and underscores, up to 40 characters. Names must be unique.'],
       engine: ['引擎', 'Engine'], provider: ['供应商', 'Provider'], model: ['模型', 'Model'], base: ['自定义 Base URL', 'Custom Base URL'],
       modelsUrl: ['模型列表 URL（可选）', 'Model list URL (optional)'], effort: ['思考强度', 'Reasoning effort'],
@@ -56,14 +59,13 @@ const MultiUi = {
     dialog.setAttribute('aria-labelledby', 'sessionEnginePickerTitle');
     const title = document.createElement('h2'); title.id = 'sessionEnginePickerTitle'; title.textContent = this.text('chooseSessionEngine'); dialog.append(title);
     const list = document.createElement('div'); list.className = 'session-engine-choices'; dialog.append(list);
-    const choices = [
-      { id: 'claude', title: 'Claude Code', mark: 'CC', note: this.text('singleSession') },
-      { id: 'antigravity', title: 'Antigravity CLI', mark: 'AG', note: this.text('singleSession') },
-      { id: 'codex', title: 'Codex', mark: 'CD', note: this.text('singleSession') },
-    ];
+    const choices = this.engineIds.map(id => ({
+      id, title: engineLabel(id), mark: engineShortLabel(id), note: this.text('singleSession'),
+    }));
     if (State.settings.multiEngine?.enabled) {
-      const count = State.settings.multiEngine.engines?.length || 0;
-      choices.push({ id: 'multi', title: this.text('title'), mark: 'M', note: count >= 2 ? this.text('multiSession').replace('{n}', count) : this.text('multiSetup'), disabled: count < 2 });
+      const entries = State.settings.multiEngine.engines || [];
+      const count = entries.filter(entry => entry.enabled !== false).length;
+      choices.push({ id: 'multi', title: this.text('title'), mark: 'M', note: entries.length < 2 ? this.text('multiSetup') : count ? this.text('multiSession').replace('{n}', count) : this.text('noneEnabled'), disabled: entries.length < 2 || !count });
     }
     let preferred;
     for (const choice of choices) {
@@ -238,7 +240,12 @@ const MultiUi = {
       const label = document.createElement('label'); label.textContent = this.text(key);
       const el = document.createElement('select'); el.className = 'sx-input'; label.append(el); card.append(label); fields[key] = el; return el;
     };
-    const engine = select('engine'); engine.add(new Option('Claude Code', 'claude')); engine.add(new Option('Codex', 'codex')); engine.add(new Option('Antigravity CLI', 'antigravity')); engine.value = entry?.engine || 'codex';
+    const participation = document.createElement('label');
+    const enabled = document.createElement('input'); enabled.type = 'checkbox'; enabled.checked = entry?.enabled !== false;
+    participation.append(enabled, ' ' + this.text('participate')); card.prepend(participation); fields.enabled = enabled;
+    const engine = select('engine');
+    for (const id of this.engineIds) engine.add(new Option(engineLabel(id), id));
+    engine.value = entry?.engine || 'codex';
     const provider = select('provider');
     const populate = (wanted) => {
       const previous = wanted || provider.value || entry?.config?.provider || 'official';
@@ -382,7 +389,7 @@ const MultiUi = {
       if (card.dataset.loading) throw new Error(this.text('loadingConfig'));
       const f = card.multiFields;
       if (enabled) for (const el of Object.values(f)) if (!el.reportValidity()) throw new Error(this.text('nameNote'));
-      return { name: f.name.value.trim(), engine: f.engine.value, config: { provider: f.provider.value, apiKey: f.key.value.trim(), baseUrl: f.base.value.trim(), model: f.model.value.trim(), effort: f.effort.value, modelsUrl: f.modelsUrl.value.trim() } };
+      return { name: f.name.value.trim(), enabled: f.enabled.checked, engine: f.engine.value, config: { provider: f.provider.value, apiKey: f.key.value.trim(), baseUrl: f.base.value.trim(), model: f.model.value.trim(), effort: f.effort.value, modelsUrl: f.modelsUrl.value.trim() } };
     });
     return { enabled, engines };
   },
@@ -431,9 +438,11 @@ const MultiUi = {
     if (State.sessionId === id) await loadSessions();
   },
   async ensureEngines(scope = 'all') {
-    if (scope === 'current' || !State.session?.multiGroup) return EngineRecovery.ensure(State.session?.engine || State.settings.defaultEngine);
+    if (!State.session?.multiGroup) return EngineRecovery.ensure(State.session?.engine || State.settings.defaultEngine);
     const members = await api('/api/multi/members?sessionId=' + encodeURIComponent(State.sessionId));
-    for (const engine of new Set(members.map(m => m.engine))) if (!(await EngineRecovery.ensure(engine))) return false;
+    const targets = members.filter(m => m.enabled !== false && (scope !== 'current' || m.name === State.session.multiName || m.id === State.sessionId));
+    if (!targets.length) { alert(this.text('noneEnabled')); return false; }
+    for (const engine of new Set(targets.map(m => m.engine))) if (!(await EngineRecovery.ensure(engine))) return false;
     return true;
   },
 };
