@@ -25,7 +25,7 @@ export class ExternalInboxStruct {
   // TaskQueue.addTasks          → 把内容作为一条普通用户消息塞进该会话任务队列（复用现有发送链路）
   static postMessage(rootId: string, token: string, sessionId: string, content: string): Task[] {
     if (!rootId) throw new Error(`postMessage: invalid rootId=${rootId}`);
-    if (!sessionId || !sessionId.startsWith(rootId + ':'))
+    if (sessionId && !sessionId.startsWith(rootId + ':'))
       throw new Error(`postMessage: sessionId does not belong to rootId, sessionId=${sessionId} rootId=${rootId}`);
     if (!content || !content.trim()) throw new Error(`postMessage: empty content`);
     const root = RootManager.getRoot(rootId);
@@ -37,7 +37,7 @@ export class ExternalInboxStruct {
     const text = target.fallback
       ? `[外部消息 - 原会话已不存在，已改投新会话]\n${content}`
       : content;
-    return TaskQueue.addTasks(target.sessionId, [text], true);
+    return TaskQueue.addTasks(target.sessionId, [text], true).map(task => ({ ...task, sessionId: target.sessionId }));
   }
 
   // 目标会话是否仍存在；不存在则在同根目录下新建一个会话兜底承接（并标记收藏，避免消息悄悄丢失）

@@ -8,6 +8,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '../..');
 
 export const Paths = {
   DATA_ROOT,
+  WAKEUP_MCP: path.resolve(PROJECT_ROOT, '../../scripts/wakeup/mcp.cjs'),
   PROJECT_ROOT,
   ROOTS_FILE: path.join(DATA_ROOT, 'roots.json'),
   // 目录私有密码（每个根目录独立：盐 + 哈希）；有记录=该目录已设为私有

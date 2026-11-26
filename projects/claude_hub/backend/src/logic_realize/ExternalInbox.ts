@@ -6,6 +6,7 @@ import { Logger } from '../helper/Logger';
 
 export class ExternalInbox extends ExternalInboxStruct {
   protected static _resolveDeliverySession(rootId: string, sessionId: string): DeliveryTarget {
+    if (!sessionId) return { sessionId: SessionManager.createSession(rootId, '', undefined).id, fallback: false };
     try {
       SessionManager.getSession(sessionId);
       return { sessionId, fallback: false };

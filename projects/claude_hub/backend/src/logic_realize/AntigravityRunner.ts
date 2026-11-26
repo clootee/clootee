@@ -1,3 +1,5 @@
+import { ExternalEnv } from '../helper/ExternalEnv';
+import { RootManager } from './RootManager';
 import { AntigravityBin } from '../helper/AntigravityBin';
 import { EngineAccess } from '../helper/EngineAccess';
 import { ProcessSpawner, SpawnHandle } from '../helper/ProcessSpawner';
@@ -61,6 +63,6 @@ export class AntigravityRunner {
         finish(ok, ok ? undefined : error || stderr.trim() || 'Antigravity CLI exited without a successful result');
       },
       onError(err) { finish(false, err.message); }
-    }, input, false, 0, profile.env);
+    }, input, false, 0, { ...profile.env, ...ExternalEnv.build(RootManager.ensureExternalApi(session.rootId), session.id) });
   }
 }

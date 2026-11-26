@@ -23,6 +23,29 @@ class ApiError(Exception):
         self.status = status
 
 
+STATES = ('pending', 'sending', 'queued', 'cancelled', 'revoked', 'failed', 'unknown')
+BASE = '/v1/wakeups'
+
+
+def schedule_time(body):
+    fields = [f for f in ('at', 'afterSeconds') if f in body]
+    if len(fields) != 1:
+        raise ApiError(400, 'provide exactly one of at or afterSeconds')
+    field = fields[0]
+    value = body[field]
+    if type(value) is not int or value <= 0:
+        raise ApiError(400, 'time must be a positive integer')
+    return field, value
+
+
+def deadline(field, value):
+    now = now_ms()
+    due = now + value * 1000 if field == 'afterSeconds' else value
+    if not now < due <= 253402300799999:
+        raise ApiError(400, 'deadline must be a future Unix timestamp in milliseconds')
+    return due
+
+
 class Scheduler:
     def __init__(self, data, port):
         self.data = data
@@ -35,6 +58,12 @@ class Scheduler:
                 id TEXT PRIMARY KEY, root TEXT, session TEXT, digest TEXT, prompt TEXT,
                 due INTEGER, state TEXT, task TEXT, key TEXT, spec TEXT, retry INTEGER DEFAULT 0,
                 UNIQUE(root,key))""")
+            columns = {r['name'] for r in self.db.execute('PRAGMA table_info(wakes)')}
+            if 'delivered_session' not in columns:
+                self.db.execute('ALTER TABLE wakes ADD COLUMN delivered_session TEXT')
+            if 'original' not in columns:
+                self.db.execute('ALTER TABLE wakes ADD COLUMN original TEXT')
+            self.db.execute("CREATE INDEX IF NOT EXISTS by_root ON wakes(root)")
             self.db.execute("CREATE INDEX IF NOT EXISTS pending ON wakes(state,due)")
             self.db.execute("UPDATE wakes SET state='unknown' WHERE state='sending'")
 
@@ -47,43 +76,71 @@ class Scheduler:
 
     def request(self, path, body, key):
         root, session, token = (body.get(k) for k in ('rootId', 'sessionId', 'token'))
-        if not all(isinstance(v, str) and v for v in (root, session, token)):
-            raise ApiError(400, 'rootId, sessionId and token are required')
+        if not all(isinstance(v, str) and v for v in (root, token)):
+            raise ApiError(400, 'rootId and token are required')
         if not hmac.compare_digest(token.encode(), self.token(root).encode()):
             raise ApiError(403, 'invalid root credentials')
-        if not session.startswith(root + ':') or not session[len(root)+1:]:
+        if session is not None and (not isinstance(session, str) or not session.startswith(root + ':')
+                                    or not session[len(root)+1:]):
             raise ApiError(400, 'sessionId must belong to rootId')
         with self.lock, self.db:
-            if path == '/v1/wakeups/status':
+            if path == BASE + '/list':
+                limit, cursor = body.get('limit', 50), body.get('cursor', 0)
+                state = body.get('status')
+                if type(limit) is not int or not 1 <= limit <= 100:
+                    raise ApiError(400, 'limit must be 1..100')
+                if type(cursor) is not int or not 0 <= cursor < 2**63:
+                    raise ApiError(400, 'invalid cursor')
+                if state is not None and state not in STATES:
+                    raise ApiError(400, 'invalid status')
+                rows = self.db.execute("""SELECT rowid,* FROM wakes WHERE root=? AND rowid>?
+                    AND (? IS NULL OR state=?) ORDER BY rowid LIMIT ?""",
+                    (root, cursor, state, state, limit + 1)).fetchall()
+                return 200, dict(items=[self.receipt(r) for r in rows[:limit]],
+                                 nextCursor=rows[limit-1]['rowid'] if len(rows) > limit else None)
+            if path in (BASE + '/status', BASE + '/update', BASE + '/cancel'):
                 if not isinstance(body.get('id'), str):
                     raise ApiError(400, 'id is required')
-                row = self.db.execute('SELECT * FROM wakes WHERE id=? AND root=? AND session=?',
-                                      (body['id'], root, session)).fetchone()
+                wake = body['id']
+                row = self.db.execute('SELECT * FROM wakes WHERE id=? AND root=?', (wake, root)).fetchone()
                 if not row:
                     raise ApiError(404, 'unknown wakeup')
-                return 200, self.receipt(row)
+                if path.endswith('/status') or (path.endswith('/cancel') and row['state'] == 'cancelled'):
+                    return 200, self.receipt(row)
+                if row['state'] != 'pending':
+                    raise ApiError(409, 'only pending wakeups can be changed')
+                if path.endswith('/cancel'):
+                    self.db.execute("UPDATE wakes SET state='cancelled' WHERE id=?", (wake,))
+                else:
+                    if not {'prompt', 'sessionId', 'at', 'afterSeconds'}.intersection(body):
+                        raise ApiError(400, 'provide a field to update')
+                    prompt = body.get('prompt', row['prompt'])
+                    if not isinstance(prompt, str) or not prompt.strip():
+                        raise ApiError(400, 'prompt is required')
+                    due = row['due']
+                    if 'at' in body or 'afterSeconds' in body:
+                        due = deadline(*schedule_time(body))
+                    original = json.dumps([row['session'], row['prompt'], row['spec']])
+                    self.db.execute("""UPDATE wakes SET original=coalesce(original,?),prompt=?,session=?,
+                        due=?,retry=0 WHERE id=?""", (original, prompt, body.get('sessionId', row['session']), due, wake))
+                self.lock.notify()
+                return 200, self.receipt(self.db.execute('SELECT * FROM wakes WHERE id=?', (wake,)).fetchone())
+            if path != BASE:
+                raise ApiError(404, 'unknown endpoint')
             prompt = body.get('prompt')
             if not isinstance(prompt, str) or not prompt.strip():
                 raise ApiError(400, 'prompt is required')
-            fields = [f for f in ('at', 'afterSeconds') if f in body]
-            if len(fields) != 1:
-                raise ApiError(400, 'provide exactly one of at or afterSeconds')
-            field = fields[0]
-            value = body[field]
-            if type(value) is not int or value <= 0:
-                raise ApiError(400, 'time must be a positive integer')
+            field, value = schedule_time(body)
             if key is not None and not 1 <= len(key) <= 200:
                 raise ApiError(400, 'invalid Idempotency-Key')
             spec = json.dumps([field, value])
             previous = self.db.execute('SELECT * FROM wakes WHERE root=? AND key=?', (root, key)).fetchone()
             if previous:
-                if (previous['session'], previous['prompt'], previous['spec']) != (session, prompt, spec):
+                original = json.loads(previous['original']) if previous['original'] else [previous['session'], previous['prompt'], previous['spec']]
+                if original != [session, prompt, spec]:
                     raise ApiError(409, 'Idempotency-Key already used')
                 return 200, self.receipt(previous)
-            now = now_ms()
-            due = now + value * 1000 if field == 'afterSeconds' else value
-            if not now < due <= 253402300799999:
-                raise ApiError(400, 'deadline must be a future Unix timestamp in milliseconds')
+            due = deadline(field, value)
             wake = uuid.uuid4().hex
             digest = hashlib.sha256(token.encode()).hexdigest()
             with self.db:
@@ -95,25 +152,29 @@ class Scheduler:
 
     @staticmethod
     def receipt(row):
-        return dict(id=row['id'], sessionId=row['session'], at=row['due'], status=row['state'], taskId=row['task'])
+        return dict(id=row['id'], sessionId=row['session'], prompt=row['prompt'], at=row['due'], status=row['state'], taskId=row['task'],
+                    deliveredSessionId=row['delivered_session'])
 
     def deliver(self, row):
         token = self.token(row['root'])
         if hashlib.sha256(token.encode()).hexdigest() != row['digest']:
-            return 'revoked', None
+            return 'revoked', None, None
         conn = http.client.HTTPConnection('127.0.0.1', self.port, timeout=15)
         try:
             try:
                 conn.connect()
             except OSError:
-                return 'pending', None
-            body = dict(rootId=row['root'], sessionId=row['session'], token=token, content=row['prompt'])
+                return 'pending', None, None
+            body = dict(rootId=row['root'], token=token, content=row['prompt'])
+            if row['session'] is not None:
+                body['sessionId'] = row['session']
             conn.request('POST', '/api/external/message', json.dumps(body), {'Content-Type': 'application/json'})
             response = conn.getresponse()
             result = json.load(response)
             if response.status == 200 and result.get('success'):
-                return 'queued', result['data'][0]['id']
-            return 'failed', None
+                task = result['data'][0]
+                return 'queued', task['id'], task.get('sessionId')
+            return 'failed', None, None
         finally:
             conn.close()
 
@@ -133,19 +194,19 @@ class Scheduler:
     def dispatch_next(self):
         row = self.next_due()
         try:
-            state, task = self.deliver(row)
+            state, task, delivered_session = self.deliver(row)
         except Exception:
             # A lost acknowledgement can follow a successful enqueue.
-            state, task = 'unknown', None
+            state, task, delivered_session = 'unknown', None, None
         with self.lock, self.db:
-            self.db.execute('UPDATE wakes SET state=?,task=?,retry=? WHERE id=?',
-                            (state, task, now_ms() + 5000, row['id']))
+            self.db.execute('UPDATE wakes SET state=?,task=?,delivered_session=?,retry=? WHERE id=?',
+                            (state, task, delivered_session, now_ms() + 5000, row['id']))
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
-            if self.path not in ('/v1/wakeups', '/v1/wakeups/status'):
+            if self.path not in (BASE, *(BASE + '/' + op for op in ('status', 'list', 'update', 'cancel'))):
                 raise ApiError(404, 'unknown endpoint')
             if self.headers.get_content_type() != 'application/json':
                 raise ApiError(415, 'application/json required')

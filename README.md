@@ -196,3 +196,7 @@ also enables boot startup when systemd and linger are available.
 Desktop installs enable login startup on first setup. Closing the window leaves the
 service running in the tray; choose **Quit and stop service** to stop it. An OS-disabled
 login item is respected on subsequent launches.
+
+## Scheduled wakeups
+
+Claude and Codex sessions can discover project wakeups through MCP, reschedule or cancel pending checks, and route delivery to a fresh session. See the [scheduler setup and MCP/HTTP API reference](scripts/wakeup/README.md).

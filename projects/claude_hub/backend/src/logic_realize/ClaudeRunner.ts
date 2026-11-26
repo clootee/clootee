@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import { Paths } from '../paths';
 import { MultiEngine } from './MultiEngine';
 // Claude 执行器（实现）：填充参数组装与 stream-json 解析细节
 import { ClaudeRunnerStruct, RunCallbacks } from '../logic_struct/ClaudeRunnerStruct';
@@ -24,6 +26,12 @@ export class ClaudeRunner extends ClaudeRunnerStruct {
       '--permission-mode',
       AppConfig.PERMISSION_MODE,
     ];
+    if (!session.costHelper && fs.existsSync(Paths.WAKEUP_MCP)) {
+      args.push('--mcp-config', JSON.stringify({ mcpServers: {
+        clootee_wakeup: { command: process.execPath, args: [Paths.WAKEUP_MCP],
+          env: { CLOOTEE_ROOT_ID: '${CLOOTEE_ROOT_ID}', CLOOTEE_EXTERNAL_TOKEN: '${CLOOTEE_EXTERNAL_TOKEN}' } },
+      } }));
+    }
     // 模型与思考强度：设置里选定则显式指定；为空=自动（不传，完全由 claude 自己决定）。
     // 注意读的是 EngineConfig.get() 的**投影视图**——它只反映当前服务商自己那一槽，
     // 所以切回原版绝不会把第三方的模型 id 传给 CLI。

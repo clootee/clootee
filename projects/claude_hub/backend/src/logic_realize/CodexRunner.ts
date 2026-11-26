@@ -1,3 +1,4 @@
+import { Paths } from '../paths';
 // Codex 执行器（实现）：填充参数组装与 codex --json 事件解析细节。
 import { CodexRunnerStruct, CodexTurnWatch } from '../logic_struct/CodexRunnerStruct';
 import { RunCallbacks } from '../logic_struct/ClaudeRunnerStruct';
@@ -37,6 +38,11 @@ export class CodexRunner extends CodexRunnerStruct {
       '--skip-git-repo-check',
       '--dangerously-bypass-approvals-and-sandbox',
     ];
+    if (fs.existsSync(Paths.WAKEUP_MCP)) {
+      common.push('-c', `mcp_servers.clootee_wakeup.command=${JSON.stringify(process.execPath)}`,
+        '-c', `mcp_servers.clootee_wakeup.args=${JSON.stringify([Paths.WAKEUP_MCP])}`,
+        '-c', 'mcp_servers.clootee_wakeup.env_vars=["CLOOTEE_ROOT_ID","CLOOTEE_EXTERNAL_TOKEN"]');
+    }
     // 模型与思考强度：设置里选定则覆盖；为空=自动（沿用 codex config.toml）
     const cfg = EngineConfig.get().codex;
     if (session.multiGroup) {

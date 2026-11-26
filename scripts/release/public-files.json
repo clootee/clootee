@@ -40,6 +40,8 @@
     "projects/claude_hub/out_end/bootstrap.sh",
     "projects/claude_hub/out_end/bootstrap-node.ps1",
     "scripts/wakeup/server.py",
+    "scripts/wakeup/mcp.cjs",
+    "scripts/wakeup/README.md",
     "scripts/wakeup/test_wakeup.py",
     "scripts/node-env.bat",
     "scripts/node-env.sh",
