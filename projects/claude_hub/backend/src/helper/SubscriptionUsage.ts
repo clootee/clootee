@@ -43,6 +43,50 @@ export class SubscriptionUsage {
     }
     return JSON.parse(raw).claudeAiOauth?.accessToken;
   }
+  // Claude Code 只在自己发请求时续期（access token 约 8 小时过期）；一段时间没跑任务，
+  // 文件里的 token 就已过期，余量接口一直 401。这里按 CLI 同样的方式用 refresh token 续期并写回。
+  private static refreshing?: Promise<string | undefined>;
+  private static refreshClaudeToken(home: string, force: boolean): Promise<string | undefined> {
+    this.refreshing ??= this.doRefreshClaudeToken(home, force).finally(() => { this.refreshing = undefined; });
+    return this.refreshing;
+  }
+  private static async doRefreshClaudeToken(home: string, force: boolean): Promise<string | undefined> {
+    const file = path.join(ClaudeStoreHelper.configDir(home), '.credentials.json');
+    if (!fs.existsSync(file)) return undefined; // macOS 钥匙串由 CLI 自己维护
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const json = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const oauth = json.claudeAiOauth;
+      if (!oauth?.refreshToken) return undefined;
+      if (!force && attempt === 0 && Number(oauth.expiresAt) > Date.now() + 60000) return oauth.accessToken;
+      const response = await HttpJson.post('https://platform.claude.com/v1/oauth/token', {
+        grant_type: 'refresh_token',
+        refresh_token: oauth.refreshToken,
+        client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
+        ...(Array.isArray(oauth.scopes) && oauth.scopes.length ? { scope: oauth.scopes.join(' ') } : {}),
+      }, {}, 10000);
+      const data = response.json;
+      if (response.status >= 200 && response.status < 300 && data?.access_token) {
+        // 写回前重读：期间 CLI 可能已续期，保留文件里其他字段
+        const latest = JSON.parse(fs.readFileSync(file, 'utf8'));
+        latest.claudeAiOauth = {
+          ...latest.claudeAiOauth,
+          accessToken: data.access_token,
+          ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
+          ...(typeof data.expires_in === 'number' ? { expiresAt: Date.now() + data.expires_in * 1000 } : {}),
+          ...(typeof data.scope === 'string' ? { scopes: data.scope.split(' ').filter(Boolean) } : {}),
+        };
+        const tmp = `${file}.${process.pid}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify(latest), { mode: 0o600 });
+        fs.renameSync(tmp, file);
+        return data.access_token;
+      }
+      // refresh token 已被并发运行的 CLI 轮换掉：重读文件，用它刚写入的新凭据再试一次
+      const reread = JSON.parse(fs.readFileSync(file, 'utf8')).claudeAiOauth;
+      if (reread?.refreshToken === oauth.refreshToken) return undefined;
+      if (Number(reread?.expiresAt) > Date.now() + 60000) return reread.accessToken;
+    }
+    return undefined;
+  }
   private static async read(name: string): Promise<unknown> {
     const rows: { label: string; remaining: number; reset?: string }[] = [];
     try {
@@ -55,6 +99,7 @@ export class SubscriptionUsage {
         account = auth.tokens?.account_id;
       } else {
         token = this.claudeToken(home);
+        try { token = (await this.refreshClaudeToken(home, false)) || token; } catch { /* 续期失败仍用原 token，401 再走兜底 */ }
       }
       if (!token) return { name, status: 'unavailable', reason: 'no-token', rows };
       const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
@@ -64,7 +109,8 @@ export class SubscriptionUsage {
       let response = await HttpJson.get(url, headers, 10000);
       if (name === 'Claude' && response.status === 401) {
         const auth = await ClaudeLogin.status();
-        const latest = this.claudeToken(home);
+        let latest = this.claudeToken(home);
+        if (!latest || latest === token) latest = await this.refreshClaudeToken(home, true).catch(() => undefined);
         if (latest && latest !== token) {
           headers.Authorization = `Bearer ${latest}`;
           response = await HttpJson.get(url, headers, 10000);
