@@ -9,12 +9,15 @@ import { Session } from '../models/Types';
 import { EngineConfig } from './EngineConfig';
 import { AntigravityProfile } from './AntigravityProfile';
 import { Settings } from './Settings';
+import { OpenLuxPrices } from './OpenLuxPrices';
 
 export class AntigravityRunner {
   static execute(session: Session, cwd: string, prompt: string, cb: RunCallbacks): SpawnHandle {
     const executable = AntigravityBin.find(Settings.effectiveHomeDir());
     if (!executable) throw new Error('Antigravity CLI (agy) was not found');
-    const profile = AntigravityProfile.launch(EngineConfig.get().antigravity);
+    const config = EngineConfig.get().antigravity;
+    const profile = AntigravityProfile.launch(config);
+    const quote = config.provider === 'openlux' ? OpenLuxPrices.quote(config.model) : undefined;
     const apiKey = profile.env.GEMINI_API_KEY;
     const runAs = Settings.runAsUser();
     EngineAccess.ensureDir(cwd, runAs, true);
@@ -28,9 +31,13 @@ export class AntigravityRunner {
     let error = '';
     let stderr = '';
     let done = false;
-    const finish = (ok: boolean, reason?: string) => {
+    const finish = async (ok: boolean, reason?: string) => {
       if (done) return;
       done = true;
+      if (quote) {
+        const price = await quote;
+        if (price) cb.onEvent?.({ kind: 'system', engine: 'antigravity', name: 'openlux_price', raw: price });
+      }
       if (ok && response) cb.onFinal(response);
       cb.onDone(ok, reason?.split(apiKey).join('[redacted]'));
     };

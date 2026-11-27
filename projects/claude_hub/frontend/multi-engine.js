@@ -417,7 +417,7 @@ const MultiUi = {
         const title = document.createElement('strong'); title.textContent = m.name;
         const detail = document.createElement('span'); detail.textContent = `${engineLabel(m.engine)} · ${this.text(status)}`;
         const cost = document.createElement('span'); cost.className = 'multi-engine-cost';
-        cost.textContent = m.cost?.consumedMessages || m.cost?.missingUsageTurns || m.cost?.unpriced ? `${m.cost.sub > 0 ? '≈' : ''}${ApiBill.money(m.cost)}${m.cost.unpriced ? ' · ' + T('apiUnpriced') : ''}` : this.text('noUsage');
+        cost.textContent = m.cost?.consumedMessages || m.cost?.missingUsageTurns || m.cost?.unpriced ? `${m.cost.sub > 0 && !m.cost.estimated ? '≈' : ''}${ApiBill.money(m.cost)}${m.cost.unpriced ? ' · ' + T('apiUnpriced') : ''}` : this.text('noUsage');
         cost.title = `${m.model || ''}${m.cost?.sub > 0 ? ' · ' + this.text('equivalentCost') : ''}`;
         button.append(title, detail, cost); button.onclick = () => this.switchTab(m.id);
         button.onkeydown = e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) { e.preventDefault(); const target = e.key === 'Home' ? 0 : e.key === 'End' ? members.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + members.length) % members.length; this.switchTab(members[target].id).then(() => $('multiEngineTabs').children[target]?.focus()); } };

@@ -203,7 +203,7 @@ export class TaskQueueStruct {
       engine: session.engine,
       name: session.engine,
       text: task.prompt,
-      raw: session.engine === 'antigravity' ? { cwd: root.path, provider: 'gemini-api' } : { cwd: root.path, claudeSessionId: session.claudeSessionId, provider: EngineConfig.get()[session.engine === 'codex' ? 'codex' : 'claude'].provider,
+      raw: session.engine === 'antigravity' ? { cwd: root.path, provider: EngineConfig.get().antigravity.provider, model: EngineConfig.get().antigravity.model } : { cwd: root.path, claudeSessionId: session.claudeSessionId, provider: EngineConfig.get()[session.engine === 'codex' ? 'codex' : 'claude'].provider,
         // 记录启动时的配置模型：费用检查据此判断“轮次之间是否换了模型”，
         // 而不是拿配置别名去比 CLI 回报的上游真实模型名（自定义服务商下两者天然不同）。
         model: EngineConfig.get().claude.model,

@@ -33,13 +33,14 @@ test('named engine infrastructure', async t => {
       const { AntigravityBin } = load('helper/AntigravityBin');
       const { ProcessSpawner } = load('helper/ProcessSpawner');
       t.mock.method(AntigravityBin, 'find', () => 'agy');
+      t.mock.method(RootManager, 'ensureExternalApi', id => ({ id }));
       let launch;
       t.mock.method(ProcessSpawner, 'run', (...args) => { launch = args; return {}; });
       const prior = process.env.GEMINI_API_KEY;
       process.env.GEMINI_API_KEY = 'test-credential';
       try {
         const calls = [], prompt = 'line one\n--model sample';
-        AntigravityRunner.execute({ claudeSessionId: 'session-a' }, temp, prompt, {
+        AntigravityRunner.execute({ id: 'test-session', rootId: 'test-root', claudeSessionId: 'session-a' }, temp, prompt, {
           onOutput: text => calls.push(text), onFinal: text => calls.push(text),
           onDone: (ok, error) => calls.push([ok, error]),
         });
@@ -269,6 +270,24 @@ test('named engine infrastructure', async t => {
       const external=path.join(temp,'external-rule.md');fs.writeFileSync(external,'untouched');fs.unlinkSync(file);fs.symlinkSync(external,file);
       try { assert.throws(()=>MultiEngine.ensureIdentity(members[1]),/Unsafe instruction/);assert.equal(fs.readFileSync(external,'utf8'),'untouched'); }
       finally {fs.unlinkSync(file);MultiEngine.ensureIdentity(members[1]);}
+    });
+    await t.test('OpenLux estimates use the captured model quote and count final usage once', () => {
+      const { OpenLuxPrices } = load('logic_realize/OpenLuxPrices');
+      const { ApiCost } = load('logic_realize/ApiCost');
+      const model = 'gemini-example';
+      const price = OpenLuxPrices.parse({ data: [{ model_name: model, quota_type: 0, model_ratio: 1,
+        completion_ratio: 4, cache_ratio: 0.1, enable_groups: ['first', 'second'] }],
+        group_ratio: { first: 1, second: 0.5 } }).get(model);
+      assert.deepEqual(price, { input: 1, output: 4, cacheRead: 0.1, group: 'second' });
+      const event = (kind, raw, name) => ({ kind, raw, name, taskId: 'agy', ts: 1, engine: 'antigravity' });
+      const start = event('task_start', { provider: 'openlux', model });
+      const result = event('result', { usage: { input_tokens: 1000, output_tokens: 100, thinking_tokens: 80, cache_read_tokens: 200 } });
+      const quote = event('system', price, 'openlux_price');
+      const compute = (...events) => ApiCost._compute('openlux-fixture', events);
+      assert.equal(compute(start, result, result, quote).totalUsd, 0.00122);
+      assert.equal(compute(start, result).turns[0].lines[0].priced, false);
+      assert.equal(compute(start, quote).missingUsageTurns, 1);
+      assert.equal(compute(event('task_start', { provider: 'gemini-api' }), result).turns.length, 0);
     });
     await t.test('Codex API-equivalent prices differ by model and parent totals include every engine', () => {
       const { ApiCost } = load('logic_realize/ApiCost');

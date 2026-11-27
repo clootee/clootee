@@ -1,5 +1,6 @@
 // 按量 Key 计费（实现）：按 msgId 去重取最终 usage → 按服务商价目（Claude 官方 / OpenRouter / DeepSeek）逐请求计价
 // → 用 result.modelUsage 补差。订阅登录跑的轮次也算一份「相当于多少钱」的估价，用 billing 标出来给前端区分。
+import { OpenLuxPrice } from './OpenLuxPrices';
 import { ApiCostStruct } from '../logic_struct/ApiCostStruct';
 import { Logger } from '../helper/Logger';
 import {
@@ -59,7 +60,7 @@ export class ApiCost extends ApiCostStruct {
     if (hit && hit.stamp === stamp && stamp !== 'none') return hit.value;
     const value = fn();
     // A background price refresh can resolve an unknown model without changing its trace.
-    if (value.turns.some(t => t.lines.some(l => !l.priced && (l.reportedRequests || 0) < l.requests))) this._cache.delete(id);
+    if (value.turns.some(t => t.lines.some(l => !l.priced && (!l.requests || (l.reportedRequests || 0) < l.requests)))) this._cache.delete(id);
     else this._cache.set(id, { stamp, value });
     return value;
   }
@@ -83,7 +84,7 @@ export class ApiCost extends ApiCostStruct {
             tokens.cacheRead += line.cacheReadTokens;
             tokens.cacheWrite += line.cacheWrite5mTokens + line.cacheWrite1hTokens;
           }
-          out[id] = { missingUsageTurns: s.missingUsageTurns || 0, unpriced: s.turns.flatMap(t => t.lines).filter(l => !l.priced && (l.reportedRequests || 0) < l.requests).length, usd: s.totalUsd, cny: s.totalCny, sub: s.subscriptionUsd, breakdown, breakdownCny, tokens,
+          out[id] = { estimated: s.turns.some(t => t.provider === 'openlux' && t.lines.some(l => l.priced)), missingUsageTurns: s.missingUsageTurns || 0, unpriced: s.turns.flatMap(t => t.lines).filter(l => !l.priced && (!l.requests || (l.reportedRequests || 0) < l.requests)).length, usd: s.totalUsd, cny: s.totalCny, sub: s.subscriptionUsd, breakdown, breakdownCny, tokens,
             consumedMessages: s.turns.reduce((n, t) => n + t.consumedMessages, 0) };
         }
       } catch (e) {
@@ -96,11 +97,15 @@ export class ApiCost extends ApiCostStruct {
   // 会话内所有 claude 轮次都计价：订阅轮次给等价估价（billing=subscription），按量轮次是真实支出。
   // Clootee 自有服务商的轮次由 ConsoleAccount 单独记账，这里跳过，免得同一笔钱算两次。
   protected static _compute(sessionId: string, events: TraceEvent[]): ApiSessionCost {
-    const tasks = new Map<string, { ts: number; provider: string; codex: { model: string; codexAuth: string } | null }>();
+    const tasks = new Map<string, { ts: number; provider: string; openLuxModel?: string; codex: { model: string; codexAuth: string } | null }>();
     for (const e of events) {
-      if (e.kind !== 'task_start' || e.engine === 'antigravity') continue;
+      if (e.kind !== 'task_start') continue;
       const raw = (e.raw || {}) as { provider?: string; model?: string; codexAuth?: string };
       const provider = String(raw.provider || '');
+      if (e.engine === 'antigravity') {
+        if (provider === 'openlux') tasks.set(e.taskId, { ts: e.ts, provider, openLuxModel: raw.model || '', codex: null });
+        continue;
+      }
       if (provider === CLOOTEE_PROVIDER) continue;
       // 老 codex 轨迹没记模型/登录方式 → 按当前配置推断
       const codex = e.engine === 'codex'
@@ -112,6 +117,10 @@ export class ApiCost extends ApiCostStruct {
     const turns: ApiTurnCost[] = [];
     for (const [taskId, t] of tasks) {
       const own = events.filter((e) => e.taskId === taskId);
+      if (t.openLuxModel !== undefined) {
+        turns.push(this._openLuxTurn(taskId, t.ts, t.openLuxModel, own));
+        continue;
+      }
       turns.push(t.codex ? this._codexTurn(taskId, t.ts, t.provider, t.codex, own)
         : this._turn(taskId, t.ts, t.provider, own, deltas.get(taskId)));
     }
@@ -125,6 +134,30 @@ export class ApiCost extends ApiCostStruct {
       totalCny: this._round(turns.reduce((n, t) => n + t.totalCny, 0)),
       subscriptionUsd: this._round(turns.filter((t) => t.billing === 'subscription').reduce((n, t) => n + t.totalUsd, 0)),
     };
+  }
+
+  private static _openLuxTurn(taskId: string, startedAt: number, model: string, events: TraceEvent[]): ApiTurnCost {
+    const turn: ApiTurnCost = { taskId, startedAt, provider: 'openlux', billing: 'apikey',
+      consumedMessages: 0, lines: [], totalUsd: 0, totalCny: 0, cliUsd: null };
+    const result = events.filter(e => e.kind === 'result').pop()?.raw as { usage?: Record<string, unknown> } | undefined;
+    const u = result?.usage;
+    const valid = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0;
+    if (!u || !valid(u.input_tokens) || !valid(u.output_tokens)) return turn;
+    const line = this._blank('openlux', model.replace(/^models\//, '') || 'OpenLux', false);
+    line.cacheReadTokens = Math.min(u.input_tokens, num(u.cache_read_tokens));
+    line.inputTokens = u.input_tokens - line.cacheReadTokens;
+    line.outputTokens = u.output_tokens; // CLI already includes thinking tokens.
+    const price = events.find(e => e.name === 'openlux_price')?.raw as OpenLuxPrice | undefined;
+    line.priced = !!price && valid(price.input) && valid(price.output) && valid(price.cacheRead);
+    if (line.priced && price) {
+      line.usd.input = line.inputTokens * price.input / MTOK;
+      line.usd.output = line.outputTokens * price.output / MTOK;
+      line.usd.cacheRead = line.cacheReadTokens * price.cacheRead / MTOK;
+    }
+    turn.lines = [this._finish(line)];
+    turn.totalUsd = turn.lines[0].totalUsd;
+    turn.consumedMessages = 1;
+    return turn;
   }
 
   // Codex 轮次：turn.completed 的 usage 是本轮（非累计）合计，input_tokens 含缓存命中部分。
@@ -179,7 +212,7 @@ export class ApiCost extends ApiCostStruct {
     let prevMu: ModelUsage = {};
     let seenResult = false; // 之前出现过 result
     let muKnown = true;     // 上一次 result 带 modelUsage（否则累计基线未知，无法求差）
-    const results = events.filter((e) => e.kind === 'result').sort((a, b) => a.ts - b.ts);
+    const results = events.filter((e) => e.kind === 'result' && e.engine !== 'antigravity').sort((a, b) => a.ts - b.ts);
     for (const e of results) {
       const cost = typeof e.costUsd === 'number' ? e.costUsd : null;
       const mu = (e.raw as { model_usage?: ModelUsage } | undefined)?.model_usage || null;
@@ -270,8 +303,8 @@ export class ApiCost extends ApiCostStruct {
 
   private static _blank(provider: string, model: string, extra: boolean): ApiCostLine {
     return {
-      model, currency: this._source(provider, model) === 'ark' ? 'CNY' : 'USD',
-      priced: this._isPriced(provider, model), extra, requests: 0, reportedUsd: 0, reportedRequests: 0,
+      model, currency: provider !== 'openlux' && this._source(provider, model) === 'ark' ? 'CNY' : 'USD',
+      priced: provider !== 'openlux' && this._isPriced(provider, model), extra, requests: 0, reportedUsd: 0, reportedRequests: 0,
       inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWrite5mTokens: 0, cacheWrite1hTokens: 0, webSearches: 0,
       usd: { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 },
       cny: { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 },

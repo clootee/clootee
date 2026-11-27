@@ -3198,16 +3198,17 @@ const ApiBill = {
   money(t) {
     const usd = Number(t && t.usd) || 0;
     const cny = Number(t && t.cny) || 0;
-    if (t?.missingUsageTurns && usd === 0 && cny === 0) return T('apiCostUnconfirmed');
+    if ((t?.missingUsageTurns || t?.unpriced) && usd === 0 && cny === 0) return T('apiCostUnconfirmed');
     const parts = [];
     if (usd > 0 || cny <= 0) parts.push(this.usd(usd));
     if (cny > 0) parts.push(this.cny(cny));
     if (t?.missingUsageTurns) parts.push(T('apiCostUnconfirmed'));
-    return parts.join(' + ');
+    return (t?.estimated ? '≈' : '') + parts.join(' + ');
   },
   tok(n) { return fmtNum(Number(n) || 0); },
   // 轮次性质：订阅登录（等价估价）/ OpenRouter / DeepSeek / 其它按量服务商
   kind(turn) {
+    if (turn.provider === 'openlux') return 'openlux';
     if (turn.billing === 'subscription') return 'sub';
     const m = String((turn.lines[0] && turn.lines[0].model) || '').toLowerCase();
     if (turn.provider === 'openrouter' || m.includes('/')) return 'or';
@@ -3215,7 +3216,7 @@ const ApiBill = {
     return 'api';
   },
   labelKey(kind) {
-    return { sub: 'apiTurnCostSub', or: 'apiTurnCostOr', ds: 'apiTurnCostDs' }[kind] || 'apiTurnCost';
+    return { openlux: 'apiTurnCostOpenLux', sub: 'apiTurnCostSub', or: 'apiTurnCostOr', ds: 'apiTurnCostDs' }[kind] || 'apiTurnCost';
   },
   parentFor(sid) {
     const row = State.sessions.find(s => s.multiParent && (s.multiSessionIds || []).includes(sid));
@@ -3257,7 +3258,11 @@ const ApiBill = {
         if (r.turns.length) {
           const parent = this.parentFor(sid);
           if (parent) { this.asked.delete(parent); this.pending.add(parent); this.flushList(); }
-          else { this.totals[sid] = { usd:r.totalUsd,cny:r.totalCny,sub:r.subscriptionUsd,missingUsageTurns:r.missingUsageTurns || 0 }; this.paintListTag(sid); this.paintSelection(); }
+          else {
+            this.totals[sid] = { ...this.sumTurns(r.turns), usd: r.totalUsd, cny: r.totalCny, sub: r.subscriptionUsd };
+            this.paintListTag(sid);
+            this.paintSelection();
+          }
         }
         if (State.session && State.session.id === sid) renderElapsedNotes();
       })
@@ -3278,7 +3283,7 @@ const ApiBill = {
     btn.type = 'button';
     btn.className = `api-cost-toggle${kind === 'sub' ? ' sub' : ''}`;
     const missing = turn.usageStatus === 'missing';
-    btn.textContent = `${missing ? T('apiUsageMissing') : T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.money({ usd: turn.totalUsd, cny: turn.totalCny }))} ${isOpen ? '▾' : '▸'}`;
+    btn.textContent = `${missing ? T('apiUsageMissing') : T(this.labelKey(kind)).replace('{c}', (kind === 'sub' ? '≈' : '') + this.money(this.turnMoney(turn)))} ${isOpen ? '▾' : '▸'}`;
     btn.title = T(missing ? 'apiUsageMissingNote' : kind === 'sub' ? 'apiCostTipSub' : 'apiCostTip');
     btn.onclick = (ev) => {
       ev.stopPropagation();
@@ -3313,7 +3318,7 @@ const ApiBill = {
       const tags = [l.extra ? T('apiExtra') : '', actual ? T('apiActual') : '', l.priced || actual ? '' : T('apiUnpriced')].filter(Boolean).join(' · ');
       const reqs = l.requests ? ` · ${T('apiRequests').replace('{n}', l.requests)}` : '';
       return `<div class="api-cost-model"><b>${escapeHtml(l.model)}</b>${reqs}${tags ? ` · <em>${escapeHtml(tags)}</em>` : ''}` +
-        `<span class="api-cost-sum">${money(isCny ? l.totalCny : l.totalUsd)}</span></div>` +
+        `<span class="api-cost-sum">${turn.provider === 'openlux' ? this.money(this.turnMoney(turn)) : money(isCny ? l.totalCny : l.totalUsd)}</span></div>` +
         `<table class="api-cost-table"><tr><th>${escapeHtml(T('apiItem'))}</th><th class="num">${escapeHtml(T('apiTokens'))}</th>` +
         `<th class="num">${escapeHtml(T(isCny ? 'apiCny' : 'apiUsd'))}</th></tr>${rows}</table>`;
     }).join('');
@@ -3325,15 +3330,31 @@ const ApiBill = {
       ? `<div class="api-cost-note">${escapeHtml(T('apiArkNote'))}</div>` : '';
     const missing = turn.usageStatus === 'missing';
     box.innerHTML = (missing ? `<div class="api-cost-note">${escapeHtml(T('apiUsageMissingNote'))}</div>` : '') + blocks + sub + ark +
-      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${missing ? escapeHtml(T('apiCostUnconfirmed')) : this.money({ usd: turn.totalUsd, cny: turn.totalCny })}</b> · ` +
+      (turn.provider === 'openlux' && turn.lines.some(l => l.priced) ? `<div class="api-cost-note">${escapeHtml(T('apiOpenLuxEstimate'))}</div>` : '') +
+      `<div class="api-cost-total">${escapeHtml(T('apiTurnTotal'))} <b>${missing ? escapeHtml(T('apiCostUnconfirmed')) : this.money(this.turnMoney(turn))}</b> · ` +
       `${escapeHtml(T('apiSessionTotal'))} <b>${this.money(this.runningTotal(turn, data))}</b></div>${cli}`;
     box.addEventListener('click', (ev) => ev.stopPropagation());
     return box;
   },
-  // 截至这一轮（含）的累计：每条消息显示的是它当时的累计，而不是会话现在的总额（总额在左侧会话列表）
+  turnMoney(turn) {
+    const openLux = turn.provider === 'openlux';
+    return { usd: turn.totalUsd, cny: turn.totalCny, estimated: openLux && turn.lines.some(l => l.priced),
+      unpriced: (turn.lines || []).some(l => !l.priced && (!l.requests || (l.reportedRequests || 0) < l.requests)) };
+  },
+  sumTurns(turns) {
+    const total = { usd: 0, cny: 0, estimated: false, unpriced: false, missingUsageTurns: 0 };
+    for (const turn of turns) {
+      const money = this.turnMoney(turn);
+      total.usd += turn.totalUsd;
+      total.cny += turn.totalCny || 0;
+      total.estimated ||= money.estimated;
+      total.unpriced ||= money.unpriced;
+      if (turn.usageStatus === 'missing') total.missingUsageTurns++;
+    }
+    return total;
+  },
   runningTotal(turn, data) {
-    return data.turns.filter((t) => t.startedAt <= turn.startedAt)
-      .reduce((n, t) => ({ usd: n.usd + t.totalUsd, cny: n.cny + t.totalCny, missingUsageTurns:n.missingUsageTurns + (t.usageStatus === 'missing' ? 1 : 0) }), { usd: 0, cny: 0, missingUsageTurns:0 });
+    return this.sumTurns(data.turns.filter(t => t.startedAt <= turn.startedAt));
   },
   // 会话列表：已知合计就出徽章；有订阅轮次的话额外用黄色标出其中「订阅」的那部分
   listTag(s) {
@@ -3377,9 +3398,9 @@ const ApiBill = {
       miss.forEach((id) => this.asked.add(id));
       this.requestTotals(miss);
     }
-    const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.cny += t.cny || 0; a.sub += t.sub || 0; a.missingUsageTurns += t.missingUsageTurns || 0; } return a; }, { usd: 0, cny: 0, sub: 0, missingUsageTurns:0 });
-    el.hidden = sum.usd <= 0 && sum.cny <= 0 && !sum.missingUsageTurns;
-    el.innerHTML = sum.usd > 0 || sum.cny > 0 || sum.missingUsageTurns ? this.tagHtml(sum) : '';
+    const sum = ids.reduce((a, id) => { const t = this.totals[id]; if (t) { a.usd += t.usd; a.cny += t.cny || 0; a.estimated ||= t.estimated; a.unpriced ||= t.unpriced; a.sub += t.sub || 0; a.missingUsageTurns += t.missingUsageTurns || 0; } return a; }, { usd: 0, cny: 0, sub: 0, missingUsageTurns:0 });
+    el.hidden = sum.usd <= 0 && sum.cny <= 0 && !sum.missingUsageTurns && !sum.unpriced;
+    el.innerHTML = sum.usd > 0 || sum.cny > 0 || sum.missingUsageTurns || sum.unpriced ? this.tagHtml(sum) : '';
   },
   selectionStats(data) {
     const stats = { sessions: 0, messages: 0, usd: 0, cny: 0, sub: 0, missingUsageTurns:0,
@@ -3387,9 +3408,11 @@ const ApiBill = {
       costsCny: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, webSearch: 0 },
       tokens: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0 } };
     for (const t of Object.values(data)) {
-      if (!(t.usd > 0) && !(t.cny > 0) && !t.missingUsageTurns) continue;
+      if (!(t.usd > 0) && !(t.cny > 0) && !t.missingUsageTurns && !t.unpriced) continue;
       if (!t.breakdown || (t.cny > 0 && !t.breakdownCny) || !t.tokens || !Number.isFinite(t.consumedMessages)) throw new Error(T('apiBatchUnavailable'));
       stats.sessions++;
+      stats.estimated ||= t.estimated;
+      stats.unpriced ||= t.unpriced;
       stats.missingUsageTurns += t.missingUsageTurns || 0;
       stats.messages += t.consumedMessages;
       stats.usd += t.usd;
@@ -3425,7 +3448,7 @@ const ApiBill = {
       (s.usd > 0 || s.cny <= 0 ? table('USD', s.usd, s.costs) : '') +
       (s.cny > 0 ? table('CNY', s.cny, s.costsCny) : '') +
       (s.sub > 0 ? `<p class="api-cost-note sub">${text('apiSubBadge').replace('{c}', this.usd(s.sub))} · ${text('apiSubscription')}</p>` : '') +
-      `${s.missingUsageTurns ? `<p class="api-cost-note">${text('apiPartialUsage')}</p>` : ''}` +
+      `${s.estimated ? `<p class="api-cost-note">${text('apiOpenLuxEstimate')}</p>` : ''}${s.unpriced ? `<p class="api-cost-note">${text('apiUnpriced')}</p>` : ''}${s.missingUsageTurns ? `<p class="api-cost-note">${text('apiPartialUsage')}</p>` : ''}` +
       `<p class="api-cost-note batch-cost-help">${text('apiBatchRule')}</p>`;
   },
   async showSelection() {

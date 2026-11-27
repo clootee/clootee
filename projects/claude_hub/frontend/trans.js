@@ -735,6 +735,8 @@ const DICT = {
   apiCny: { en: 'Cost (CNY)', zh: '费用（人民币）' },
   apiRequests: { en: '{n} requests', zh: '{n} 次请求' },
   apiExtra: { en: 'background calls', zh: '后台调用' },
+  apiTurnCostOpenLux: { en: 'OpenLux {c}', zh: 'OpenLux 本轮 {c}' },
+  apiOpenLuxEstimate: { en: 'Estimated at the lowest listed OpenLux group rate. Your billed group may differ.', zh: '按 OpenLux 当时公开的最低分组价估算，实际扣费取决于请求使用的分组。' },
   apiActual: { en: 'total = amount actually charged by the provider', zh: '合计为服务商实扣金额' },
   apiUnpriced: { en: 'model not in price table', zh: '价目表无此模型' },
   apiSubscription: { en: 'Subscription turn — the figure below is an API-price equivalent, not a real charge.', zh: '订阅轮次：下面的数字是按 API 价目折算的等价估价，不是实际支出。' },
